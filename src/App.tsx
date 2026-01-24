@@ -4,33 +4,26 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
-import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { AuthProvider } from "@/hooks/use-auth";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import "@/i18n";
 
 // Pages
 import AuthPage from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
-const queryClient = new QueryClient();
+// App Pages
+import { AppLayout } from "./components/layout/AppLayout";
+import Dashboard from "./pages/app/Dashboard";
+import Organizations from "./pages/app/Organizations";
+import Sites from "./pages/app/Sites";
+import Captures from "./pages/app/Captures";
+import Inspections from "./pages/app/Inspections";
+import Reports from "./pages/app/Reports";
+import Drone from "./pages/app/Drone";
+import Settings from "./pages/app/Settings";
 
-// Temporary placeholder for app dashboard
-function AppDashboard() {
-  const { user, signOut } = useAuth();
-  return (
-    <div className="min-h-screen bg-background flex items-center justify-center">
-      <div className="text-center space-y-4">
-        <h1 className="text-3xl font-bold gradient-text">SitePulse</h1>
-        <p className="text-muted-foreground">Bem-vindo, {user?.email}</p>
-        <button 
-          onClick={signOut}
-          className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90"
-        >
-          Sair
-        </button>
-      </div>
-    </div>
-  );
-}
+const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -44,13 +37,22 @@ const App = () => (
               <Route path="/" element={<Navigate to="/auth" replace />} />
               <Route path="/auth" element={<AuthPage />} />
               <Route 
-                path="/app/*" 
+                path="/app" 
                 element={
                   <ProtectedRoute>
-                    <AppDashboard />
+                    <AppLayout />
                   </ProtectedRoute>
-                } 
-              />
+                }
+              >
+                <Route index element={<Dashboard />} />
+                <Route path="organizations" element={<Organizations />} />
+                <Route path="sites" element={<Sites />} />
+                <Route path="captures" element={<Captures />} />
+                <Route path="inspections" element={<Inspections />} />
+                <Route path="reports" element={<Reports />} />
+                <Route path="drone" element={<Drone />} />
+                <Route path="settings" element={<Settings />} />
+              </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>
           </AuthProvider>
