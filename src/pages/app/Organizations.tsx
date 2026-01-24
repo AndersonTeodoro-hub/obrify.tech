@@ -157,7 +157,7 @@ export default function Organizations() {
                     </Badge>
                   </div>
                 </div>
-                {membership.role === 'owner' && (
+                {membership.role === 'admin' && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="ghost" size="icon" className="h-8 w-8">
