@@ -42,6 +42,20 @@ const RESULT_LABELS: Record<string, string> = {
   'NA': 'N/A',
 };
 
+const RESULT_CONFORM_LABELS: Record<string, string> = {
+  'OK': 'Sim',
+  'NC': 'Não',
+  'OBS': 'OBS',
+  'NA': 'N/A',
+};
+
+const CATEGORY_LABELS: Record<string, string> = {
+  'structure': 'Estrutura',
+  'finishes': 'Acabamentos',
+  'installations': 'Instalações',
+  'safety': 'Segurança',
+};
+
 /**
  * Add header with logo placeholder and title
  */
@@ -140,10 +154,28 @@ function addInfoRow(doc: jsPDF, label: string, value: string, y: number): number
 }
 
 /**
- * Generate Inspection Report PDF
+ * Generate reference number based on year and sequential order
+ */
+function generateReference(createdAt: string, inspectionNumber: number): string {
+  const year = new Date(createdAt).getFullYear();
+  return `INS-${year}-${String(inspectionNumber).padStart(3, '0')}`;
+}
+
+/**
+ * Determine inspection conclusion based on NCs
+ */
+function getConclusion(ncs: { severity: string }[]): 'approved' | 'conditional' | 'rejected' {
+  if (!ncs || ncs.length === 0) return 'approved';
+  const hasCritical = ncs.some(nc => nc.severity === 'critical');
+  if (hasCritical) return 'rejected';
+  return 'conditional';
+}
+
+/**
+ * Generate Inspection Report PDF with complete structure
  */
 export async function generateInspectionReport(inspectionId: string): Promise<Blob> {
-  // Fetch inspection data
+  // Fetch inspection data with all relations
   const { data: inspection, error: inspectionError } = await supabase
     .from('inspections')
     .select(`
@@ -161,17 +193,32 @@ export async function generateInspectionReport(inspectionId: string): Promise<Bl
     throw new Error('Inspection not found');
   }
 
+  // Get inspection number for reference (count inspections created before this one in same year)
+  const inspectionYear = new Date(inspection.created_at).getFullYear();
+  const { count: inspectionNumber } = await supabase
+    .from('inspections')
+    .select('*', { count: 'exact', head: true })
+    .gte('created_at', `${inspectionYear}-01-01`)
+    .lte('created_at', inspection.created_at);
+
   // Fetch inspection items with template details
   const { data: items } = await supabase
     .from('inspection_items')
     .select(`
       *,
       inspection_template_items!inspection_items_template_item_id_fkey(
-        id, title, is_required, section
+        id, title, is_required, section, order_index
       )
     `)
     .eq('inspection_id', inspectionId)
     .order('created_at');
+
+  // Sort items by template order
+  const sortedItems = items?.sort((a, b) => {
+    const orderA = (a.inspection_template_items as { order_index?: number })?.order_index || 0;
+    const orderB = (b.inspection_template_items as { order_index?: number })?.order_index || 0;
+    return orderA - orderB;
+  }) || [];
 
   // Fetch inspector profile
   const { data: inspector } = await supabase
@@ -180,7 +227,7 @@ export async function generateInspectionReport(inspectionId: string): Promise<Bl
     .eq('user_id', inspection.created_by)
     .single();
 
-  // Fetch evidence photos
+  // Fetch evidence photos with item references
   const { data: evidenceLinks } = await supabase
     .from('evidence_links')
     .select(`
@@ -188,7 +235,14 @@ export async function generateInspectionReport(inspectionId: string): Promise<Bl
       captures!evidence_links_capture_id_fkey(id, file_path)
     `)
     .eq('inspection_id', inspectionId)
-    .limit(10);
+    .limit(24);
+
+  // Fetch nonconformities for this inspection
+  const { data: ncs } = await supabase
+    .from('nonconformities')
+    .select('*')
+    .eq('inspection_id', inspectionId)
+    .order('created_at');
 
   // Initialize PDF
   const doc = new jsPDF({
@@ -197,13 +251,46 @@ export async function generateInspectionReport(inspectionId: string): Promise<Bl
     format: 'a4',
   });
 
-  let currentY = addHeader(doc, 'RELATÓRIO DE INSPEÇÃO');
-  currentY += 5;
+  // === HEADER ===
+  let currentY = MARGIN;
+  
+  // Logo placeholder
+  doc.setFillColor(...COLORS.lightGray);
+  doc.rect(MARGIN, currentY, 30, 15, 'F');
+  doc.setFontSize(8);
+  doc.setTextColor(...COLORS.secondary);
+  doc.text('LOGO', MARGIN + 15, currentY + 9, { align: 'center' });
+  
+  // Title
+  doc.setFontSize(16);
+  doc.setTextColor(...COLORS.primary);
+  doc.setFont('helvetica', 'bold');
+  doc.text('RELATÓRIO DE INSPEÇÃO', PAGE_WIDTH / 2, currentY + 7, { align: 'center' });
+  
+  // Reference and date
+  const reference = generateReference(inspection.created_at, inspectionNumber || 1);
+  const reportDate = format(new Date(), 'dd/MM/yyyy', { locale: pt });
+  
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...COLORS.text);
+  doc.text(`Ref: ${reference}`, PAGE_WIDTH - MARGIN, currentY + 5, { align: 'right' });
+  doc.text(`Data: ${reportDate}`, PAGE_WIDTH - MARGIN, currentY + 10, { align: 'right' });
+  
+  // Separator line
+  currentY += 20;
+  doc.setDrawColor(...COLORS.primary);
+  doc.setLineWidth(0.5);
+  doc.line(MARGIN, currentY, PAGE_WIDTH - MARGIN, currentY);
+  currentY += 8;
 
-  // Site & inspection info
+  // === GENERAL DATA ===
+  currentY = addSectionTitle(doc, 'DADOS GERAIS', currentY);
+  
   const siteName = (inspection.sites as { name: string })?.name || '-';
   const siteAddress = (inspection.sites as { address?: string })?.address || '-';
   const templateName = (inspection.inspection_templates as { name: string })?.name || '-';
+  const templateCategory = (inspection.inspection_templates as { category?: string })?.category;
   const floorName = (inspection.floors as { name?: string })?.name;
   const areaName = (inspection.areas as { name?: string })?.name;
   const pointCode = (inspection.capture_points as { code?: string })?.code;
@@ -219,61 +306,42 @@ export async function generateInspectionReport(inspectionId: string): Promise<Bl
 
   currentY = addInfoRow(doc, 'Obra', siteName, currentY);
   currentY = addInfoRow(doc, 'Morada', siteAddress, currentY);
-  currentY = addInfoRow(doc, 'Template', templateName, currentY);
-  currentY = addInfoRow(doc, 'Data', inspectionDate, currentY);
-  currentY = addInfoRow(doc, 'Inspetor', inspector?.full_name || '-', currentY);
   if (location) {
     currentY = addInfoRow(doc, 'Local', location, currentY);
   }
-
+  currentY = addInfoRow(doc, 'Inspetor', inspector?.full_name || '-', currentY);
+  currentY = addInfoRow(doc, 'Data da Inspeção', inspectionDate, currentY);
   currentY += 5;
 
-  // Summary box
-  const okCount = items?.filter(i => i.result === 'OK').length || 0;
-  const ncCount = items?.filter(i => i.result === 'NC').length || 0;
-  const obsCount = items?.filter(i => i.result === 'OBS').length || 0;
-  const naCount = items?.filter(i => i.result === 'NA').length || 0;
-
-  currentY = addSectionTitle(doc, 'RESUMO', currentY);
+  // === OBJECTIVE ===
+  currentY = addSectionTitle(doc, 'OBJECTIVO', currentY);
   
-  doc.setFillColor(...COLORS.lightGray);
-  doc.roundedRect(MARGIN, currentY, CONTENT_WIDTH, 12, 2, 2, 'F');
+  const categoryLabel = templateCategory ? CATEGORY_LABELS[templateCategory] || templateCategory : 'construção';
+  const objectiveText = `Esta inspeção teve como objectivo a verificação das condições de ${categoryLabel} conforme o checklist "${templateName}".`;
   
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  const summaryY = currentY + 8;
-  const colWidth = CONTENT_WIDTH / 4;
-  
-  doc.setTextColor(...COLORS.success);
-  doc.text(`Conforme: ${okCount}`, MARGIN + 5, summaryY);
-  
-  doc.setTextColor(...COLORS.danger);
-  doc.text(`NC: ${ncCount}`, MARGIN + colWidth + 5, summaryY);
-  
-  doc.setTextColor(...COLORS.warning);
-  doc.text(`OBS: ${obsCount}`, MARGIN + colWidth * 2 + 5, summaryY);
-  
-  doc.setTextColor(...COLORS.secondary);
-  doc.text(`N/A: ${naCount}`, MARGIN + colWidth * 3 + 5, summaryY);
+  doc.setTextColor(...COLORS.text);
+  const objectiveLines = doc.splitTextToSize(objectiveText, CONTENT_WIDTH);
+  doc.text(objectiveLines, MARGIN, currentY);
+  currentY += objectiveLines.length * 5 + 5;
 
-  currentY += 18;
+  // === VERIFICATION TABLE ===
+  currentY = addSectionTitle(doc, 'TABELA DE VERIFICAÇÕES', currentY);
 
-  // Checklist table
-  currentY = addSectionTitle(doc, 'CHECKLIST', currentY);
-
-  const tableData = items?.map((item, index) => {
+  const tableData = sortedItems.map((item, index) => {
     const templateItem = item.inspection_template_items as { title: string; section?: string };
     return [
       String(index + 1),
       templateItem?.title || '-',
-      RESULT_LABELS[item.result || ''] || '-',
+      RESULT_CONFORM_LABELS[item.result || ''] || '-',
       item.notes || '-',
     ];
-  }) || [];
+  });
 
   autoTable(doc, {
     startY: currentY,
-    head: [['#', 'Item', 'Resultado', 'Observações']],
+    head: [['#', 'Item', 'Conforme', 'Observações']],
     body: tableData,
     margin: { left: MARGIN, right: MARGIN },
     headStyles: {
@@ -289,41 +357,78 @@ export async function generateInspectionReport(inspectionId: string): Promise<Bl
     columnStyles: {
       0: { cellWidth: 10 },
       1: { cellWidth: 70 },
-      2: { cellWidth: 25 },
+      2: { cellWidth: 20, halign: 'center' },
       3: { cellWidth: 'auto' },
     },
     alternateRowStyles: {
       fillColor: [249, 250, 251],
     },
+    didParseCell: (data) => {
+      // Color code conform column
+      if (data.section === 'body' && data.column.index === 2) {
+        const value = data.cell.raw as string;
+        if (value === 'Sim') {
+          data.cell.styles.textColor = COLORS.success;
+          data.cell.styles.fontStyle = 'bold';
+        } else if (value === 'Não') {
+          data.cell.styles.textColor = COLORS.danger;
+          data.cell.styles.fontStyle = 'bold';
+        } else if (value === 'OBS') {
+          data.cell.styles.textColor = COLORS.warning;
+        }
+      }
+    },
   });
 
   currentY = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
 
-  // Photos section (if any)
-  if (evidenceLinks && evidenceLinks.length > 0) {
+  // === PHOTO REGISTRY ===
+  const photosWithContext = evidenceLinks?.map(link => {
+    const itemIndex = sortedItems.findIndex(item => item.id === link.inspection_item_id);
+    return {
+      ...link,
+      caption: link.inspection_item_id && itemIndex >= 0 
+        ? `Item #${itemIndex + 1}` 
+        : 'Geral',
+    };
+  }).slice(0, 18) || [];
+
+  if (photosWithContext.length > 0) {
     // Check if we need a new page
-    if (currentY > PAGE_HEIGHT - 60) {
+    if (currentY > PAGE_HEIGHT - 80) {
       doc.addPage();
       currentY = MARGIN;
     }
 
-    currentY = addSectionTitle(doc, 'FOTOS ANEXADAS', currentY);
+    currentY = addSectionTitle(doc, 'REGISTO FOTOGRÁFICO', currentY);
     
-    const photoWidth = 40;
-    const photoHeight = 30;
-    const photosPerRow = 4;
+    const photoWidth = 50;
+    const photoHeight = 40;
+    const photosPerRow = 3;
+    const photosPerPage = 6;
+    let photoCount = 0;
     let photoX = MARGIN;
     let photoY = currentY;
     
-    for (let i = 0; i < Math.min(evidenceLinks.length, 8); i++) {
-      const capture = evidenceLinks[i].captures as { file_path?: string };
+    for (let i = 0; i < photosWithContext.length; i++) {
+      const photo = photosWithContext[i];
+      const capture = photo.captures as { file_path?: string };
+      
       if (capture?.file_path) {
+        // Check for new page (max 6 photos per page)
+        if (photoCount > 0 && photoCount % photosPerPage === 0) {
+          doc.addPage();
+          photoX = MARGIN;
+          photoY = MARGIN;
+          currentY = addSectionTitle(doc, 'REGISTO FOTOGRÁFICO (cont.)', MARGIN);
+          photoY = currentY;
+        }
+
         const imageData = await loadImageFromStorage(capture.file_path);
         if (imageData) {
           try {
             doc.addImage(imageData, 'JPEG', photoX, photoY, photoWidth, photoHeight);
           } catch {
-            // If image fails, draw placeholder
             doc.setFillColor(...COLORS.lightGray);
             doc.rect(photoX, photoY, photoWidth, photoHeight, 'F');
           }
@@ -332,16 +437,137 @@ export async function generateInspectionReport(inspectionId: string): Promise<Bl
           doc.rect(photoX, photoY, photoWidth, photoHeight, 'F');
         }
         
-        photoX += photoWidth + 3;
-        if ((i + 1) % photosPerRow === 0) {
+        // Photo caption
+        doc.setFontSize(7);
+        doc.setTextColor(...COLORS.secondary);
+        doc.text(`Foto ${i + 1}: ${photo.caption}`, photoX + photoWidth / 2, photoY + photoHeight + 4, { align: 'center' });
+        
+        photoX += photoWidth + 7;
+        photoCount++;
+        
+        if (photoCount % photosPerRow === 0) {
           photoX = MARGIN;
-          photoY += photoHeight + 3;
+          photoY += photoHeight + 12;
         }
       }
     }
+    
+    // Update currentY based on photos rendered
+    const rowsRendered = Math.ceil(Math.min(photosPerPage, photosWithContext.length) / photosPerRow);
+    currentY = photoY + (rowsRendered > 0 ? photoHeight + 15 : 0);
   }
 
-  // Add footers to all pages
+  // === OPEN NON-CONFORMITIES ===
+  if (ncs && ncs.length > 0) {
+    if (currentY > PAGE_HEIGHT - 50) {
+      doc.addPage();
+      currentY = MARGIN;
+    }
+
+    currentY = addSectionTitle(doc, 'NÃO-CONFORMIDADES ABERTAS', currentY);
+
+    const ncData = ncs.map((nc, index) => [
+      String(index + 1).padStart(3, '0'),
+      (nc.description || nc.title || '-').slice(0, 50) + ((nc.description || nc.title || '').length > 50 ? '...' : ''),
+      SEVERITY_LABELS[nc.severity] || nc.severity,
+      STATUS_LABELS[nc.status] || nc.status,
+    ]);
+
+    autoTable(doc, {
+      startY: currentY,
+      head: [['NC', 'Descrição', 'Severidade', 'Estado']],
+      body: ncData,
+      margin: { left: MARGIN, right: MARGIN },
+      headStyles: {
+        fillColor: COLORS.danger,
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 9,
+      },
+      bodyStyles: {
+        fontSize: 8,
+        textColor: COLORS.text,
+      },
+      columnStyles: {
+        0: { cellWidth: 15 },
+        1: { cellWidth: 'auto' },
+        2: { cellWidth: 25 },
+        3: { cellWidth: 30 },
+      },
+    });
+
+    currentY = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
+  }
+
+  // === CONCLUSION ===
+  if (currentY > PAGE_HEIGHT - 60) {
+    doc.addPage();
+    currentY = MARGIN;
+  }
+
+  currentY = addSectionTitle(doc, 'CONCLUSÃO', currentY);
+  
+  const conclusion = getConclusion(ncs || []);
+  const boxHeight = 12;
+  
+  // Draw conclusion boxes
+  const boxWidth = (CONTENT_WIDTH - 10) / 3;
+  const boxes = [
+    { label: 'APROVADO', selected: conclusion === 'approved', color: COLORS.success },
+    { label: 'CONDICIONADO', selected: conclusion === 'conditional', color: COLORS.warning },
+    { label: 'REPROVADO', selected: conclusion === 'rejected', color: COLORS.danger },
+  ];
+
+  boxes.forEach((box, index) => {
+    const boxX = MARGIN + (boxWidth + 5) * index;
+    
+    if (box.selected) {
+      doc.setFillColor(...box.color);
+      doc.roundedRect(boxX, currentY, boxWidth, boxHeight, 2, 2, 'F');
+      doc.setTextColor(255, 255, 255);
+    } else {
+      doc.setDrawColor(...COLORS.lightGray);
+      doc.setLineWidth(0.5);
+      doc.roundedRect(boxX, currentY, boxWidth, boxHeight, 2, 2, 'S');
+      doc.setTextColor(...COLORS.secondary);
+    }
+    
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    const checkMark = box.selected ? '☑ ' : '☐ ';
+    doc.text(checkMark + box.label, boxX + boxWidth / 2, currentY + boxHeight / 2 + 1, { align: 'center' });
+  });
+
+  currentY += boxHeight + 15;
+
+  // === SIGNATURE ===
+  if (currentY > PAGE_HEIGHT - 45) {
+    doc.addPage();
+    currentY = MARGIN;
+  }
+
+  currentY = addSectionTitle(doc, 'ASSINATURA', currentY);
+  currentY += 3;
+  
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...COLORS.text);
+  
+  doc.text(`Inspetor: ${inspector?.full_name || '-'}`, MARGIN, currentY);
+  currentY += 5;
+  doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy', { locale: pt })}`, MARGIN, currentY);
+  currentY += 10;
+  
+  // Signature line
+  doc.setDrawColor(...COLORS.text);
+  doc.setLineWidth(0.3);
+  doc.line(MARGIN, currentY, MARGIN + 70, currentY);
+  
+  doc.setFontSize(8);
+  doc.setTextColor(...COLORS.secondary);
+  doc.text('(Assinatura)', MARGIN + 35, currentY + 4, { align: 'center' });
+
+  // === FOOTERS ===
   const totalPages = doc.getNumberOfPages();
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
