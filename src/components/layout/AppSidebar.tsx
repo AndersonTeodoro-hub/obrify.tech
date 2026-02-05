@@ -75,7 +75,7 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar collapsible="icon" className="border-r border-border/50 transition-all duration-300">
+    <Sidebar collapsible="icon" className="border-r border-border/50 transition-all duration-300" data-tour="sidebar">
       <SidebarHeader className="border-b border-border/50 p-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center shadow-sm flex-shrink-0">
@@ -109,6 +109,14 @@ export function AppSidebar() {
                       end={item.url === '/app'}
                       className="flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 hover:bg-slate-100 dark:hover:bg-slate-800"
                       activeClassName="bg-gradient-to-r from-accent-100 to-transparent dark:from-slate-800/50 text-accent-600 dark:text-accent-400"
+                      data-tour={
+                        item.url === '/app/sites' ? 'sites' :
+                        item.url === '/app/captures' ? 'captures' :
+                        item.url === '/app/inspections' ? 'inspections' :
+                        item.url === '/app/nonconformities' ? 'nonconformities' :
+                        item.url === '/app/reports' ? 'reports' :
+                        undefined
+                      }
                     >
                       <item.icon className="w-5 h-5 flex-shrink-0" />
                       {!isCollapsed && <span className="font-medium">{item.title}</span>}
