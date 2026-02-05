@@ -1,247 +1,189 @@
 
-# Plano: Pagina de Preenchimento de Inspeccao (InspectionDetail.tsx)
+# Plano: Sistema de Nao-Conformidades Integrado com Inspeccoes
 
 ## Resumo
-Reescrever a pagina `InspectionDetail.tsx` para permitir o preenchimento completo de uma inspeccao, incluindo marcacao de conformidade por item, observacoes, anexos de fotos, e criacao automatica de nao-conformidades quando um item e marcado como "Nao Conforme".
+Melhorar o sistema de nao-conformidades existente para incluir todos os campos requeridos, foto-evidencias, e contador de NCs abertas por obra no dashboard.
 
 ---
 
 ## Analise do Estado Actual
 
-### Tabelas Existentes:
-- **inspections**: Dados da inspeccao (site, template, status, etc.)
-- **inspection_items**: Resultados por item (result: OK/NC/OBS/NA, notes, severity)
-- **inspection_template_items**: Itens do template (title, item_type, is_required)
-- **nonconformities**: Nao-conformidades (inspection_id, inspection_item_id, title, severity, status)
-- **evidence_links**: Ligacao entre capturas e inspeccoes (capture_id, inspection_id, kind)
+### O que ja existe:
+- Componente `CreateNCFromItem.tsx` com modal basico
+- Tabela `nonconformities` com campos: title, description, severity, due_date, corrective_action, responsible, status
+- `SiteOverviewTab.tsx` ja mostra contador de NCs abertas
+- Integracao com `InspectionDetail.tsx` que abre modal quando item e marcado como NC
 
-### Enums Relevantes:
-- `inspection_result`: OK, NC, OBS, NA
-- `nonconformity_status`: OPEN, IN_PROGRESS, RESOLVED, CLOSED
+### O que falta implementar:
+1. Campo descricao obrigatorio (actualmente opcional)
+2. Novas opcoes de severidade: Critico (vermelho), Importante (laranja), Menor (amarelo)
+3. Date picker para prazo (actualmente usa input nativo)
+4. Upload de fotos de evidencia
+5. Campo para norma/especificacao violada
+6. Contador de NCs por obra no Dashboard
 
-### Pagina Actual:
-- Mostra informacoes basicas da inspeccao
-- Lista itens do template (apenas visualizacao)
-- Botoes placeholder sem funcionalidade
+---
+
+## Alteracoes na Base de Dados
+
+Adicionar novos campos a tabela `nonconformities`:
+
+```text
+ALTER TABLE nonconformities
+ADD COLUMN IF NOT EXISTS site_id uuid REFERENCES sites(id) ON DELETE CASCADE,
+ADD COLUMN IF NOT EXISTS standard_violated text,
+ADD COLUMN IF NOT EXISTS created_by uuid;
+
+CREATE INDEX IF NOT EXISTS idx_nonconformities_site_id ON nonconformities(site_id);
+```
+
+Criar tabela para evidencias de NC:
+
+```text
+CREATE TABLE IF NOT EXISTS nonconformity_evidence (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nonconformity_id uuid REFERENCES nonconformities(id) ON DELETE CASCADE NOT NULL,
+  capture_id uuid REFERENCES captures(id) ON DELETE SET NULL,
+  file_path text NOT NULL,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX idx_nc_evidence_nc_id ON nonconformity_evidence(nonconformity_id);
+```
 
 ---
 
 ## Arquitectura da Solucao
 
 ```text
-InspectionDetail.tsx
-├── Header Fixo
-│   ├── Botao Voltar
-│   ├── Nome do Template
-│   ├── Badges (Categoria, Estado)
-│   └── Nome da Obra
-│
-├── Cards de Info
-│   ├── Data
-│   ├── Localizacao
-│   ├── Inspector
-│   └── Progresso (X/Y itens)
-│
-├── Secçao Checklist
-│   └── ChecklistItem (por cada item)
-│       ├── Numero + Titulo
-│       ├── Radio/Botoes: OK | NC | OBS | NA
-│       ├── Campo Observacoes (expandivel)
-│       ├── Botao Anexar Foto (abre modal upload)
-│       └── Badge Obrigatorio (se aplicavel)
-│
-├── Secçao Fotos Gerais
-│   ├── DropZone para upload multiplo
-│   └── Grid de fotos anexadas
-│
-├── Modal Criar NC (quando NC selecionado)
-│   ├── Titulo (pre-preenchido com item)
-│   ├── Descricao
-│   ├── Gravidade
-│   └── Accao Corretiva
-│
-└── Barra de Accoes (sticky bottom)
-    ├── Guardar Rascunho
-    └── Concluir Inspeccao
+CreateNCFromItem.tsx (melhorado)
+├── Titulo (editavel, pre-preenchido)
+├── Descricao * (obrigatorio)
+├── Severidade (nova UI com cores)
+│   ├── Critico (vermelho) - value: 'critical'
+│   ├── Importante (laranja) - value: 'high'
+│   └── Menor (amarelo) - value: 'medium'
+├── Prazo para Resolucao (DatePicker)
+├── Norma/Especificacao Violada (texto)
+├── Fotos de Evidencia (upload multiplo)
+│   └── DropZone + Grid de previews
+└── Accao Corretiva (opcional)
 ```
 
 ---
 
-## Ficheiros a Criar/Modificar
+## Ficheiros a Modificar/Criar
 
 | Ficheiro | Accao |
 |----------|-------|
-| src/pages/app/InspectionDetail.tsx | Reescrever completamente |
-| src/components/inspections/ChecklistItem.tsx | Criar |
-| src/components/inspections/CreateNCFromItem.tsx | Criar |
-| src/components/inspections/InspectionPhotos.tsx | Criar |
-| src/components/inspections/PhotoUploadModal.tsx | Criar |
+| supabase/migrations/xxx.sql | Criar (adicionar campos) |
+| src/components/inspections/CreateNCFromItem.tsx | Reescrever |
+| src/pages/app/Dashboard.tsx | Modificar (adicionar NCs por obra) |
 | src/i18n/locales/pt.json | Adicionar chaves |
 | src/i18n/locales/en.json | Adicionar chaves |
 
 ---
 
-## Fluxo de Dados
+## Componente CreateNCFromItem.tsx (Reescrito)
 
-### 1. Inicializacao:
+### Interface Melhorada:
+
 ```text
-1. Carregar inspeccao com joins (site, template, floors, areas, points)
-2. Carregar template_items ordenados por order_index
-3. Carregar inspection_items existentes (pode estar vazio se primeira vez)
-4. Carregar evidence_links para fotos anexadas
-5. Criar mapa local: templateItemId -> resultado + notas
+┌─────────────────────────────────────────────────────────────┐
+│  ⚠ Criar Nao-Conformidade                             [X]  │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  Titulo                                                     │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │ NC - Cofragem com residuos                           │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                                                             │
+│  Descricao do Problema *                                    │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │ Descreva o problema encontrado...                    │  │
+│  │                                                       │  │
+│  │                                                       │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                                                             │
+│  Severidade                                                 │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐        │
+│  │ ● Critico    │ │   Importante │ │     Menor    │        │
+│  │   (vermelho) │ │   (laranja)  │ │   (amarelo)  │        │
+│  └──────────────┘ └──────────────┘ └──────────────┘        │
+│                                                             │
+│  Prazo para Resolucao         Norma/Especificacao Violada  │
+│  ┌─────────────────────────┐  ┌─────────────────────────┐  │
+│  │ 📅 15 Fev 2026          │  │ NP EN 206-1            │  │
+│  └─────────────────────────┘  └─────────────────────────┘  │
+│                                                             │
+│  Fotos de Evidencia                                         │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │  [📷] [📷] [📷]  [+ Adicionar]                        │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                                                             │
+│  Accao Corretiva (opcional)                                 │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │ Descreva a acao corretiva...                         │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                                                             │
+│                              [Cancelar]  [Registar NC]      │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### 2. Criar Inspection Items (se nao existirem):
+### Severidade com Cores:
+
 ```text
-Quando a inspeccao e aberta pela primeira vez:
-- Para cada template_item, verificar se existe inspection_item
-- Se nao existir, criar com result = null
-- Isto permite guardar progresso parcial
+| Valor    | Label       | Cor de Fundo      | Cor Texto |
+|----------|-------------|-------------------|-----------|
+| critical | Critico     | bg-red-500/20     | text-red  |
+| high     | Importante  | bg-orange-500/20  | text-orange|
+| medium   | Menor       | bg-yellow-500/20  | text-yellow|
 ```
 
-### 3. Actualizar Item:
-```text
-Quando o utilizador muda o resultado de um item:
-1. UPDATE inspection_items SET result = 'OK'/'NC'/'OBS'/'NA', notes = '...'
-2. Se result = 'NC' → Abrir modal para criar NC
-3. Actualizar estado local imediatamente (optimistic update)
-```
-
-### 4. Anexar Foto a Item:
-```text
-1. Abrir modal de upload
-2. Upload para Storage (bucket captures ou novo bucket inspection_evidence)
-3. Criar registo em evidence_links com kind = 'item_evidence' e inspection_item_id
-4. Mostrar thumbnail no item
-```
-
-### 5. Fotos Gerais:
-```text
-1. Upload multiplo via DropZone
-2. Criar registo em evidence_links com kind = 'general'
-3. Mostrar grid de fotos
-```
-
-### 6. Guardar Rascunho:
-```text
-1. Guardar todos os inspection_items com resultados actuais
-2. UPDATE inspections SET status = 'IN_PROGRESS'
-3. Toast de sucesso
-```
-
-### 7. Concluir Inspeccao:
-```text
-1. Validar: todos os itens obrigatorios tem resultado
-2. Validar: itens que requerem evidencia tem fotos anexadas
-3. UPDATE inspections SET status = 'COMPLETED'
-4. Bloquear edicao (modo read-only)
-5. Redirigir ou mostrar resumo
-```
-
----
-
-## Componente ChecklistItem.tsx
+### Fluxo de Upload de Fotos:
 
 ```text
-interface ChecklistItemProps {
-  templateItem: TemplateItem;
-  inspectionItem: InspectionItem | null;
-  onResultChange: (itemId: string, result: InspectionResult, notes: string) => void;
-  onAddPhoto: (itemId: string) => void;
-  photos: EvidenceLink[];
-  isReadOnly: boolean;
-}
-
-Estrutura Visual:
-┌─────────────────────────────────────────────────────────────────┐
-│  [1]  Cofragem limpa e isenta de residuos         [Obrigatorio] │
-│                                                                  │
-│  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐                           │
-│  │  OK  │ │  NC  │ │ OBS  │ │ N/A  │                           │
-│  └──────┘ └──────┘ └──────┘ └──────┘                           │
-│                                                                  │
-│  Observacoes: ____________________________________________      │
-│                                                                  │
-│  Fotos: [+] [📷] [📷]                                          │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-Comportamento dos botoes de resultado:
-- **OK** (verde): Conforme
-- **NC** (vermelho): Nao Conforme → Abre modal NC
-- **OBS** (amarelo): Observacao (conforme com nota)
-- **NA** (cinza): Nao Aplicavel
-
----
-
-## Modal Criar NC (CreateNCFromItem.tsx)
-
-```text
-Quando o utilizador marca um item como NC:
-1. Modal abre automaticamente
-2. Titulo pre-preenchido: "NC - [titulo do item]"
-3. Campos:
-   - Titulo (editavel)
-   - Descricao (textarea)
-   - Gravidade: Baixa / Media / Alta / Critica
-   - Accao Corretiva (opcional)
-   - Responsavel (opcional)
-   - Data Limite (opcional)
-4. Guardar cria registo em nonconformities
-5. Fechar modal, item fica marcado como NC
+1. Utilizador seleciona fotos via DropZone
+2. Upload para Storage (bucket: captures)
+3. Criar registo em captures com site_id
+4. Criar ligacao em nonconformity_evidence
+5. Mostrar preview com opcao de remover
 ```
 
 ---
 
-## Secçao Fotos Gerais (InspectionPhotos.tsx)
+## Dashboard com NCs por Obra
+
+Adicionar secao ou modificar cards para mostrar NCs abertas por obra:
 
 ```text
-┌─────────────────────────────────────────────────────────────────┐
-│  Fotos Gerais da Inspeccao                          [+ Anexar]  │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐                  │
-│  │ 📷   │ │ 📷   │ │ 📷   │ │ 📷   │ │  +   │                  │
-│  │      │ │      │ │      │ │      │ │      │                  │
-│  └──────┘ └──────┘ └──────┘ └──────┘ └──────┘                  │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│  Obras com Nao-Conformidades                                │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ [🏗] Edificio Aurora          NCs Abertas: 5  [→]  │   │
+│  └─────────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ [🏗] Residencial Mar          NCs Abertas: 2  [→]  │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-- Reutilizar DropZone existente
-- Upload vai para Storage
-- Criar evidence_link com inspection_id
-
----
-
-## Barra de Accoes
+### Query para NCs por Obra:
 
 ```text
-Inspeccao em DRAFT ou IN_PROGRESS:
-┌─────────────────────────────────────────────────────────────────┐
-│                   [Guardar Rascunho]  [Concluir Inspeccao]     │
-└─────────────────────────────────────────────────────────────────┘
-
-Inspeccao COMPLETED:
-- Botoes desabilitados ou escondidos
-- Badge "Inspeccao Concluida" visivel
-- Todos os campos em modo read-only
-```
-
----
-
-## Validacao ao Concluir
-
-```text
-Verificar antes de permitir conclusao:
-
-1. Itens obrigatorios (is_required = true) devem ter resultado != null
-2. Itens com requires_evidence = true devem ter pelo menos 1 foto
-3. Se alguma validacao falhar:
-   - Mostrar toast com lista de erros
-   - Highlight nos itens com problema
-   - Nao permitir conclusao
+SELECT 
+  s.id, s.name,
+  COUNT(nc.id) as open_ncs
+FROM sites s
+LEFT JOIN inspections i ON i.site_id = s.id
+LEFT JOIN nonconformities nc ON nc.inspection_id = i.id AND nc.status = 'OPEN'
+WHERE s.org_id IN (user_org_ids)
+GROUP BY s.id, s.name
+HAVING COUNT(nc.id) > 0
+ORDER BY open_ncs DESC
 ```
 
 ---
@@ -249,132 +191,145 @@ Verificar antes de permitir conclusao:
 ## Traducoes a Adicionar
 
 ```text
-inspections.detail.progress: "Progresso"
-inspections.detail.itemsCompleted: "{{completed}} de {{total}} itens"
-inspections.detail.generalPhotos: "Fotos Gerais"
-inspections.detail.attachPhoto: "Anexar Foto"
-inspections.detail.addPhotos: "Adicionar Fotos"
-inspections.detail.resultOK: "Conforme"
-inspections.detail.resultNC: "Não Conforme"
-inspections.detail.resultOBS: "Observação"
-inspections.detail.resultNA: "N/A"
-inspections.detail.observations: "Observações"
-inspections.detail.observationsPlaceholder: "Adicionar observações..."
-inspections.detail.saveDraft: "Guardar Rascunho"
-inspections.detail.completeInspection: "Concluir Inspeção"
-inspections.detail.savedSuccessfully: "Alterações guardadas"
-inspections.detail.completedSuccessfully: "Inspeção concluída com sucesso"
-inspections.detail.readOnly: "Esta inspeção já foi concluída e não pode ser editada"
-inspections.detail.missingRequired: "Existem itens obrigatórios por preencher"
-inspections.detail.missingEvidence: "Existem itens que necessitam de evidência fotográfica"
-inspections.detail.createNC: "Criar Não-Conformidade"
-inspections.detail.ncTitle: "Título da NC"
-inspections.detail.ncDescription: "Descrição"
-inspections.detail.ncSeverity: "Gravidade"
-inspections.detail.ncCorrectiveAction: "Ação Corretiva"
-inspections.detail.ncResponsible: "Responsável"
-inspections.detail.ncDueDate: "Data Limite"
-inspections.detail.ncCreated: "Não-conformidade registada"
-inspections.detail.photoUploaded: "Foto anexada com sucesso"
-inspections.detail.noPhotos: "Sem fotos anexadas"
+nc.title: "Titulo"
+nc.description: "Descricao do Problema"
+nc.descriptionRequired: "A descricao e obrigatoria"
+nc.severity: "Severidade"
+nc.severityCritical: "Critico"
+nc.severityHigh: "Importante"
+nc.severityMedium: "Menor"
+nc.dueDate: "Prazo para Resolucao"
+nc.standardViolated: "Norma/Especificacao Violada"
+nc.standardViolatedPlaceholder: "Ex: NP EN 206-1, Decreto-Lei..."
+nc.evidence: "Fotos de Evidencia"
+nc.addEvidence: "Adicionar Fotos"
+nc.correctiveAction: "Acao Corretiva"
+nc.correctiveActionPlaceholder: "Descreva a acao corretiva..."
+nc.create: "Registar NC"
+nc.created: "Nao-conformidade registada com sucesso"
+
+dashboard.sitesWithNCs: "Obras com Nao-Conformidades"
+dashboard.openNCsCount: "{{count}} NC(s) aberta(s)"
+dashboard.noOpenNCs: "Nenhuma NC aberta"
 ```
 
 ---
 
-## Migracao de Base de Dados (se necessario)
-
-A tabela `evidence_links` ja existe mas pode precisar de campo adicional para referenciar `inspection_item_id`:
-
-```sql
--- Adicionar referencia ao item especifico (opcional, para fotos por item)
-ALTER TABLE evidence_links
-ADD COLUMN IF NOT EXISTS inspection_item_id uuid REFERENCES inspection_items(id);
-
--- Adicionar tipo de evidencia
--- O campo 'kind' ja existe e pode ser usado: 'general', 'item_evidence'
-```
-
----
-
-## Estado Local da Pagina
+## Validacoes do Formulario
 
 ```text
-interface InspectionDetailState {
-  // Dados carregados
-  inspection: Inspection;
-  templateItems: TemplateItem[];
-  
-  // Estado de preenchimento
-  itemResults: Map<string, {
-    inspectionItemId: string;
-    result: 'OK' | 'NC' | 'OBS' | 'NA' | null;
-    notes: string;
-  }>;
-  
-  // Fotos
-  itemPhotos: Map<string, EvidenceLink[]>;
-  generalPhotos: EvidenceLink[];
-  
-  // UI
-  isSubmitting: boolean;
-  showNCModal: boolean;
-  currentNCItem: TemplateItem | null;
-  showPhotoModal: boolean;
-  currentPhotoItem: TemplateItem | null;
+Campos Obrigatorios:
+- Titulo (minimo 5 caracteres)
+- Descricao (minimo 10 caracteres)
+- Severidade (deve selecionar uma)
+
+Campos Opcionais:
+- Prazo para Resolucao
+- Norma/Especificacao Violada
+- Fotos de Evidencia
+- Accao Corretiva
+```
+
+---
+
+## Fluxo Completo
+
+```text
+1. Utilizador marca item como "Nao Conforme" no checklist
+   ↓
+2. Modal de NC abre automaticamente
+   ↓
+3. Titulo pre-preenchido com "NC - [titulo do item]"
+   ↓
+4. Utilizador preenche descricao (obrigatorio)
+   ↓
+5. Seleciona severidade (Critico/Importante/Menor)
+   ↓
+6. Opcionalmente define prazo via DatePicker
+   ↓
+7. Opcionalmente indica norma violada
+   ↓
+8. Opcionalmente anexa fotos de evidencia
+   ↓
+9. Clica "Registar NC"
+   ↓
+10. Sistema cria:
+    - Registo em nonconformities com status = 'OPEN'
+    - Registos em nonconformity_evidence para cada foto
+   ↓
+11. Toast de sucesso
+12. Modal fecha
+13. Item do checklist permanece como NC
+```
+
+---
+
+## Secao Tecnica
+
+### Props do Componente Melhorado:
+
+```text
+interface CreateNCFromItemProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  inspectionId: string;
+  inspectionItemId: string;
+  siteId: string;          // NOVO - para associar NC directamente a obra
+  itemTitle: string;
+  onSuccess: () => void;
 }
 ```
 
----
-
-## Fluxo de Utilizacao
+### Dados a Guardar:
 
 ```text
-1. Utilizador abre inspeccao (/app/inspections/:id)
-   ↓
-2. Sistema carrega dados e cria inspection_items se necessario
-   ↓
-3. Utilizador percorre checklist:
-   - Marca cada item como OK, NC, OBS ou NA
-   - Adiciona observacoes quando necessario
-   - Anexa fotos por item ou gerais
-   ↓
-4. Se marca NC:
-   - Modal abre para criar nao-conformidade
-   - Preenche detalhes e guarda
-   ↓
-5. Clica "Guardar Rascunho" periodicamente
-   - Estado = IN_PROGRESS
-   ↓
-6. Quando termina, clica "Concluir Inspeccao"
-   - Validacao de itens obrigatorios
-   - Estado = COMPLETED
-   - Pagina fica read-only
+nonconformities:
+  - inspection_id
+  - inspection_item_id
+  - site_id (NOVO)
+  - title
+  - description (obrigatorio)
+  - severity ('critical' | 'high' | 'medium')
+  - due_date
+  - standard_violated (NOVO)
+  - corrective_action
+  - status = 'OPEN'
+  - created_by (NOVO)
 ```
 
----
+### RLS para Nova Tabela:
 
-## Consideracoes Tecnicas
+```text
+-- nonconformity_evidence RLS
+CREATE POLICY "Users can view evidence for accessible NCs"
+  ON nonconformity_evidence FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM nonconformities nc
+      JOIN inspections i ON i.id = nc.inspection_id
+      WHERE nc.id = nonconformity_evidence.nonconformity_id
+      AND can_access_site(auth.uid(), i.site_id)
+    )
+  );
 
-1. **Auto-save**: Implementar debounce para guardar automaticamente a cada 30 segundos
-
-2. **Optimistic Updates**: Actualizar UI imediatamente, fazer sync em background
-
-3. **Offline Support (futuro)**: Estrutura preparada para guardar localmente
-
-4. **Performance**: Usar React Query para cache dos dados
-
-5. **RLS**: Policies ja existem para inspection_items e nonconformities
-
-6. **Storage**: Usar bucket "captures" existente ou criar "inspection-evidence"
+CREATE POLICY "Users can insert evidence for accessible NCs"
+  ON nonconformity_evidence FOR INSERT
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM nonconformities nc
+      JOIN inspections i ON i.id = nc.inspection_id
+      WHERE nc.id = nonconformity_evidence.nonconformity_id
+      AND can_access_site(auth.uid(), i.site_id)
+    )
+  );
+```
 
 ---
 
 ## Resumo das Alteracoes
 
-1. **InspectionDetail.tsx**: Reescrita completa com funcionalidade de preenchimento
-2. **ChecklistItem.tsx**: Componente para cada item do checklist
-3. **CreateNCFromItem.tsx**: Modal para criar NC quando item marcado como NC
-4. **InspectionPhotos.tsx**: Componente para fotos gerais
-5. **PhotoUploadModal.tsx**: Modal para upload de foto por item
-6. **Migracao BD**: Adicionar `inspection_item_id` a `evidence_links`
-7. **Traducoes**: Novas chaves em PT e EN
+1. **Migracao BD**: Adicionar campos `site_id`, `standard_violated`, `created_by` a nonconformities + criar tabela `nonconformity_evidence`
+2. **CreateNCFromItem.tsx**: Reescrever com nova UI, campos obrigatorios, DatePicker, upload de fotos
+3. **InspectionDetail.tsx**: Passar `siteId` ao modal de NC
+4. **Dashboard.tsx**: Adicionar secao de obras com NCs abertas
+5. **Traducoes**: Novas chaves em PT e EN
