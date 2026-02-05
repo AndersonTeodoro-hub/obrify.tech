@@ -1,193 +1,127 @@
 
-
-# Plano: Edge Function 'ai-image-analysis'
+# Plano: Adicionar Analise IA ao CaptureViewer
 
 ## Resumo
-Criar uma nova Edge Function que recebe um `capture_id` e um `analysis_type`, busca a imagem do bucket de Storage, envia para Gemini Vision com prompts especificos para construcao civil, e guarda os resultados na tabela `ai_analysis_results`.
+Adicionar funcionalidade de analise de imagens com IA ao visualizador de capturas, integrando com a Edge Function `ai-image-analysis` ja existente. Inclui botao de analise com dropdown de opcoes, painel de resultados, e criacao de NCs a partir de deteccoes.
 
 ---
 
 ## Analise do Estado Actual
 
-### Tabela ai_analysis_results (ja existe):
-```
-- id: uuid
-- capture_id: string (FK -> captures)
-- site_id: string (FK -> sites)
-- detection_type: enum (fissura, humidade, desalinhamento, medicao, defeito_estrutural, corrosao, infiltracao)
-- description: string
-- severity: string
-- confidence: number
-- bounding_box: json
-- measurements: json
-- raw_response: json
-- ai_model: string
-- is_false_positive: boolean
-- verified_at: timestamp
-- verified_by: uuid
-- created_at: timestamp
-```
+### CaptureViewer.tsx:
+- Ja tem toolbar com accoes (info, download, NC, delete)
+- Ja tem CaptureInfoPanel lateral (w-80)
+- Ja integra com CreateNCModal
+- Ja carrega imagens via signed URL
+
+### Edge Function ai-image-analysis:
+- Aceita `{ capture_id, analysis_type: 'defects' | 'rebar' | 'general' }`
+- Retorna `{ detections, overall_assessment, recommendations, results_saved }`
+- Guarda resultados em `ai_analysis_results`
 
 ### Tabela captures:
-```
-- id: uuid
-- file_path: string (caminho no Storage)
-- capture_point_id: string (FK -> capture_points -> areas -> floors -> sites)
-- source_type: enum
-- processing_status: enum
-```
+- Nao tem flag `ai_analyzed` - precisa de adicionar
 
-### Bucket de Storage:
-- Nome: `captures` (privado)
-- Ficheiros armazenados com file_path relativo
-
-### Edge Function existente:
-- `ai-fiscal-agent` usa Lovable AI Gateway com Gemini
-- Pattern de CORS, error handling, streaming
+### Tabela ai_analysis_results:
+- Ja tem todos os campos necessarios
+- Relaciona com capture_id
 
 ---
 
-## Arquitectura da Edge Function
+## Alteracoes Necessarias
+
+### 1. Migracao de Base de Dados
+
+Adicionar campo `ai_analyzed` a tabela `captures`:
+
+```sql
+ALTER TABLE public.captures 
+ADD COLUMN ai_analyzed boolean DEFAULT false;
+
+ALTER TABLE public.captures 
+ADD COLUMN ai_analyzed_at timestamp with time zone;
+```
+
+### 2. Novo Componente: AIAnalysisPanel
+
+Painel lateral que mostra resultados da analise:
 
 ```text
-ai-image-analysis/index.ts
-│
-├── 1. Validar request (capture_id, analysis_type)
-│
-├── 2. Buscar capture da base de dados
-│   └── Obter file_path e site_id (via joins)
-│
-├── 3. Gerar signed URL do Storage
-│   └── Usar supabase.storage.createSignedUrl()
-│
-├── 4. Construir prompt baseado no analysis_type
-│   ├── 'defects' → detectar fissuras, manchas, segregacao
-│   ├── 'rebar' → verificar espacamentos, recobrimentos
-│   └── 'general' → avaliacao geral de conformidade
-│
-├── 5. Chamar Gemini Vision via Lovable AI Gateway
-│   └── Usar modelo google/gemini-2.5-flash com imagem
-│
-├── 6. Parsear resposta JSON estruturada
-│   ├── detections: array de deteccoes
-│   ├── overall_assessment: texto resumo
-│   └── recommendations: array de sugestoes
-│
-├── 7. Inserir resultados em ai_analysis_results
-│   └── Um registo por deteccao encontrada
-│
-└── 8. Retornar resultado ao cliente
+AIAnalysisPanel.tsx
+├── Header com titulo e botao fechar
+├── Estado: loading | results | error
+├── Loading: Spinner + mensagem
+├── Results:
+│   ├── Overall Assessment (texto)
+│   ├── Lista de Deteccoes
+│   │   ├── Badge de severidade (cor)
+│   │   ├── Tipo + Descricao
+│   │   ├── Localizacao
+│   │   ├── Confianca (%)
+│   │   └── Botao "Criar NC" (se critical/major)
+│   └── Recomendacoes (lista)
+└── Botao "Nova Analise" para repetir
 ```
+
+### 3. Modificar CaptureViewer.tsx
+
+Alteracoes necessarias:
+
+1. **Novos estados:**
+   - `showAIPanel: boolean`
+   - `isAnalyzing: boolean`
+   - `aiResults: AnalysisResult | null`
+   - `selectedDetection: Detection | null` (para criar NC)
+
+2. **Novo botao na toolbar:**
+   - Icone: `Sparkles` (lucide-react)
+   - Dropdown com 3 opcoes:
+     - Detectar Defeitos
+     - Verificar Armaduras
+     - Analise Geral
+   - Mostra loading enquanto analisa
+
+3. **Integracao com AIAnalysisPanel:**
+   - Mostrar a direita (como CaptureInfoPanel)
+   - Posicionar botao "next" correctamente
+
+4. **Criar NC a partir de deteccao:**
+   - Pre-preencher CreateNCModal com dados da deteccao
+   - Mapear severity: critical->critical, major->high, minor->medium, observation->low
 
 ---
 
-## Prompts por Tipo de Analise
-
-### defects (Deteccao de Defeitos)
+## Estrutura Visual
 
 ```text
-Es um especialista em fiscalizacao de obras de construcao civil em Portugal.
-Analisa esta imagem e detecta todos os defeitos visiveis.
-
-Procura especificamente por:
-- Fissuras (orientacao, largura estimada, padrao)
-- Manchas de humidade ou infiltracao
-- Segregacao do betao (ninhos de brita)
-- Desagregacao superficial
-- Eflorescencias (manchas brancas de sais)
-- Corrosao de armaduras expostas
-- Desalinhamentos ou deformacoes
-
-Para cada defeito encontrado, classifica a severidade:
-- critical: Compromete seguranca estrutural
-- major: Requer intervencao urgente
-- minor: Manutencao preventiva recomendada
-- observation: Apenas monitorizar
-
-Responde APENAS com JSON valido no formato especificado.
+┌─────────────────────────────────────────────────────────────────┐
+│  1/10  ▲────────────────────────────────────────────── [⚡AI▼]  │
+│        │                                                [ℹ][⬇] │
+│        │                                                [⚠][🗑] │
+├────────┼────────────────────────────────────────────────[✕]────┤
+│        │                                                        │
+│   ◀    │              [IMAGEM]                            │  ▶  │
+│        │                                                  │     │
+│        │                                                  │     │
+├────────┼──────────────────────────────────────────────────┼─────┤
+│        │                                                  │     │
+│        │                                        AI PANEL  │     │
+│        │                                        ────────  │     │
+│        │                                        Avaliação │     │
+│        │                                        Geral...  │     │
+│        │                                                  │     │
+│        │                                        Deteccoes │     │
+│        │                                        ┌───────┐ │     │
+│        │                                        │🔴 CRIT│ │     │
+│        │                                        │Fissura│ │     │
+│        │                                        │[NC]   │ │     │
+│        │                                        └───────┘ │     │
+│        │                                                  │     │
+│        │                                        Recomend. │     │
+│        │                                        • Item 1  │     │
+│        │                                        • Item 2  │     │
+└────────┴──────────────────────────────────────────────────┴─────┘
 ```
-
-### rebar (Verificacao de Armaduras)
-
-```text
-Es um especialista em fiscalizacao de armaduras de betao armado.
-Analisa esta imagem de armaduras e verifica:
-
-- Espacamento entre varoes (se visivel)
-- Recobrimento aparente
-- Posicionamento dos estribos
-- Amarracoes e sobreposicoes
-- Calcadores/espacadores presentes
-- Estado geral da armadura (oxidacao, sujidade)
-
-Para cada observacao, indica:
-- Se esta conforme ou nao conforme
-- Medicoes estimadas (se possivel)
-- Localizacao na imagem
-
-Responde APENAS com JSON valido no formato especificado.
-```
-
-### general (Avaliacao Geral)
-
-```text
-Es um engenheiro fiscal de obras de construcao civil.
-Faz uma avaliacao geral do estado de conformidade visivel nesta imagem.
-
-Considera:
-- Qualidade geral da execucao
-- Organizacao e limpeza da obra
-- Seguranca visivel (EPI, proteccoes)
-- Estado dos materiais
-- Progresso aparente dos trabalhos
-
-Identifica qualquer situacao que justifique atencao ou registo.
-
-Responde APENAS com JSON valido no formato especificado.
-```
-
----
-
-## Estrutura da Resposta JSON (Tool Calling)
-
-```json
-{
-  "detections": [
-    {
-      "type": "fissura",
-      "description": "Fissura diagonal no canto superior direito",
-      "severity": "major",
-      "location": "canto superior direito, aproximadamente 15cm do bordo",
-      "confidence": 0.85,
-      "measurements": {
-        "estimated_width_mm": 2,
-        "estimated_length_cm": 30
-      }
-    }
-  ],
-  "overall_assessment": "A laje apresenta sinais de assentamento diferencial...",
-  "recommendations": [
-    "Monitorizar evolucao da fissura com testemunhos",
-    "Realizar ensaio de carbonatacao na zona afectada"
-  ]
-}
-```
-
----
-
-## Mapeamento detection_type
-
-Os tipos do enum existente serao mapeados assim:
-
-| Tipo detectado | Enum ai_detection_type |
-|----------------|----------------------|
-| fissura, crack | fissura |
-| humidade, moisture | humidade |
-| desalinhamento, misalignment | desalinhamento |
-| medicao, measurement | medicao |
-| defeito_estrutural, structural | defeito_estrutural |
-| corrosao, corrosion, rust | corrosao |
-| infiltracao, infiltration, leak | infiltracao |
 
 ---
 
@@ -195,88 +129,311 @@ Os tipos do enum existente serao mapeados assim:
 
 | Ficheiro | Accao |
 |----------|-------|
-| supabase/functions/ai-image-analysis/index.ts | Criar |
-| supabase/config.toml | Adicionar entrada para nova funcao |
+| src/components/captures/AIAnalysisPanel.tsx | Criar |
+| src/components/captures/CaptureViewer.tsx | Modificar |
+| src/components/captures/CreateNCModal.tsx | Modificar (aceitar dados pre-preenchidos) |
+| src/types/captures.ts | Adicionar tipos AIAnalysisResult |
+| src/i18n/locales/pt.json | Adicionar traducoes |
+| src/i18n/locales/en.json | Adicionar traducoes |
+| Migracao SQL | Adicionar campo ai_analyzed |
 
 ---
 
-## Codigo da Edge Function
+## Tipos a Adicionar (types/captures.ts)
 
-### Estrutura Principal:
+```typescript
+export interface AIDetection {
+  type: string;
+  description: string;
+  severity: 'critical' | 'major' | 'minor' | 'observation';
+  location: string;
+  confidence: number;
+  measurements?: {
+    estimated_width_mm?: number;
+    estimated_length_cm?: number;
+    estimated_spacing_cm?: number;
+  };
+}
 
-```text
-1. Imports (serve, createClient)
-2. CORS headers
-3. Prompts por tipo de analise
-4. Tool definition para JSON estruturado
-5. Handler principal:
-   - Validar input
-   - Buscar capture com site_id
-   - Gerar signed URL da imagem
-   - Chamar Gemini Vision
-   - Parsear resultado
-   - Inserir em ai_analysis_results
-   - Retornar resposta
-```
-
-### Chamada ao Gemini Vision:
-
-```text
-body: {
-  model: "google/gemini-2.5-flash",
-  messages: [
-    { role: "system", content: systemPrompt },
-    { 
-      role: "user", 
-      content: [
-        { type: "text", text: "Analisa esta imagem." },
-        { type: "image_url", image_url: { url: signedUrl } }
-      ]
-    }
-  ],
-  tools: [analysisToolDefinition],
-  tool_choice: { type: "function", function: { name: "submit_analysis" } }
+export interface AIAnalysisResult {
+  success: boolean;
+  capture_id: string;
+  analysis_type: 'defects' | 'rebar' | 'general';
+  detections: AIDetection[];
+  overall_assessment: string;
+  recommendations: string[];
+  results_saved: number;
 }
 ```
 
 ---
 
-## Tool Definition (Structured Output)
+## AIAnalysisPanel.tsx - Estrutura
 
 ```text
-{
-  type: "function",
-  function: {
-    name: "submit_analysis",
-    description: "Submete os resultados da analise de imagem",
-    parameters: {
-      type: "object",
-      properties: {
-        detections: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              type: { type: "string" },
-              description: { type: "string" },
-              severity: { 
-                type: "string", 
-                enum: ["critical", "major", "minor", "observation"] 
-              },
-              location: { type: "string" },
-              confidence: { type: "number" },
-              measurements: { type: "object" }
-            },
-            required: ["type", "description", "severity", "location", "confidence"]
-          }
+Props:
+- isLoading: boolean
+- results: AIAnalysisResult | null
+- error: string | null
+- onClose: () => void
+- onCreateNC: (detection: AIDetection) => void
+- onRetry: () => void
+- className?: string
+
+Badges de severidade:
+- critical: bg-red-500 text-white
+- major: bg-orange-500 text-white
+- minor: bg-yellow-500 text-black
+- observation: bg-blue-500 text-white
+
+Secoes:
+1. Header fixo com titulo e X
+2. ScrollArea para conteudo
+3. Loading state com Loader2 animado
+4. Error state com mensagem e botao retry
+5. Results state:
+   - Card com overall_assessment
+   - Lista de deteccoes com cards
+   - Lista de recomendacoes
+```
+
+---
+
+## Modificacoes no CaptureViewer.tsx
+
+### Novos imports:
+
+```typescript
+import { Sparkles } from 'lucide-react';
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuItem, 
+  DropdownMenuTrigger 
+} from '@/components/ui/dropdown-menu';
+import { AIAnalysisPanel } from './AIAnalysisPanel';
+import type { AIAnalysisResult, AIDetection } from '@/types/captures';
+```
+
+### Novos estados:
+
+```typescript
+const [showAIPanel, setShowAIPanel] = useState(false);
+const [isAnalyzing, setIsAnalyzing] = useState(false);
+const [aiResults, setAiResults] = useState<AIAnalysisResult | null>(null);
+const [aiError, setAiError] = useState<string | null>(null);
+const [ncPreFillData, setNcPreFillData] = useState<{
+  title: string;
+  description: string;
+  severity: string;
+} | null>(null);
+```
+
+### Funcao de analise:
+
+```typescript
+const handleAIAnalysis = async (analysisType: 'defects' | 'rebar' | 'general') => {
+  if (!capture) return;
+  
+  setIsAnalyzing(true);
+  setAiError(null);
+  setShowAIPanel(true);
+  
+  try {
+    const response = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-image-analysis`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        overall_assessment: { type: "string" },
-        recommendations: { 
-          type: "array", 
-          items: { type: "string" } 
-        }
-      },
-      required: ["detections", "overall_assessment", "recommendations"]
+        body: JSON.stringify({
+          capture_id: capture.id,
+          analysis_type: analysisType,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Analysis failed');
+    }
+
+    const results = await response.json();
+    setAiResults(results);
+    
+    // Marcar captura como analisada
+    await supabase
+      .from('captures')
+      .update({ ai_analyzed: true, ai_analyzed_at: new Date().toISOString() })
+      .eq('id', capture.id);
+      
+  } catch (err) {
+    setAiError(err instanceof Error ? err.message : 'Unknown error');
+  } finally {
+    setIsAnalyzing(false);
+  }
+};
+```
+
+### Criar NC a partir de deteccao:
+
+```typescript
+const handleCreateNCFromDetection = (detection: AIDetection) => {
+  const severityMap: Record<string, string> = {
+    critical: 'critical',
+    major: 'high',
+    minor: 'medium',
+    observation: 'low',
+  };
+  
+  setNcPreFillData({
+    title: `${detection.type}: ${detection.description.slice(0, 50)}`,
+    description: `${detection.description}\n\nLocalização: ${detection.location}\nConfiança: ${Math.round(detection.confidence * 100)}%`,
+    severity: severityMap[detection.severity] || 'medium',
+  });
+  setShowNCModal(true);
+};
+```
+
+### Dropdown na toolbar:
+
+```tsx
+<DropdownMenu>
+  <DropdownMenuTrigger asChild>
+    <Button
+      variant="ghost"
+      size="icon"
+      className="text-white hover:bg-white/20"
+      disabled={isAnalyzing || !imageUrl}
+    >
+      {isAnalyzing ? (
+        <Loader2 className="w-5 h-5 animate-spin" />
+      ) : (
+        <Sparkles className="w-5 h-5" />
+      )}
+    </Button>
+  </DropdownMenuTrigger>
+  <DropdownMenuContent align="end">
+    <DropdownMenuItem onClick={() => handleAIAnalysis('defects')}>
+      {t('captures.ai.detectDefects')}
+    </DropdownMenuItem>
+    <DropdownMenuItem onClick={() => handleAIAnalysis('rebar')}>
+      {t('captures.ai.verifyRebar')}
+    </DropdownMenuItem>
+    <DropdownMenuItem onClick={() => handleAIAnalysis('general')}>
+      {t('captures.ai.generalAnalysis')}
+    </DropdownMenuItem>
+  </DropdownMenuContent>
+</DropdownMenu>
+```
+
+---
+
+## Modificacoes no CreateNCModal.tsx
+
+Aceitar props opcionais de pre-preenchimento:
+
+```typescript
+interface CreateNCModalProps {
+  capture: CaptureWithDetails;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSuccess?: () => void;
+  prefillData?: {
+    title: string;
+    description: string;
+    severity: string;
+  };
+}
+```
+
+E usar no useForm:
+
+```typescript
+const form = useForm<NCFormData>({
+  resolver: zodResolver(ncSchema),
+  defaultValues: {
+    title: prefillData?.title || '',
+    description: prefillData?.description || '',
+    severity: (prefillData?.severity as any) || 'medium',
+  },
+});
+
+// Reset quando prefillData muda
+useEffect(() => {
+  if (prefillData) {
+    form.reset({
+      title: prefillData.title,
+      description: prefillData.description,
+      severity: prefillData.severity as any,
+    });
+  }
+}, [prefillData, form]);
+```
+
+---
+
+## Traducoes a Adicionar
+
+### Portugues (pt.json):
+
+```json
+"captures": {
+  "ai": {
+    "analyzeWithAI": "Analisar com IA",
+    "detectDefects": "Detectar Defeitos",
+    "verifyRebar": "Verificar Armaduras",
+    "generalAnalysis": "Análise Geral",
+    "analyzing": "A analisar imagem...",
+    "analysisComplete": "Análise concluída",
+    "analysisError": "Erro na análise",
+    "overallAssessment": "Avaliação Geral",
+    "detections": "Detecções",
+    "noDetections": "Nenhum problema detectado",
+    "recommendations": "Recomendações",
+    "confidence": "Confiança",
+    "location": "Localização",
+    "createNC": "Criar NC",
+    "retry": "Tentar Novamente",
+    "newAnalysis": "Nova Análise",
+    "severity": {
+      "critical": "Crítico",
+      "major": "Importante",
+      "minor": "Menor",
+      "observation": "Observação"
+    }
+  }
+}
+```
+
+### Ingles (en.json):
+
+```json
+"captures": {
+  "ai": {
+    "analyzeWithAI": "Analyze with AI",
+    "detectDefects": "Detect Defects",
+    "verifyRebar": "Verify Rebar",
+    "generalAnalysis": "General Analysis",
+    "analyzing": "Analyzing image...",
+    "analysisComplete": "Analysis complete",
+    "analysisError": "Analysis error",
+    "overallAssessment": "Overall Assessment",
+    "detections": "Detections",
+    "noDetections": "No issues detected",
+    "recommendations": "Recommendations",
+    "confidence": "Confidence",
+    "location": "Location",
+    "createNC": "Create NC",
+    "retry": "Retry",
+    "newAnalysis": "New Analysis",
+    "severity": {
+      "critical": "Critical",
+      "major": "Major",
+      "minor": "Minor",
+      "observation": "Observation"
     }
   }
 }
@@ -284,122 +441,66 @@ body: {
 
 ---
 
-## Insercao na Base de Dados
+## Layout do Painel de Resultados
 
-Para cada deteccao, inserir um registo:
+O AIAnalysisPanel fica posicionado de forma similar ao CaptureInfoPanel:
+- Largura fixa: w-80 (320px)
+- Posicao absoluta a direita
+- Pode coexistir com o InfoPanel (lado a lado) ou substituir
 
-```text
-await supabase.from('ai_analysis_results').insert({
-  capture_id: captureId,
-  site_id: siteId,
-  detection_type: mapDetectionType(detection.type),
-  description: detection.description,
-  severity: detection.severity,
-  confidence: detection.confidence,
-  measurements: detection.measurements || null,
-  bounding_box: null, // Gemini nao retorna bounding boxes
-  raw_response: fullResponse,
-  ai_model: 'google/gemini-2.5-flash'
-});
-```
-
----
-
-## Resposta ao Cliente
-
-```json
-{
-  "success": true,
-  "capture_id": "uuid",
-  "analysis_type": "defects",
-  "detections": [...],
-  "overall_assessment": "...",
-  "recommendations": [...],
-  "results_saved": 3
-}
-```
-
----
-
-## Error Handling
-
-| Erro | Resposta |
-|------|----------|
-| capture_id em falta | 400: "capture_id is required" |
-| analysis_type invalido | 400: "analysis_type must be defects, rebar, or general" |
-| Capture nao encontrada | 404: "Capture not found" |
-| Imagem nao encontrada no Storage | 404: "Image file not found" |
-| Erro na API Gemini | 500: "AI analysis failed" |
-| Rate limit (429) | 429: "Rate limit exceeded" |
-| Sem creditos (402) | 402: "Insufficient credits" |
-
----
-
-## Config.toml
-
-Adicionar a nova funcao:
-
-```toml
-[functions.ai-image-analysis]
-verify_jwt = false
-```
+Para simplicidade, quando showAIPanel = true, escondemos o InfoPanel (toggle entre os dois).
 
 ---
 
 ## Fluxo de Utilizacao
 
 ```text
-Cliente                     Edge Function              Supabase          Gemini Vision
-   │                              │                        │                   │
-   │  POST { capture_id,          │                        │                   │
-   │        analysis_type }       │                        │                   │
-   │─────────────────────────────>│                        │                   │
-   │                              │                        │                   │
-   │                              │  SELECT capture        │                   │
-   │                              │  + site_id            │                   │
-   │                              │───────────────────────>│                   │
-   │                              │<───────────────────────│                   │
-   │                              │                        │                   │
-   │                              │  createSignedUrl()     │                   │
-   │                              │───────────────────────>│                   │
-   │                              │<───────────────────────│                   │
-   │                              │                        │                   │
-   │                              │  POST image + prompt  │                   │
-   │                              │──────────────────────────────────────────>│
-   │                              │<──────────────────────────────────────────│
-   │                              │                        │                   │
-   │                              │  INSERT results        │                   │
-   │                              │───────────────────────>│                   │
-   │                              │<───────────────────────│                   │
-   │                              │                        │                   │
-   │  { detections, assessment,   │                        │                   │
-   │    recommendations }         │                        │                   │
-   │<─────────────────────────────│                        │                   │
+1. Utilizador abre CaptureViewer
+       │
+       ▼
+2. Clica no botao ⚡ (Sparkles)
+       │
+       ▼
+3. Seleciona tipo de analise no dropdown
+       │
+       ▼
+4. Mostra painel lateral com loading
+       │
+       ▼
+5. Edge Function processa imagem
+       │
+       ▼
+6. Resultados aparecem no painel:
+   - Avaliacao geral
+   - Lista de deteccoes com badges
+   - Recomendacoes
+       │
+       ▼
+7. Para deteccoes critical/major:
+   - Botao "Criar NC" disponivel
+   - Abre CreateNCModal pre-preenchido
+       │
+       ▼
+8. Captura marcada como ai_analyzed = true
 ```
 
 ---
 
 ## Resumo das Alteracoes
 
-1. **Criar Edge Function**: `supabase/functions/ai-image-analysis/index.ts`
-   - Validar input (capture_id, analysis_type)
-   - Buscar capture e site_id via joins
-   - Gerar signed URL do Storage
-   - Construir prompt especifico por tipo de analise
-   - Usar tool calling para obter JSON estruturado
-   - Inserir cada deteccao em `ai_analysis_results`
-   - Retornar resultado completo ao cliente
-
-2. **Actualizar config.toml**: Adicionar entrada `[functions.ai-image-analysis]`
+1. **Migracao SQL**: Adicionar campos `ai_analyzed` e `ai_analyzed_at` na tabela captures
+2. **AIAnalysisPanel.tsx**: Novo componente para mostrar resultados da analise
+3. **CaptureViewer.tsx**: Adicionar dropdown de analise IA e integracao com painel
+4. **CreateNCModal.tsx**: Aceitar dados pre-preenchidos
+5. **types/captures.ts**: Adicionar tipos para AIDetection e AIAnalysisResult
+6. **Traducoes**: Novas chaves para PT e EN
 
 ---
 
 ## Consideracoes Tecnicas
 
-1. **Modelo**: Usar `google/gemini-2.5-flash` que suporta imagens e e mais rapido
-2. **Signed URLs**: Validade de 60 segundos (suficiente para o pedido)
-3. **Tool Calling**: Garante resposta JSON estruturada e valida
-4. **Mapeamento de tipos**: Converter tipos detectados para o enum existente
-5. **Raw Response**: Guardar resposta completa para debug/auditoria
-6. **Tamanho de imagem**: Gemini aceita URLs directos, nao precisa base64
-
+1. **Painel exclusivo**: Quando AI panel esta aberto, Info panel fecha (e vice-versa)
+2. **Cache de resultados**: Guardar aiResults no state para nao perder ao navegar
+3. **Rate limiting**: Tratar erros 429 com mensagem amigavel
+4. **Timeout**: A analise pode demorar 10-30s, manter loading visivel
+5. **Videos/Panoramas**: Desactivar botao de analise para conteudo nao-imagem
