@@ -399,6 +399,20 @@
       }
     }
   },
+  "alerts": {
+    "title": "Alerts",
+    "markAllRead": "Mark all read",
+    "viewAll": "View all alerts",
+    "noAlerts": "No alerts",
+    "noAlertsDesc": "You have no unread alerts",
+    "unread": "{{count}} unread",
+    "viewCapture": "View Capture",
+    "createNC": "Create NC",
+    "markRead": "Mark as read",
+    "types": {
+      "ai_detection": "AI Detection"
+    }
+  },
   "inspections": {
     "title": "Inspections",
     "subtitle": "Checklists and technical audits",

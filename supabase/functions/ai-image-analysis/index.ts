@@ -357,6 +357,52 @@ serve(async (req) => {
       console.error("Some inserts failed:", insertErrors);
     }
 
+    // Create alerts for critical/major detections
+    const alertDetections = analysisResult.detections.filter(
+      (d) => d.severity === 'critical' || d.severity === 'major'
+    );
+
+    if (alertDetections.length > 0) {
+      try {
+        // Get org_id from site
+        const { data: site } = await supabase
+          .from('sites')
+          .select('org_id')
+          .eq('id', siteId)
+          .single();
+
+        if (site?.org_id) {
+          // Get all organization members
+          const { data: members } = await supabase
+            .from('memberships')
+            .select('user_id')
+            .eq('org_id', site.org_id);
+
+          if (members && members.length > 0) {
+            const alertInserts = [];
+
+            for (const detection of alertDetections) {
+              for (const member of members) {
+                alertInserts.push({
+                  type: 'ai_detection',
+                  message: `${detection.type}: ${detection.description.slice(0, 100)}`,
+                  severity: detection.severity,
+                  related_capture_id: capture_id,
+                  related_site_id: siteId,
+                  user_id: member.user_id,
+                });
+              }
+            }
+
+            await supabase.from('alerts').insert(alertInserts);
+          }
+        }
+      } catch (alertError) {
+        // Log but don't fail the main request
+        console.error('Failed to create alerts:', alertError);
+      }
+    }
+
     // Retornar resultado ao cliente
     return new Response(
       JSON.stringify({

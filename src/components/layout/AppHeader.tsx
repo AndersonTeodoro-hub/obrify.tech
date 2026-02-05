@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
+import { AlertBell } from '@/components/layout/AlertBell';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -90,6 +91,7 @@ export function AppHeader() {
       </div>
 
       <div className="flex items-center gap-2">
+        <AlertBell />
         <LanguageSwitcher />
         <ThemeToggle />
       </div>
