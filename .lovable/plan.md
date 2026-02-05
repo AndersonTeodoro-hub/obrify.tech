@@ -1,143 +1,150 @@
 
-# Plano: Sistema de Alertas Baseado em Analises IA
+# Plano: Sistema de Convite de Membros para Organizacao
 
 ## Resumo
-Implementar um sistema de alertas automaticos que notifica utilizadores quando analises IA detectam problemas criticos. Inclui nova tabela de alertas, componente AlertBell no header, dropdown de alertas, e integracao com a Edge Function existente.
+Implementar sistema completo de convites para membros, incluindo nova tab "Equipa" nas Settings, listagem de membros, modal de convite com seleccao de role e obras, tabela de convites pendentes, e pagina de aceitacao de convite.
 
 ---
 
 ## Analise do Estado Actual
 
-### Edge Function ai-image-analysis:
-- Ja guarda deteccoes em `ai_analysis_results`
-- Retorna severidade: critical, major, minor, observation
-- Local ideal para criar alertas automaticos
+### Tabela memberships:
+- Role como enum: admin, manager, viewer
+- Precisa adicionar: inspector, contributor
 
-### AppHeader.tsx:
-- Header simples com breadcrumbs e toggles
-- Espaco disponivel para AlertBell junto aos toggles
+### Tabela profiles:
+- Tem: full_name, email, avatar_url, user_id
+- Pode ser usada para mostrar nomes dos membros
 
-### Tabelas existentes:
-- `ai_analysis_results` - resultados de analise
-- `captures` - capturas com file_path
+### Settings.tsx:
+- Pagina simples com cards
+- Precisa de adicionar sistema de tabs para incluir "Equipa"
 
 ---
 
-## Alteracoes Necessarias
+## Alteracoes de Base de Dados
 
-### 1. Nova Tabela: alerts
+### 1. Expandir enum membership_role
 
 ```sql
-CREATE TABLE public.alerts (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  type text NOT NULL DEFAULT 'ai_detection',
-  message text NOT NULL,
-  severity text NOT NULL DEFAULT 'medium',
-  related_capture_id uuid REFERENCES public.captures(id) ON DELETE CASCADE,
-  related_site_id uuid REFERENCES public.sites(id) ON DELETE CASCADE,
-  user_id uuid NOT NULL,
-  read boolean NOT NULL DEFAULT false,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
--- RLS Policies
-ALTER TABLE public.alerts ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can view own alerts" ON public.alerts
-  FOR SELECT USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can update own alerts" ON public.alerts
-  FOR UPDATE USING (auth.uid() = user_id);
-
-CREATE POLICY "System can create alerts" ON public.alerts
-  FOR INSERT WITH CHECK (true);
+ALTER TYPE public.membership_role ADD VALUE 'inspector';
+ALTER TYPE public.membership_role ADD VALUE 'contributor';
 ```
 
-### 2. Modificar Edge Function ai-image-analysis
+### 2. Nova tabela: invitations
 
-Apos guardar deteccoes, criar alertas para severidades critical/major:
-
-```text
-// Apos inserir em ai_analysis_results
-const criticalDetections = analysisResult.detections.filter(
-  d => d.severity === 'critical' || d.severity === 'major'
+```sql
+CREATE TABLE public.invitations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  email text NOT NULL,
+  role text NOT NULL DEFAULT 'viewer',
+  site_ids uuid[] DEFAULT '{}',
+  invited_by uuid NOT NULL,
+  token uuid NOT NULL DEFAULT gen_random_uuid(),
+  status text NOT NULL DEFAULT 'pending',
+  expires_at timestamptz NOT NULL DEFAULT (now() + interval '7 days'),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  accepted_at timestamptz,
+  
+  CONSTRAINT valid_status CHECK (status IN ('pending', 'accepted', 'expired', 'cancelled'))
 );
 
-if (criticalDetections.length > 0) {
-  // Buscar membros da organizacao
-  const { data: site } = await supabase
-    .from('sites')
-    .select('org_id')
-    .eq('id', siteId)
-    .single();
+-- Indice unico para token
+CREATE UNIQUE INDEX invitations_token_idx ON public.invitations(token);
 
-  const { data: members } = await supabase
-    .from('memberships')
-    .select('user_id')
-    .eq('org_id', site.org_id);
+-- Indice para email + org (evitar duplicados)
+CREATE UNIQUE INDEX invitations_email_org_pending_idx 
+  ON public.invitations(email, org_id) 
+  WHERE status = 'pending';
+```
 
-  // Criar alerta para cada membro
-  for (const detection of criticalDetections) {
-    const alertInserts = members.map(m => ({
-      type: 'ai_detection',
-      message: `${detection.type}: ${detection.description}`,
-      severity: detection.severity,
-      related_capture_id: capture_id,
-      related_site_id: siteId,
-      user_id: m.user_id,
-    }));
+### 3. RLS Policies para invitations
 
-    await supabase.from('alerts').insert(alertInserts);
-  }
-}
+```sql
+ALTER TABLE public.invitations ENABLE ROW LEVEL SECURITY;
+
+-- Admins podem ver e gerir convites da sua org
+CREATE POLICY "Admins can manage invitations" ON public.invitations
+  FOR ALL USING (has_org_role(auth.uid(), org_id, 'admin'));
+
+-- Utilizadores podem ver convites pelo token (para aceitar)
+CREATE POLICY "Anyone can view invitation by token" ON public.invitations
+  FOR SELECT USING (true);
 ```
 
 ---
 
 ## Novos Componentes
 
-### 3. AlertBell.tsx
+### 1. TeamTab.tsx (src/components/settings/TeamTab.tsx)
 
-Componente do header com contador de alertas nao lidos:
+Tab principal com lista de membros e botao de convite:
 
 ```text
-AlertBell.tsx
-├── Estado: unreadCount (realtime)
-├── Icone Bell com badge contador
-├── Dropdown ao clicar:
-│   ├── Header "Alertas" + Botao "Marcar todos como lidos"
-│   ├── ScrollArea com lista de alertas recentes
-│   │   ├── Cada alerta:
-│   │   │   ├── Badge severidade (cor)
-│   │   │   ├── Mensagem truncada
-│   │   │   ├── Tempo relativo (ha 2 min)
-│   │   │   ├── Botao "Ver" -> navega para captura
-│   │   │   └── Botao "Criar NC" (se critical/major)
-│   │   └── Indicador de nao lido (circulo)
-│   └── Footer "Ver todos os alertas"
-└── Realtime subscription para updates
+TeamTab.tsx
+├── Header: "Equipa" + Botao "Convidar Membro"
+├── Tabela de Membros:
+│   ├── Avatar + Nome
+│   ├── Email
+│   ├── Role (Badge colorido)
+│   ├── Data de entrada
+│   ├── Accoes (Editar role, Remover)
+├── Seccao "Convites Pendentes":
+│   ├── Email
+│   ├── Role
+│   ├── Enviado por
+│   ├── Expira em
+│   ├── Accoes (Reenviar, Cancelar)
 ```
 
-### Estrutura Visual do Dropdown:
+### 2. InviteMemberModal.tsx (src/components/settings/InviteMemberModal.tsx)
+
+Modal para criar convite:
 
 ```text
-┌─────────────────────────────────────┐
-│  🔔 Alertas (3)    [Marcar lidas]  │
-├─────────────────────────────────────┤
-│  🔴 Fissura detectada               │
-│     Obra Centro - há 2 min    [Ver] │
-│  ●                                  │
-├─────────────────────────────────────┤
-│  🟠 Armadura exposta                │
-│     Obra Norte - há 15 min    [Ver] │
-│  ●                                  │
-├─────────────────────────────────────┤
-│  🟠 Segregacao betao                │
-│     Obra Sul - há 1 hora      [Ver] │
-│                                     │
-├─────────────────────────────────────┤
-│       Ver todos os alertas →        │
-└─────────────────────────────────────┘
+InviteMemberModal.tsx
+├── Campo: Email do convidado
+├── Select: Role
+│   ├── Admin (acesso total)
+│   ├── Manager (gestao de obras)
+│   ├── Inspector (realizar inspeccoes)
+│   ├── Contributor (adicionar capturas)
+│   └── Viewer (apenas visualizar)
+├── Multi-select: Obras (visivel para roles nao-admin)
+│   └── Lista de sites da organizacao
+├── Botoes: Cancelar / Enviar Convite
+```
+
+### 3. AcceptInvite.tsx (src/pages/AcceptInvite.tsx)
+
+Pagina publica para aceitar convites:
+
+```text
+AcceptInvite.tsx
+├── Validar token da URL
+├── Se token valido e nao expirado:
+│   ├── Mostrar: Org name, Role
+│   ├── Se utilizador logado:
+│   │   └── Botao "Aceitar Convite"
+│   ├── Se nao logado:
+│   │   ├── Form de Login
+│   │   └── Link "Criar Conta"
+├── Se token invalido/expirado:
+│   └── Mensagem de erro
+```
+
+---
+
+## Modificar Settings.tsx
+
+Transformar em layout com tabs:
+
+```text
+Settings.tsx (modificado)
+├── Tabs:
+│   ├── "Geral" (conteudo actual)
+│   └── "Equipa" (novo TeamTab)
 ```
 
 ---
@@ -146,168 +153,175 @@ AlertBell.tsx
 
 | Ficheiro | Accao |
 |----------|-------|
-| Migracao SQL | Criar tabela alerts |
-| supabase/functions/ai-image-analysis/index.ts | Adicionar criacao de alertas |
-| src/components/layout/AlertBell.tsx | Criar componente |
-| src/components/layout/AppHeader.tsx | Adicionar AlertBell |
-| src/pages/app/Alerts.tsx | Pagina completa de alertas (opcional) |
+| Migracao SQL | Expandir enum + criar tabela invitations |
+| src/components/settings/TeamTab.tsx | Criar |
+| src/components/settings/InviteMemberModal.tsx | Criar |
+| src/pages/AcceptInvite.tsx | Criar |
+| src/pages/app/Settings.tsx | Modificar (adicionar tabs) |
+| src/App.tsx | Adicionar rota /invite/:token |
 | src/i18n/locales/pt.json | Adicionar traducoes |
 | src/i18n/locales/en.json | Adicionar traducoes |
 
 ---
 
-## Logica do AlertBell
+## Logica do TeamTab
 
-### Query de alertas:
+### Query de membros:
 
 ```typescript
-const { data: alerts } = await supabase
-  .from('alerts')
+const { data: members } = await supabase
+  .from('memberships')
   .select(`
-    *,
-    capture:captures(
-      id,
-      file_path,
-      capture_point:capture_points(
-        code,
-        area:areas(
-          name,
-          floor:floors(
-            name,
-            site:sites(id, name)
-          )
-        )
-      )
+    id,
+    role,
+    created_at,
+    user_id,
+    profiles!inner(
+      full_name,
+      email,
+      avatar_url
     )
   `)
-  .eq('user_id', user.id)
-  .order('created_at', { ascending: false })
-  .limit(10);
+  .eq('org_id', currentOrgId);
 ```
 
-### Contador em tempo real:
+### Query de convites pendentes:
 
 ```typescript
-// Contar nao lidos
-const { count } = await supabase
-  .from('alerts')
-  .select('*', { count: 'exact', head: true })
-  .eq('user_id', user.id)
-  .eq('read', false);
-
-// Subscription para updates
-const channel = supabase
-  .channel('alerts')
-  .on('postgres_changes', {
-    event: 'INSERT',
-    schema: 'public',
-    table: 'alerts',
-    filter: `user_id=eq.${user.id}`,
-  }, (payload) => {
-    // Incrementar contador e adicionar a lista
-    setUnreadCount(prev => prev + 1);
-    setAlerts(prev => [payload.new, ...prev].slice(0, 10));
-  })
-  .subscribe();
+const { data: invitations } = await supabase
+  .from('invitations')
+  .select('*')
+  .eq('org_id', currentOrgId)
+  .eq('status', 'pending')
+  .order('created_at', { ascending: false });
 ```
 
-### Marcar como lido:
+---
+
+## Logica do InviteMemberModal
+
+### Criar convite:
 
 ```typescript
-const markAsRead = async (alertId: string) => {
-  await supabase
-    .from('alerts')
-    .update({ read: true })
-    .eq('id', alertId);
-};
+const createInvite = async () => {
+  const { data, error } = await supabase
+    .from('invitations')
+    .insert({
+      org_id: currentOrgId,
+      email: inviteEmail,
+      role: selectedRole,
+      site_ids: selectedSites,
+      invited_by: user.id,
+    })
+    .select()
+    .single();
 
-const markAllAsRead = async () => {
-  await supabase
-    .from('alerts')
-    .update({ read: true })
-    .eq('user_id', user.id)
-    .eq('read', false);
-};
-```
-
-### Navegacao para captura:
-
-```typescript
-const handleViewCapture = (alert: Alert) => {
-  markAsRead(alert.id);
-  const site = alert.capture?.capture_point?.area?.floor?.site;
-  if (site) {
-    navigate(`/app/sites/${site.id}?tab=captures&capture=${alert.related_capture_id}`);
+  if (!error) {
+    // Gerar link: /invite/{token}
+    const inviteLink = `${window.location.origin}/invite/${data.token}`;
+    // Copiar para clipboard ou mostrar
   }
 };
 ```
 
 ---
 
-## Modificar Edge Function
+## Logica do AcceptInvite
 
-Adicionar ao final do handler, antes do return:
+### Fluxo de aceitacao:
 
 ```typescript
-// Criar alertas para deteccoes criticas/importantes
-const alertDetections = analysisResult.detections.filter(
-  d => d.severity === 'critical' || d.severity === 'major'
-);
+// 1. Buscar convite pelo token
+const { data: invitation } = await supabase
+  .from('invitations')
+  .select('*, organizations(name)')
+  .eq('token', token)
+  .eq('status', 'pending')
+  .single();
 
-if (alertDetections.length > 0) {
-  try {
-    // Buscar org_id do site
-    const { data: site } = await supabase
-      .from('sites')
-      .select('org_id')
-      .eq('id', siteId)
-      .single();
-
-    if (site?.org_id) {
-      // Buscar todos os membros da org
-      const { data: members } = await supabase
-        .from('memberships')
-        .select('user_id')
-        .eq('org_id', site.org_id);
-
-      if (members && members.length > 0) {
-        const alertInserts = [];
-        
-        for (const detection of alertDetections) {
-          for (const member of members) {
-            alertInserts.push({
-              type: 'ai_detection',
-              message: `${detection.type}: ${detection.description.slice(0, 100)}`,
-              severity: detection.severity,
-              related_capture_id: capture_id,
-              related_site_id: siteId,
-              user_id: member.user_id,
-            });
-          }
-        }
-
-        await supabase.from('alerts').insert(alertInserts);
-      }
-    }
-  } catch (alertError) {
-    // Log mas nao falhar o request principal
-    console.error('Failed to create alerts:', alertError);
-  }
+// 2. Verificar se nao expirou
+if (new Date(invitation.expires_at) < new Date()) {
+  // Convite expirado
+  await supabase
+    .from('invitations')
+    .update({ status: 'expired' })
+    .eq('id', invitation.id);
+  return;
 }
+
+// 3. Aceitar convite (se utilizador logado)
+const acceptInvite = async () => {
+  // Criar membership
+  await supabase.from('memberships').insert({
+    org_id: invitation.org_id,
+    user_id: user.id,
+    role: invitation.role,
+  });
+
+  // Marcar convite como aceite
+  await supabase
+    .from('invitations')
+    .update({ status: 'accepted', accepted_at: new Date().toISOString() })
+    .eq('id', invitation.id);
+
+  // Redirigir para dashboard
+  navigate('/app');
+};
 ```
 
 ---
 
-## Modificar AppHeader
+## Estrutura Visual do TeamTab
 
-Adicionar AlertBell antes dos toggles:
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│  Equipa                                    [+ Convidar Membro]  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  MEMBROS (3)                                                    │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │ 👤 Joao Silva       joao@email.com    Admin    12 Jan 25  │  │
+│  │ 👤 Maria Santos     maria@email.com   Manager  15 Jan 25  │  │
+│  │ 👤 Pedro Costa      pedro@email.com   Viewer   20 Jan 25  │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│  CONVITES PENDENTES (1)                                         │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │ ana@email.com   Inspector   Expira: 5 dias  [📋][❌]      │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-```tsx
-<div className="flex items-center gap-2">
-  <AlertBell />
-  <LanguageSwitcher />
-  <ThemeToggle />
-</div>
+---
+
+## Estrutura Visual do InviteMemberModal
+
+```text
+┌─────────────────────────────────────────────────┐
+│  Convidar Membro                          [X]   │
+├─────────────────────────────────────────────────┤
+│                                                 │
+│  Email *                                        │
+│  ┌─────────────────────────────────────────┐    │
+│  │ email@exemplo.com                       │    │
+│  └─────────────────────────────────────────┘    │
+│                                                 │
+│  Funcao *                                       │
+│  ┌─────────────────────────────────────────┐    │
+│  │ Inspector                           ▼   │    │
+│  └─────────────────────────────────────────┘    │
+│                                                 │
+│  Obras com Acesso (para roles nao-admin)        │
+│  ┌─────────────────────────────────────────┐    │
+│  │ ☑ Edificio Centro                       │    │
+│  │ ☐ Obra Norte                            │    │
+│  │ ☑ Projeto Sul                           │    │
+│  └─────────────────────────────────────────┘    │
+│                                                 │
+├─────────────────────────────────────────────────┤
+│           [Cancelar]    [Enviar Convite]        │
+└─────────────────────────────────────────────────┘
 ```
 
 ---
@@ -317,24 +331,42 @@ Adicionar AlertBell antes dos toggles:
 ### Portugues (pt.json):
 
 ```json
-"alerts": {
-  "title": "Alertas",
-  "markAllRead": "Marcar todas como lidas",
-  "viewAll": "Ver todos os alertas",
-  "noAlerts": "Sem alertas",
-  "noAlertsDesc": "Nao tem alertas por ler",
-  "unread": "{{count}} nao lido(s)",
-  "viewCapture": "Ver Captura",
-  "createNC": "Criar NC",
-  "markRead": "Marcar como lida",
-  "timeAgo": {
-    "justNow": "Agora mesmo",
-    "minutes": "ha {{count}} min",
-    "hours": "ha {{count}} hora(s)",
-    "days": "ha {{count}} dia(s)"
+"team": {
+  "title": "Equipa",
+  "subtitle": "Gerir membros da organizacao",
+  "members": "Membros",
+  "pendingInvites": "Convites Pendentes",
+  "inviteMember": "Convidar Membro",
+  "noMembers": "Sem membros",
+  "noInvites": "Sem convites pendentes",
+  "email": "Email",
+  "role": "Funcao",
+  "joinedAt": "Entrou em",
+  "expiresIn": "Expira em",
+  "days": "dias",
+  "copyLink": "Copiar Link",
+  "cancelInvite": "Cancelar Convite",
+  "resendInvite": "Reenviar",
+  "removeFromOrg": "Remover da Organizacao",
+  "changeRole": "Alterar Funcao",
+  "sites": "Obras com Acesso",
+  "allSites": "Todas as obras",
+  "selectSites": "Seleccionar obras",
+  "inviteSent": "Convite enviado!",
+  "inviteLink": "Link de convite",
+  "roles": {
+    "admin": "Administrador",
+    "manager": "Gestor",
+    "inspector": "Fiscalizador",
+    "contributor": "Colaborador",
+    "viewer": "Visualizador"
   },
-  "types": {
-    "ai_detection": "Deteccao IA"
+  "roleDescriptions": {
+    "admin": "Acesso total, gerir membros e configuracoes",
+    "manager": "Gerir obras, inspeccoes e equipas",
+    "inspector": "Realizar inspeccoes e criar NCs",
+    "contributor": "Adicionar capturas e comentarios",
+    "viewer": "Apenas visualizar informacoes"
   }
 }
 ```
@@ -342,103 +374,108 @@ Adicionar AlertBell antes dos toggles:
 ### Ingles (en.json):
 
 ```json
-"alerts": {
-  "title": "Alerts",
-  "markAllRead": "Mark all as read",
-  "viewAll": "View all alerts",
-  "noAlerts": "No alerts",
-  "noAlertsDesc": "You have no unread alerts",
-  "unread": "{{count}} unread",
-  "viewCapture": "View Capture",
-  "createNC": "Create NC",
-  "markRead": "Mark as read",
-  "timeAgo": {
-    "justNow": "Just now",
-    "minutes": "{{count}} min ago",
-    "hours": "{{count}} hour(s) ago",
-    "days": "{{count}} day(s) ago"
+"team": {
+  "title": "Team",
+  "subtitle": "Manage organization members",
+  "members": "Members",
+  "pendingInvites": "Pending Invitations",
+  "inviteMember": "Invite Member",
+  "noMembers": "No members",
+  "noInvites": "No pending invitations",
+  "email": "Email",
+  "role": "Role",
+  "joinedAt": "Joined",
+  "expiresIn": "Expires in",
+  "days": "days",
+  "copyLink": "Copy Link",
+  "cancelInvite": "Cancel Invitation",
+  "resendInvite": "Resend",
+  "removeFromOrg": "Remove from Organization",
+  "changeRole": "Change Role",
+  "sites": "Site Access",
+  "allSites": "All sites",
+  "selectSites": "Select sites",
+  "inviteSent": "Invitation sent!",
+  "inviteLink": "Invitation link",
+  "roles": {
+    "admin": "Administrator",
+    "manager": "Manager",
+    "inspector": "Inspector",
+    "contributor": "Contributor",
+    "viewer": "Viewer"
   },
-  "types": {
-    "ai_detection": "AI Detection"
+  "roleDescriptions": {
+    "admin": "Full access, manage members and settings",
+    "manager": "Manage sites, inspections and teams",
+    "inspector": "Perform inspections and create NCs",
+    "contributor": "Add captures and comments",
+    "viewer": "View only"
   }
 }
 ```
 
 ---
 
-## Fluxo de Utilizacao
+## Rota AcceptInvite
+
+Adicionar ao App.tsx:
+
+```tsx
+import AcceptInvite from './pages/AcceptInvite';
+
+// Na configuracao de rotas (fora do ProtectedRoute)
+<Route path="/invite/:token" element={<AcceptInvite />} />
+```
+
+---
+
+## Fluxo de Convite
 
 ```text
-1. Utilizador analisa captura com IA
+1. Admin clica "Convidar Membro"
        │
        ▼
-2. Edge Function detecta problema critico
+2. Preenche email, role, e obras (se aplicavel)
        │
        ▼
-3. Alerta criado para todos os membros da org
+3. Sistema cria entrada em invitations com token unico
        │
        ▼
-4. Badge no AlertBell actualiza (realtime)
+4. Mostra link de convite (copiar para partilhar)
        │
        ▼
-5. Utilizador clica no sino
+5. Convidado acede ao link /invite/{token}
        │
        ▼
-6. Ve lista de alertas recentes
+6. Se ja tem conta: faz login e aceita
+   Se nao tem: cria conta e aceita
        │
        ▼
-7. Clica "Ver" -> navega para captura
-   OU clica "Criar NC" -> abre modal pre-preenchido
+7. Membership criada, convite marcado como aceite
        │
        ▼
-8. Alerta marcado como lido
+8. Utilizador redirigido para dashboard
 ```
-
----
-
-## Notificacoes Push (Futuro)
-
-A infraestrutura de alertas permite adicionar notificacoes push posteriormente:
-- Registar service worker
-- Guardar push subscription na BD
-- Enviar notificacao quando alerta e criado (Edge Function)
-
-Este requisito fica preparado mas nao implementado nesta fase (requer setup adicional de service worker).
-
----
-
-## RLS Policies
-
-```sql
--- Utilizadores podem ver os seus proprios alertas
-CREATE POLICY "Users can view own alerts" ON public.alerts
-  FOR SELECT USING (auth.uid() = user_id);
-
--- Utilizadores podem actualizar os seus proprios alertas (marcar como lido)
-CREATE POLICY "Users can update own alerts" ON public.alerts
-  FOR UPDATE USING (auth.uid() = user_id);
-
--- Sistema pode criar alertas (via service role na Edge Function)
-CREATE POLICY "Service role can insert alerts" ON public.alerts
-  FOR INSERT WITH CHECK (true);
-```
-
----
-
-## Resumo das Alteracoes
-
-1. **Migracao SQL**: Criar tabela `alerts` com RLS e enable realtime
-2. **Edge Function**: Adicionar logica de criacao de alertas para deteccoes criticas
-3. **AlertBell.tsx**: Componente com contador, dropdown, e realtime subscription
-4. **AppHeader.tsx**: Integrar AlertBell
-5. **Traducoes**: Novas chaves para PT e EN
 
 ---
 
 ## Consideracoes Tecnicas
 
-1. **Realtime**: Usar Supabase realtime para updates instantaneos
-2. **Performance**: Limitar a 10 alertas no dropdown, paginacao na pagina completa
-3. **Cleanup**: Alertas antigos podem ser limpos via cron job (futuro)
-4. **Membros**: Alertas criados para todos os membros da org do site
-5. **Fallback**: Se falhar criacao de alertas, nao afecta a analise principal
+1. **Novos Roles**: Adicionar "inspector" e "contributor" ao enum membership_role
+2. **Token Seguro**: UUID aleatorio para cada convite
+3. **Expiracao**: Convites expiram apos 7 dias por defeito
+4. **Duplicados**: Indice unico impede convites duplicados pendentes
+5. **Email Opcional**: Como email nao esta configurado, mostrar apenas o link
+6. **Site Access**: Campo site_ids permite restricao de acesso por obra (futuro)
+
+---
+
+## Resumo das Alteracoes
+
+1. **Migracao SQL**: Expandir enum + criar tabela invitations com RLS
+2. **TeamTab.tsx**: Lista de membros e convites pendentes
+3. **InviteMemberModal.tsx**: Formulario de convite
+4. **AcceptInvite.tsx**: Pagina publica para aceitar convites
+5. **Settings.tsx**: Adicionar sistema de tabs
+6. **App.tsx**: Adicionar rota /invite/:token
+7. **Traducoes**: Novas chaves para PT e EN
