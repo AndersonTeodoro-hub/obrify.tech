@@ -558,5 +558,40 @@
     "conformNo": "No",
     "conformNA": "N/A",
     "conformOBS": "OBS"
+  },
+  "reportsPage": {
+    "title": "Reports",
+    "subtitle": "Reports and documentation center",
+    "inspectionReports": "Inspection Reports",
+    "inspectionReportsDesc": "Generate reports for completed inspections",
+    "ncReports": "Non-Conformity Reports",
+    "openNCsBySite": "Open NCs by Site",
+    "openNCsBySiteDesc": "List of all open NCs for a site",
+    "ncHistory": "NC History",
+    "ncHistoryDesc": "Closed NCs in a specific period",
+    "measurementAutos": "Measurement Reports",
+    "measurementAutosDesc": "This feature will be available in a future version",
+    "comingSoon": "Coming soon",
+    "generatedReports": "Report History",
+    "generatedReportsDesc": "Previously generated reports",
+    "noCompletedInspections": "No completed inspections",
+    "generateReport": "Generate Report",
+    "generateList": "Generate List",
+    "selectSite": "Select site",
+    "selectPeriod": "Select period",
+    "from": "From",
+    "to": "To",
+    "reportType": "Type",
+    "generatedAt": "Generated at",
+    "generatedBy": "By",
+    "download": "Download",
+    "noReports": "No reports generated yet",
+    "reportSaved": "Report saved successfully",
+    "types": {
+      "inspection_report": "Inspection Report",
+      "nc_open_list": "Open NCs List",
+      "nc_history": "NC History",
+      "measurement_auto": "Measurement Report"
+    }
   }
 }

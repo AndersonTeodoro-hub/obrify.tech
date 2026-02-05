@@ -558,5 +558,40 @@
     "conformNo": "Não",
     "conformNA": "N/A",
     "conformOBS": "OBS"
+  },
+  "reportsPage": {
+    "title": "Relatórios",
+    "subtitle": "Central de relatórios e documentação",
+    "inspectionReports": "Relatórios de Inspeção",
+    "inspectionReportsDesc": "Gerar relatórios de inspeções concluídas",
+    "ncReports": "Relatórios de Não-Conformidades",
+    "openNCsBySite": "NCs Abertas por Obra",
+    "openNCsBySiteDesc": "Lista de todas as NCs abertas numa obra",
+    "ncHistory": "Histórico de NCs",
+    "ncHistoryDesc": "NCs fechadas num período específico",
+    "measurementAutos": "Autos de Medição",
+    "measurementAutosDesc": "Esta funcionalidade estará disponível numa versão futura",
+    "comingSoon": "Em desenvolvimento",
+    "generatedReports": "Histórico de Relatórios",
+    "generatedReportsDesc": "Relatórios gerados anteriormente",
+    "noCompletedInspections": "Não existem inspeções concluídas",
+    "generateReport": "Gerar Relatório",
+    "generateList": "Gerar Lista",
+    "selectSite": "Selecionar obra",
+    "selectPeriod": "Selecionar período",
+    "from": "De",
+    "to": "Até",
+    "reportType": "Tipo",
+    "generatedAt": "Gerado em",
+    "generatedBy": "Por",
+    "download": "Descarregar",
+    "noReports": "Ainda não foram gerados relatórios",
+    "reportSaved": "Relatório guardado com sucesso",
+    "types": {
+      "inspection_report": "Relatório de Inspeção",
+      "nc_open_list": "Lista NCs Abertas",
+      "nc_history": "Histórico de NCs",
+      "measurement_auto": "Auto de Medição"
+    }
   }
 }
