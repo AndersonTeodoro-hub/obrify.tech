@@ -399,6 +399,20 @@
       }
     }
   },
+  "alerts": {
+    "title": "Alertas",
+    "markAllRead": "Marcar lidas",
+    "viewAll": "Ver todos os alertas",
+    "noAlerts": "Sem alertas",
+    "noAlertsDesc": "Não tem alertas por ler",
+    "unread": "{{count}} não lido(s)",
+    "viewCapture": "Ver Captura",
+    "createNC": "Criar NC",
+    "markRead": "Marcar como lida",
+    "types": {
+      "ai_detection": "Deteção IA"
+    }
+  },
   "inspections": {
     "title": "Fiscalizações",
     "subtitle": "Checklists e auditorias técnicas",
