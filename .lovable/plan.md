@@ -1,150 +1,126 @@
 
-# Plano: Sistema de Convite de Membros para Organizacao
+# Plano: Sistema de Permissoes Baseado em Roles
 
 ## Resumo
-Implementar sistema completo de convites para membros, incluindo nova tab "Equipa" nas Settings, listagem de membros, modal de convite com seleccao de role e obras, tabela de convites pendentes, e pagina de aceitacao de convite.
+Implementar um hook `usePermissions()` que centraliza a logica de permissoes baseada nos roles existentes (admin, manager, inspector, contributor, viewer). O hook retorna flags booleanas para cada permissao, permitindo controlo de UI e validacao no frontend, complementado por RLS policies robustas no backend.
 
 ---
 
 ## Analise do Estado Actual
 
-### Tabela memberships:
-- Role como enum: admin, manager, viewer
-- Precisa adicionar: inspector, contributor
+### Roles existentes (membership_role enum):
+- admin, manager, viewer, inspector, contributor
 
-### Tabela profiles:
-- Tem: full_name, email, avatar_url, user_id
-- Pode ser usada para mostrar nomes dos membros
+### Funcoes de verificacao existentes:
+- `is_org_member(_user_id, _org_id)` - verifica se utilizador pertence a org
+- `has_org_role(_user_id, _org_id, _role)` - verifica role especifico
+- `can_access_site(_user_id, _site_id)` - verifica acesso a site
 
-### Settings.tsx:
-- Pagina simples com cards
-- Precisa de adicionar sistema de tabs para incluir "Equipa"
+### RLS Policies actuais:
+- Sites: Admin/Manager podem criar/editar, apenas Admin pode eliminar
+- Inspeccoes: Qualquer membro pode criar/editar
+- NCs: Qualquer membro pode gerir
+- Memberships: Apenas Admin pode gerir
 
 ---
 
-## Alteracoes de Base de Dados
+## Matriz de Permissoes por Role
 
-### 1. Expandir enum membership_role
-
-```sql
-ALTER TYPE public.membership_role ADD VALUE 'inspector';
-ALTER TYPE public.membership_role ADD VALUE 'contributor';
+```text
+Permissao             | Admin | Manager | Inspector | Contributor | Viewer
+----------------------|-------|---------|-----------|-------------|-------
+canCreateSite         |   ✓   |    ✓    |     ✗     |      ✗      |   ✗
+canEditSite           |   ✓   |    ✓    |     ✗     |      ✗      |   ✗
+canDeleteSite         |   ✓   |    ✗    |     ✗     |      ✗      |   ✗
+canCreateInspection   |   ✓   |    ✓    |     ✓     |      ✗      |   ✗
+canApproveInspection  |   ✓   |    ✓    |     ✗     |      ✗      |   ✗
+canCreateNC           |   ✓   |    ✓    |     ✓     |      ✗      |   ✗
+canCloseNC            |   ✓   |    ✓    |     ✗     |      ✗      |   ✗
+canInviteMembers      |   ✓   |    ✗    |     ✗     |      ✗      |   ✗
+canManageRoles        |   ✓   |    ✗    |     ✗     |      ✗      |   ✗
+canGenerateReports    |   ✓   |    ✓    |     ✓     |      ✗      |   ✗
+canExportData         |   ✓   |    ✓    |     ✗     |      ✗      |   ✗
+canUploadCaptures     |   ✓   |    ✓    |     ✓     |      ✓      |   ✗
+canComment            |   ✓   |    ✓    |     ✓     |      ✓      |   ✗
+canViewOnly           |   ✓   |    ✓    |     ✓     |      ✓      |   ✓
 ```
 
-### 2. Nova tabela: invitations
+---
 
-```sql
-CREATE TABLE public.invitations (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-  email text NOT NULL,
-  role text NOT NULL DEFAULT 'viewer',
-  site_ids uuid[] DEFAULT '{}',
-  invited_by uuid NOT NULL,
-  token uuid NOT NULL DEFAULT gen_random_uuid(),
-  status text NOT NULL DEFAULT 'pending',
-  expires_at timestamptz NOT NULL DEFAULT (now() + interval '7 days'),
-  created_at timestamptz NOT NULL DEFAULT now(),
-  accepted_at timestamptz,
+## Alteracoes Necessarias
+
+### 1. Novo Hook: usePermissions()
+
+Criar `src/hooks/use-permissions.tsx`:
+
+```typescript
+interface Permissions {
+  // Estado
+  loading: boolean;
+  role: string | null;
+  orgId: string | null;
   
-  CONSTRAINT valid_status CHECK (status IN ('pending', 'accepted', 'expired', 'cancelled'))
-);
-
--- Indice unico para token
-CREATE UNIQUE INDEX invitations_token_idx ON public.invitations(token);
-
--- Indice para email + org (evitar duplicados)
-CREATE UNIQUE INDEX invitations_email_org_pending_idx 
-  ON public.invitations(email, org_id) 
-  WHERE status = 'pending';
+  // Sites
+  canCreateSite: boolean;
+  canEditSite: boolean;
+  canDeleteSite: boolean;
+  
+  // Inspeccoes
+  canCreateInspection: boolean;
+  canApproveInspection: boolean;
+  
+  // NCs
+  canCreateNC: boolean;
+  canCloseNC: boolean;
+  
+  // Gestao
+  canInviteMembers: boolean;
+  canManageRoles: boolean;
+  
+  // Relatorios
+  canGenerateReports: boolean;
+  canExportData: boolean;
+  
+  // Capturas
+  canUploadCaptures: boolean;
+  canComment: boolean;
+  
+  // Helper
+  hasRole: (role: string) => boolean;
+  hasAnyRole: (...roles: string[]) => boolean;
+}
 ```
 
-### 3. RLS Policies para invitations
+### Logica de Mapeamento:
 
-```sql
-ALTER TABLE public.invitations ENABLE ROW LEVEL SECURITY;
-
--- Admins podem ver e gerir convites da sua org
-CREATE POLICY "Admins can manage invitations" ON public.invitations
-  FOR ALL USING (has_org_role(auth.uid(), org_id, 'admin'));
-
--- Utilizadores podem ver convites pelo token (para aceitar)
-CREATE POLICY "Anyone can view invitation by token" ON public.invitations
-  FOR SELECT USING (true);
-```
-
----
-
-## Novos Componentes
-
-### 1. TeamTab.tsx (src/components/settings/TeamTab.tsx)
-
-Tab principal com lista de membros e botao de convite:
-
-```text
-TeamTab.tsx
-├── Header: "Equipa" + Botao "Convidar Membro"
-├── Tabela de Membros:
-│   ├── Avatar + Nome
-│   ├── Email
-│   ├── Role (Badge colorido)
-│   ├── Data de entrada
-│   ├── Accoes (Editar role, Remover)
-├── Seccao "Convites Pendentes":
-│   ├── Email
-│   ├── Role
-│   ├── Enviado por
-│   ├── Expira em
-│   ├── Accoes (Reenviar, Cancelar)
-```
-
-### 2. InviteMemberModal.tsx (src/components/settings/InviteMemberModal.tsx)
-
-Modal para criar convite:
-
-```text
-InviteMemberModal.tsx
-├── Campo: Email do convidado
-├── Select: Role
-│   ├── Admin (acesso total)
-│   ├── Manager (gestao de obras)
-│   ├── Inspector (realizar inspeccoes)
-│   ├── Contributor (adicionar capturas)
-│   └── Viewer (apenas visualizar)
-├── Multi-select: Obras (visivel para roles nao-admin)
-│   └── Lista de sites da organizacao
-├── Botoes: Cancelar / Enviar Convite
-```
-
-### 3. AcceptInvite.tsx (src/pages/AcceptInvite.tsx)
-
-Pagina publica para aceitar convites:
-
-```text
-AcceptInvite.tsx
-├── Validar token da URL
-├── Se token valido e nao expirado:
-│   ├── Mostrar: Org name, Role
-│   ├── Se utilizador logado:
-│   │   └── Botao "Aceitar Convite"
-│   ├── Se nao logado:
-│   │   ├── Form de Login
-│   │   └── Link "Criar Conta"
-├── Se token invalido/expirado:
-│   └── Mensagem de erro
-```
-
----
-
-## Modificar Settings.tsx
-
-Transformar em layout com tabs:
-
-```text
-Settings.tsx (modificado)
-├── Tabs:
-│   ├── "Geral" (conteudo actual)
-│   └── "Equipa" (novo TeamTab)
+```typescript
+const ROLE_PERMISSIONS: Record<string, string[]> = {
+  admin: [
+    'canCreateSite', 'canEditSite', 'canDeleteSite',
+    'canCreateInspection', 'canApproveInspection',
+    'canCreateNC', 'canCloseNC',
+    'canInviteMembers', 'canManageRoles',
+    'canGenerateReports', 'canExportData',
+    'canUploadCaptures', 'canComment'
+  ],
+  manager: [
+    'canCreateSite', 'canEditSite',
+    'canCreateInspection', 'canApproveInspection',
+    'canCreateNC', 'canCloseNC',
+    'canGenerateReports', 'canExportData',
+    'canUploadCaptures', 'canComment'
+  ],
+  inspector: [
+    'canCreateInspection',
+    'canCreateNC',
+    'canGenerateReports',
+    'canUploadCaptures', 'canComment'
+  ],
+  contributor: [
+    'canUploadCaptures', 'canComment'
+  ],
+  viewer: []
+};
 ```
 
 ---
@@ -153,175 +129,249 @@ Settings.tsx (modificado)
 
 | Ficheiro | Accao |
 |----------|-------|
-| Migracao SQL | Expandir enum + criar tabela invitations |
-| src/components/settings/TeamTab.tsx | Criar |
-| src/components/settings/InviteMemberModal.tsx | Criar |
-| src/pages/AcceptInvite.tsx | Criar |
-| src/pages/app/Settings.tsx | Modificar (adicionar tabs) |
-| src/App.tsx | Adicionar rota /invite/:token |
+| src/hooks/use-permissions.tsx | Criar |
+| Migracao SQL | Actualizar RLS policies |
+| src/pages/app/Sites.tsx | Usar permissoes |
+| src/pages/app/Inspections.tsx | Usar permissoes |
+| src/pages/app/NonConformities.tsx | Usar permissoes |
+| src/components/settings/TeamTab.tsx | Ja usa isAdmin |
 | src/i18n/locales/pt.json | Adicionar traducoes |
 | src/i18n/locales/en.json | Adicionar traducoes |
 
 ---
 
-## Logica do TeamTab
+## Implementacao do Hook
 
-### Query de membros:
+### Estrutura do usePermissions:
 
-```typescript
-const { data: members } = await supabase
-  .from('memberships')
-  .select(`
-    id,
-    role,
-    created_at,
-    user_id,
-    profiles!inner(
-      full_name,
-      email,
-      avatar_url
-    )
-  `)
-  .eq('org_id', currentOrgId);
+```text
+usePermissions()
+├── Buscar membership do utilizador actual
+├── Calcular permissoes baseado no role
+├── Retornar objecto Permissions
+└── Cache com React Query para performance
 ```
 
-### Query de convites pendentes:
+### Codigo do Hook:
 
 ```typescript
-const { data: invitations } = await supabase
-  .from('invitations')
-  .select('*')
-  .eq('org_id', currentOrgId)
-  .eq('status', 'pending')
-  .order('created_at', { ascending: false });
-```
-
----
-
-## Logica do InviteMemberModal
-
-### Criar convite:
-
-```typescript
-const createInvite = async () => {
-  const { data, error } = await supabase
-    .from('invitations')
-    .insert({
-      org_id: currentOrgId,
-      email: inviteEmail,
-      role: selectedRole,
-      site_ids: selectedSites,
-      invited_by: user.id,
-    })
-    .select()
-    .single();
-
-  if (!error) {
-    // Gerar link: /invite/{token}
-    const inviteLink = `${window.location.origin}/invite/${data.token}`;
-    // Copiar para clipboard ou mostrar
-  }
-};
-```
-
----
-
-## Logica do AcceptInvite
-
-### Fluxo de aceitacao:
-
-```typescript
-// 1. Buscar convite pelo token
-const { data: invitation } = await supabase
-  .from('invitations')
-  .select('*, organizations(name)')
-  .eq('token', token)
-  .eq('status', 'pending')
-  .single();
-
-// 2. Verificar se nao expirou
-if (new Date(invitation.expires_at) < new Date()) {
-  // Convite expirado
-  await supabase
-    .from('invitations')
-    .update({ status: 'expired' })
-    .eq('id', invitation.id);
-  return;
-}
-
-// 3. Aceitar convite (se utilizador logado)
-const acceptInvite = async () => {
-  // Criar membership
-  await supabase.from('memberships').insert({
-    org_id: invitation.org_id,
-    user_id: user.id,
-    role: invitation.role,
+export function usePermissions() {
+  const { user } = useAuth();
+  
+  const { data: membership, isLoading } = useQuery({
+    queryKey: ['user-permissions', user?.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('memberships')
+        .select('org_id, role')
+        .eq('user_id', user?.id)
+        .limit(1)
+        .single();
+      return data;
+    },
+    enabled: !!user?.id,
+    staleTime: 5 * 60 * 1000, // Cache 5 minutos
   });
 
-  // Marcar convite como aceite
-  await supabase
-    .from('invitations')
-    .update({ status: 'accepted', accepted_at: new Date().toISOString() })
-    .eq('id', invitation.id);
+  const role = membership?.role || null;
+  const allowedPermissions = role ? ROLE_PERMISSIONS[role] || [] : [];
 
-  // Redirigir para dashboard
-  navigate('/app');
-};
+  const hasPermission = (permission: string) => 
+    allowedPermissions.includes(permission);
+
+  return {
+    loading: isLoading,
+    role,
+    orgId: membership?.org_id || null,
+    
+    // Permissoes
+    canCreateSite: hasPermission('canCreateSite'),
+    canEditSite: hasPermission('canEditSite'),
+    canDeleteSite: hasPermission('canDeleteSite'),
+    canCreateInspection: hasPermission('canCreateInspection'),
+    canApproveInspection: hasPermission('canApproveInspection'),
+    canCreateNC: hasPermission('canCreateNC'),
+    canCloseNC: hasPermission('canCloseNC'),
+    canInviteMembers: hasPermission('canInviteMembers'),
+    canManageRoles: hasPermission('canManageRoles'),
+    canGenerateReports: hasPermission('canGenerateReports'),
+    canExportData: hasPermission('canExportData'),
+    canUploadCaptures: hasPermission('canUploadCaptures'),
+    canComment: hasPermission('canComment'),
+    
+    // Helpers
+    hasRole: (r: string) => role === r,
+    hasAnyRole: (...roles: string[]) => roles.includes(role || ''),
+  };
+}
 ```
 
 ---
 
-## Estrutura Visual do TeamTab
+## Actualizacao de RLS Policies
 
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│  Equipa                                    [+ Convidar Membro]  │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  MEMBROS (3)                                                    │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │ 👤 Joao Silva       joao@email.com    Admin    12 Jan 25  │  │
-│  │ 👤 Maria Santos     maria@email.com   Manager  15 Jan 25  │  │
-│  │ 👤 Pedro Costa      pedro@email.com   Viewer   20 Jan 25  │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│                                                                 │
-│  CONVITES PENDENTES (1)                                         │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │ ana@email.com   Inspector   Expira: 5 dias  [📋][❌]      │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+### Nova funcao helper com multiplos roles:
+
+```sql
+CREATE OR REPLACE FUNCTION public.has_any_org_role(_user_id UUID, _org_id UUID, _roles membership_role[])
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.memberships
+    WHERE user_id = _user_id 
+    AND org_id = _org_id 
+    AND role = ANY(_roles)
+  )
+$$;
+```
+
+### Policies a actualizar:
+
+```sql
+-- Sites: Inspector/Contributor/Viewer nao podem criar
+DROP POLICY IF EXISTS "Admin/Manager can create sites" ON public.sites;
+CREATE POLICY "Admin/Manager can create sites" ON public.sites
+  FOR INSERT WITH CHECK (
+    has_any_org_role(auth.uid(), org_id, ARRAY['admin', 'manager']::membership_role[])
+  );
+
+-- Inspeccoes: Inspector pode criar, mas nao aprovar
+DROP POLICY IF EXISTS "Members can update inspections" ON public.inspections;
+CREATE POLICY "Members can update inspections" ON public.inspections
+  FOR UPDATE USING (
+    public.can_access_site(auth.uid(), site_id) AND
+    (
+      -- Aprovar (mudar status para completed) requer admin/manager
+      (status = 'completed') = false OR
+      has_any_org_role(
+        auth.uid(), 
+        (SELECT org_id FROM sites WHERE id = site_id),
+        ARRAY['admin', 'manager']::membership_role[]
+      )
+    )
+  );
+
+-- NCs: Apenas admin/manager podem fechar
+DROP POLICY IF EXISTS "Members can manage nonconformities" ON public.nonconformities;
+
+CREATE POLICY "Members can view nonconformities" ON public.nonconformities
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM public.inspections i 
+      WHERE i.id = inspection_id AND public.can_access_site(auth.uid(), i.site_id)
+    )
+  );
+
+CREATE POLICY "Inspector+ can create nonconformities" ON public.nonconformities
+  FOR INSERT WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.inspections i 
+      JOIN public.sites s ON s.id = i.site_id
+      WHERE i.id = inspection_id 
+      AND has_any_org_role(auth.uid(), s.org_id, ARRAY['admin', 'manager', 'inspector']::membership_role[])
+    )
+  );
+
+CREATE POLICY "Admin/Manager can close nonconformities" ON public.nonconformities
+  FOR UPDATE USING (
+    EXISTS (
+      SELECT 1 FROM public.inspections i 
+      JOIN public.sites s ON s.id = i.site_id
+      WHERE i.id = inspection_id 
+      AND (
+        -- Qualquer membro pode editar campos gerais
+        public.can_access_site(auth.uid(), i.site_id) AND
+        (
+          -- Mas fechar (status = closed) requer admin/manager
+          status <> 'closed' OR
+          has_any_org_role(auth.uid(), s.org_id, ARRAY['admin', 'manager']::membership_role[])
+        )
+      )
+    )
+  );
+
+-- Captures: Contributor+ pode criar
+DROP POLICY IF EXISTS "Members can create captures" ON public.captures;
+CREATE POLICY "Contributor+ can create captures" ON public.captures
+  FOR INSERT WITH CHECK (
+    auth.uid() = user_id AND
+    EXISTS (
+      SELECT 1 FROM public.capture_points cp 
+      JOIN public.areas a ON a.id = cp.area_id 
+      JOIN public.floors f ON f.id = a.floor_id 
+      JOIN public.sites s ON s.id = f.site_id 
+      WHERE cp.id = capture_point_id 
+      AND has_any_org_role(auth.uid(), s.org_id, ARRAY['admin', 'manager', 'inspector', 'contributor']::membership_role[])
+    )
+  );
 ```
 
 ---
 
-## Estrutura Visual do InviteMemberModal
+## Uso do Hook na UI
 
-```text
-┌─────────────────────────────────────────────────┐
-│  Convidar Membro                          [X]   │
-├─────────────────────────────────────────────────┤
-│                                                 │
-│  Email *                                        │
-│  ┌─────────────────────────────────────────┐    │
-│  │ email@exemplo.com                       │    │
-│  └─────────────────────────────────────────┘    │
-│                                                 │
-│  Funcao *                                       │
-│  ┌─────────────────────────────────────────┐    │
-│  │ Inspector                           ▼   │    │
-│  └─────────────────────────────────────────┘    │
-│                                                 │
-│  Obras com Acesso (para roles nao-admin)        │
-│  ┌─────────────────────────────────────────┐    │
-│  │ ☑ Edificio Centro                       │    │
-│  │ ☐ Obra Norte                            │    │
-│  │ ☑ Projeto Sul                           │    │
-│  └─────────────────────────────────────────┘    │
-│                                                 │
-├─────────────────────────────────────────────────┤
-│           [Cancelar]    [Enviar Convite]        │
-└─────────────────────────────────────────────────┘
+### Exemplo em Sites.tsx:
+
+```typescript
+import { usePermissions } from '@/hooks/use-permissions';
+
+export default function Sites() {
+  const { canCreateSite, canEditSite, canDeleteSite } = usePermissions();
+  
+  return (
+    <div>
+      {/* Botao de criar so aparece se tem permissao */}
+      {canCreateSite && (
+        <Button onClick={() => setIsCreateOpen(true)}>
+          <Plus className="w-4 h-4 mr-2" />
+          {t('sites.create')}
+        </Button>
+      )}
+      
+      {/* Dropdown actions baseado em permissoes */}
+      <DropdownMenu>
+        <DropdownMenuContent>
+          {canEditSite && (
+            <DropdownMenuItem>
+              <Pencil className="w-4 h-4 mr-2" />
+              {t('common.edit')}
+            </DropdownMenuItem>
+          )}
+          {canDeleteSite && (
+            <DropdownMenuItem className="text-destructive">
+              <Trash2 className="w-4 h-4 mr-2" />
+              {t('common.delete')}
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+```
+
+### Exemplo em NonConformities.tsx:
+
+```typescript
+const { canCreateNC, canCloseNC } = usePermissions();
+
+// Botao de criar NC
+{canCreateNC && (
+  <Button onClick={handleCreateNC}>
+    {t('ncs.create')}
+  </Button>
+)}
+
+// Botao de fechar NC (no detail sheet)
+{canCloseNC && nc.status !== 'closed' && (
+  <Button onClick={handleCloseNC}>
+    {t('ncs.close')}
+  </Button>
+)}
 ```
 
 ---
@@ -331,42 +381,22 @@ const acceptInvite = async () => {
 ### Portugues (pt.json):
 
 ```json
-"team": {
-  "title": "Equipa",
-  "subtitle": "Gerir membros da organizacao",
-  "members": "Membros",
-  "pendingInvites": "Convites Pendentes",
-  "inviteMember": "Convidar Membro",
-  "noMembers": "Sem membros",
-  "noInvites": "Sem convites pendentes",
-  "email": "Email",
-  "role": "Funcao",
-  "joinedAt": "Entrou em",
-  "expiresIn": "Expira em",
-  "days": "dias",
-  "copyLink": "Copiar Link",
-  "cancelInvite": "Cancelar Convite",
-  "resendInvite": "Reenviar",
-  "removeFromOrg": "Remover da Organizacao",
-  "changeRole": "Alterar Funcao",
-  "sites": "Obras com Acesso",
-  "allSites": "Todas as obras",
-  "selectSites": "Seleccionar obras",
-  "inviteSent": "Convite enviado!",
-  "inviteLink": "Link de convite",
-  "roles": {
-    "admin": "Administrador",
-    "manager": "Gestor",
-    "inspector": "Fiscalizador",
-    "contributor": "Colaborador",
-    "viewer": "Visualizador"
-  },
-  "roleDescriptions": {
-    "admin": "Acesso total, gerir membros e configuracoes",
-    "manager": "Gerir obras, inspeccoes e equipas",
-    "inspector": "Realizar inspeccoes e criar NCs",
-    "contributor": "Adicionar capturas e comentarios",
-    "viewer": "Apenas visualizar informacoes"
+"permissions": {
+  "noPermission": "Sem permissao",
+  "noPermissionDesc": "Nao tem permissao para realizar esta accao",
+  "contactAdmin": "Contacte o administrador da organizacao",
+  "actions": {
+    "createSite": "Criar obra",
+    "editSite": "Editar obra",
+    "deleteSite": "Eliminar obra",
+    "createInspection": "Criar inspeccao",
+    "approveInspection": "Aprovar inspeccao",
+    "createNC": "Criar nao conformidade",
+    "closeNC": "Fechar nao conformidade",
+    "inviteMembers": "Convidar membros",
+    "manageRoles": "Gerir funcoes",
+    "generateReports": "Gerar relatorios",
+    "exportData": "Exportar dados"
   }
 }
 ```
@@ -374,108 +404,122 @@ const acceptInvite = async () => {
 ### Ingles (en.json):
 
 ```json
-"team": {
-  "title": "Team",
-  "subtitle": "Manage organization members",
-  "members": "Members",
-  "pendingInvites": "Pending Invitations",
-  "inviteMember": "Invite Member",
-  "noMembers": "No members",
-  "noInvites": "No pending invitations",
-  "email": "Email",
-  "role": "Role",
-  "joinedAt": "Joined",
-  "expiresIn": "Expires in",
-  "days": "days",
-  "copyLink": "Copy Link",
-  "cancelInvite": "Cancel Invitation",
-  "resendInvite": "Resend",
-  "removeFromOrg": "Remove from Organization",
-  "changeRole": "Change Role",
-  "sites": "Site Access",
-  "allSites": "All sites",
-  "selectSites": "Select sites",
-  "inviteSent": "Invitation sent!",
-  "inviteLink": "Invitation link",
-  "roles": {
-    "admin": "Administrator",
-    "manager": "Manager",
-    "inspector": "Inspector",
-    "contributor": "Contributor",
-    "viewer": "Viewer"
-  },
-  "roleDescriptions": {
-    "admin": "Full access, manage members and settings",
-    "manager": "Manage sites, inspections and teams",
-    "inspector": "Perform inspections and create NCs",
-    "contributor": "Add captures and comments",
-    "viewer": "View only"
+"permissions": {
+  "noPermission": "No permission",
+  "noPermissionDesc": "You do not have permission to perform this action",
+  "contactAdmin": "Contact the organization administrator",
+  "actions": {
+    "createSite": "Create site",
+    "editSite": "Edit site",
+    "deleteSite": "Delete site",
+    "createInspection": "Create inspection",
+    "approveInspection": "Approve inspection",
+    "createNC": "Create non-conformity",
+    "closeNC": "Close non-conformity",
+    "inviteMembers": "Invite members",
+    "manageRoles": "Manage roles",
+    "generateReports": "Generate reports",
+    "exportData": "Export data"
   }
 }
 ```
 
 ---
 
-## Rota AcceptInvite
+## Componente PermissionGate (Opcional)
 
-Adicionar ao App.tsx:
+Componente auxiliar para esconder/desactivar UI:
 
-```tsx
-import AcceptInvite from './pages/AcceptInvite';
+```typescript
+interface PermissionGateProps {
+  permission: keyof Permissions;
+  children: React.ReactNode;
+  fallback?: React.ReactNode;
+  mode?: 'hide' | 'disable';
+}
 
-// Na configuracao de rotas (fora do ProtectedRoute)
-<Route path="/invite/:token" element={<AcceptInvite />} />
+export function PermissionGate({ 
+  permission, 
+  children, 
+  fallback = null,
+  mode = 'hide' 
+}: PermissionGateProps) {
+  const permissions = usePermissions();
+  const hasPermission = permissions[permission];
+
+  if (mode === 'disable') {
+    return React.cloneElement(children as React.ReactElement, {
+      disabled: !hasPermission,
+      title: !hasPermission ? t('permissions.noPermission') : undefined
+    });
+  }
+
+  return hasPermission ? <>{children}</> : <>{fallback}</>;
+}
+
+// Uso:
+<PermissionGate permission="canCreateSite">
+  <Button>Criar Obra</Button>
+</PermissionGate>
 ```
 
 ---
 
-## Fluxo de Convite
+## Fluxo de Verificacao
 
 ```text
-1. Admin clica "Convidar Membro"
+1. Utilizador acede a pagina
        │
        ▼
-2. Preenche email, role, e obras (se aplicavel)
+2. usePermissions() busca membership
        │
        ▼
-3. Sistema cria entrada em invitations com token unico
+3. Calcula permissoes baseado no role
        │
        ▼
-4. Mostra link de convite (copiar para partilhar)
+4. UI renderiza condicionalmente
+   (botoes, menus, accoes)
        │
        ▼
-5. Convidado acede ao link /invite/{token}
+5. Se utilizador tenta accao:
+   - Frontend: Verifica permissao
+   - Backend: RLS policy valida role
        │
        ▼
-6. Se ja tem conta: faz login e aceita
-   Se nao tem: cria conta e aceita
-       │
-       ▼
-7. Membership criada, convite marcado como aceite
-       │
-       ▼
-8. Utilizador redirigido para dashboard
+6. Accao permitida ou bloqueada
 ```
-
----
-
-## Consideracoes Tecnicas
-
-1. **Novos Roles**: Adicionar "inspector" e "contributor" ao enum membership_role
-2. **Token Seguro**: UUID aleatorio para cada convite
-3. **Expiracao**: Convites expiram apos 7 dias por defeito
-4. **Duplicados**: Indice unico impede convites duplicados pendentes
-5. **Email Opcional**: Como email nao esta configurado, mostrar apenas o link
-6. **Site Access**: Campo site_ids permite restricao de acesso por obra (futuro)
 
 ---
 
 ## Resumo das Alteracoes
 
-1. **Migracao SQL**: Expandir enum + criar tabela invitations com RLS
-2. **TeamTab.tsx**: Lista de membros e convites pendentes
-3. **InviteMemberModal.tsx**: Formulario de convite
-4. **AcceptInvite.tsx**: Pagina publica para aceitar convites
-5. **Settings.tsx**: Adicionar sistema de tabs
-6. **App.tsx**: Adicionar rota /invite/:token
-7. **Traducoes**: Novas chaves para PT e EN
+1. **Criar hook usePermissions()**: Centraliza logica de permissoes
+2. **Migracao SQL**: Criar funcao has_any_org_role e actualizar policies
+3. **Sites.tsx**: Esconder botoes baseado em permissoes
+4. **Inspections.tsx**: Condicionar criacao e aprovacao
+5. **NonConformities.tsx**: Condicionar criacao e fecho
+6. **TeamTab.tsx**: Ja usa isAdmin (manter)
+7. **Traducoes**: Novas chaves para mensagens de permissao
+
+---
+
+## Consideracoes de Seguranca
+
+1. **Frontend**: Hook apenas para UX (esconder/desactivar)
+2. **Backend**: RLS policies sao a verdadeira barreira de seguranca
+3. **Cache**: Permissoes cached por 5 minutos para performance
+4. **Refresh**: Invalida cache quando role muda (raro)
+5. **Fallback**: Se erro ao buscar role, assume viewer (minimo privilegio)
+
+---
+
+## Ordem de Implementacao
+
+1. Criar funcao SQL `has_any_org_role`
+2. Actualizar RLS policies existentes
+3. Criar hook `usePermissions()`
+4. Integrar em Sites.tsx
+5. Integrar em Inspections.tsx
+6. Integrar em NonConformities.tsx
+7. Adicionar traducoes
+8. Testar fluxo completo
