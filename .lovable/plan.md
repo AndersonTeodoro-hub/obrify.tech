@@ -1,211 +1,259 @@
 
-# Plano: Upload Avancado para Pagina de Capturas
+# Plano: CaptureViewer Avancado com Zoom e Visualizador 360
 
 ## Resumo
-Reescrever o modal de nova captura com suporte a multiplos ficheiros, drag-and-drop, barra de progresso, upload real para o bucket "captures" e extracao automatica de metadata EXIF.
+Reescrever o componente CaptureViewer com funcionalidades avancadas: zoom com scroll/gestos touch, painel lateral de informacoes, accoes (download, eliminar, criar NC), visualizador panoramico para imagens 360 e navegacao por teclado.
 
 ---
 
 ## Estado Actual
 
 ### O que existe:
-- Modal `NewCaptureModal.tsx` com selecao hierarquica (Site > Floor > Area > Point)
-- Upload de ficheiro unico com preview
-- Tabela `captures` com campos: `file_path`, `size_bytes`, `mime_type`, `captured_at`
-- Storage bucket "captures" (privado) com policies RLS configuradas
-- Component `Progress` do shadcn/ui disponivel
+- Componente `CaptureViewer.tsx` basico com:
+  - Dialog fullscreen com overlay escuro
+  - Navegacao com setas (botoes e teclado)
+  - Imagem estatica (placeholder Unsplash)
+  - Info overlay no fundo com data, localizacao, autor
+  - Botao de download (sem funcao)
+  - Contador de posicao
 
 ### Limitacoes actuais:
-- Apenas 1 ficheiro de cada vez
-- Sem drag-and-drop real
-- Sem upload para Storage (apenas placeholder)
-- Sem extracao de metadata EXIF
-- Sem barra de progresso
+- Sem zoom (scroll ou gestos)
+- Sem painel lateral estruturado
+- Sem accoes funcionais (download, eliminar, criar NC)
+- Sem suporte para 360
+- Usa imagens placeholder em vez de Storage
 
 ---
 
-## Componentes a Criar/Modificar
+## Arquitectura do Novo Componente
 
-### 1. Novo Utilitario: `src/lib/exif-parser.ts`
-Funcao para extrair metadata EXIF de imagens:
-- Data de captura (DateTimeOriginal)
-- Coordenadas GPS (se disponiveis)
-- Modelo da camera
-- Orientacao
-
-Utilizara a API nativa do browser (sem dependencias externas):
-- FileReader para ler bytes
-- Parsing manual dos tags EXIF
-- Conversao de coordenadas GPS para decimal
-
-### 2. Reescrever: `src/components/captures/NewCaptureModal.tsx`
-
-**Novo Estado:**
 ```text
-files: FileWithPreview[]     // Lista de ficheiros com previews
-uploadProgress: Map<string, number>  // Progresso por ficheiro
-isUploading: boolean
-currentUploadIndex: number
+CaptureViewer (container principal)
+├── Toolbar (topo)
+│   ├── Botao Fechar (X)
+│   ├── Contador (1 de N)
+│   └── Accoes (Download, Eliminar, Criar NC)
+│
+├── Content Area (centro)
+│   ├── Navegacao Esquerda (seta)
+│   ├── Media Viewer
+│   │   ├── ImageViewer (fotos com zoom)
+│   │   ├── VideoPlayer (videos)
+│   │   └── PanoramaViewer (360)
+│   └── Navegacao Direita (seta)
+│
+└── Info Panel (lateral direita, colapsavel)
+    ├── Thumbnail
+    ├── Metadados (data, tipo, tamanho)
+    ├── Localizacao (obra/piso/area/ponto)
+    ├── Autor (avatar, nome)
+    └── Notas
 ```
 
-**Interface FileWithPreview:**
+---
+
+## Componentes a Criar
+
+### 1. Componente Principal: `CaptureViewer.tsx` (reescrever)
+
+**Props:**
 ```text
-{
-  file: File
-  id: string (uuid local)
-  preview: string (URL.createObjectURL)
-  exifData: ExifData | null
-  status: 'pending' | 'uploading' | 'success' | 'error'
-  progress: number
-  error?: string
-}
+capture: CaptureWithDetails | null
+captures: CaptureWithDetails[]
+open: boolean
+onOpenChange: (open: boolean) => void
+onNavigate: (capture: CaptureWithDetails) => void
+onDelete?: (capture: CaptureWithDetails) => void
+onCreateNC?: (capture: CaptureWithDetails) => void
+```
+
+**Estado:**
+```text
+zoom: number (1 = 100%)
+position: { x: number, y: number }
+isPanning: boolean
+showInfoPanel: boolean
+isDeleting: boolean
 ```
 
 **Funcionalidades:**
-1. Drag-and-drop com visual feedback
-2. Limite de 10 ficheiros por vez
-3. Preview em grid de cada ficheiro
-4. Botao X para remover ficheiro da lista
-5. Extracao EXIF automatica ao adicionar foto
-6. Barra de progresso global e por ficheiro
-7. Upload sequencial para Storage
-8. Criar registo na tabela captures apos upload
+- Layout com painel lateral toggleable
+- Toolbar no topo com accoes
+- Area central para media
+- Gestao de zoom e pan
 
-### 3. Componente Auxiliar: `src/components/captures/FilePreviewGrid.tsx`
-Grid de previews dos ficheiros selecionados:
-- Thumbnail com aspect-ratio
-- Badge com status (pendente/a carregar/sucesso/erro)
-- Barra de progresso individual
-- Botao remover
-- Icone diferente para video vs foto vs 360
+### 2. Subcomponente: `ImageViewerWithZoom.tsx`
 
-### 4. Componente Auxiliar: `src/components/captures/DropZone.tsx`
-Area de drag-and-drop reutilizavel:
-- Visual feedback ao arrastar
-- Click para selecionar ficheiros
-- Validacao de tipo de ficheiro
-- Contagem de ficheiros
+Visualizador de imagens com zoom:
+- Zoom com scroll do rato (wheel event)
+- Zoom com pinch gesture (touch events)
+- Pan/arrastar quando em zoom
+- Double-click para reset zoom
+- Limites de zoom: 0.5x a 5x
 
----
-
-## Fluxo de Upload
-
+**Implementacao:**
 ```text
-1. User arrasta/seleciona ficheiros
-   ↓
-2. Para cada ficheiro:
-   - Gerar preview URL
-   - Extrair EXIF (se imagem)
-   - Adicionar a lista
-   ↓
-3. User preenche campos obrigatorios:
-   - Selecionar Obra
-   - Selecionar Piso
-   - Selecionar Area
-   - Selecionar Ponto (auto-criado se nao existir)
-   ↓
-4. User clica "Carregar"
-   ↓
-5. Para cada ficheiro (sequencial):
-   a. Gerar path unico: captures/{org_id}/{site_id}/{point_id}/{timestamp}_{filename}
-   b. Upload para Supabase Storage com onUploadProgress
-   c. Actualizar progresso na UI
-   d. Inserir registo em captures com metadata
-   e. Marcar como sucesso ou erro
-   ↓
-6. Mostrar resumo final
-   ↓
-7. Fechar modal e refrescar lista
+- CSS transform: scale() translate()
+- onWheel para zoom
+- onTouchStart/Move/End para gestos
+- onMouseDown/Move/Up para pan
+- Cursor: grab/grabbing
+```
+
+### 3. Subcomponente: `PanoramaViewer.tsx`
+
+Visualizador 360 com biblioteca leve:
+
+**Opcao escolhida: Photo Sphere Viewer (leve, React-friendly)**
+- Biblioteca: @photo-sphere-viewer/core
+- Licenca: MIT
+- Tamanho: ~50KB gzipped
+- Suporte: touch, VR, hotspots
+
+**Funcionalidades:**
+- Navegacao com drag do rato
+- Navegacao touch
+- Zoom in/out
+- Autorotacao opcional
+- Fullscreen dentro do viewer
+
+### 4. Subcomponente: `CaptureInfoPanel.tsx`
+
+Painel lateral com informacoes detalhadas:
+- Toggle button para mostrar/esconder
+- Scroll interno para conteudo longo
+- Seccoes colapsaveis
+
+**Conteudo:**
+```text
+- Tipo de captura (icone + label)
+- Data de captura
+- Tamanho do ficheiro
+- Dimensoes (se imagem)
+- Localizacao completa
+- Autor com avatar
+- Notas (se existirem)
+- Coordenadas GPS (se disponiveis)
 ```
 
 ---
 
-## Estrutura de Paths no Storage
+## Accoes a Implementar
 
+### 1. Download
+- Obter signed URL do Storage
+- Criar link temporario e trigger download
+- Feedback com toast
+
+### 2. Eliminar
+- Confirmacao com AlertDialog
+- Eliminar do Storage
+- Eliminar registo da BD
+- Fechar viewer e refrescar lista
+- Feedback com toast
+
+### 3. Criar Nao-Conformidade (NC)
+- Abrir modal/sheet com formulario
+- Campos: titulo, descricao, severidade
+- Associar capture como evidencia
+- Guardar em tabela nonconformities
+- Requer inspection_id - pode ser opcional ou criar "avulsa"
+
+---
+
+## Gestao de Zoom
+
+### Zoom com Scroll (Desktop)
 ```text
-captures/
-  {org_id}/
-    {site_id}/
-      {capture_point_id}/
-        {timestamp}_{uuid}_{original_filename}
+onWheel(e):
+  - e.preventDefault()
+  - deltaY < 0 → zoom in
+  - deltaY > 0 → zoom out
+  - Calcular novo zoom com limites
+  - Actualizar posicao para zoom centrado no cursor
 ```
 
-Exemplo:
+### Zoom com Pinch (Touch)
 ```text
-captures/abc123/site456/point789/1738702800000_uuid_foto_fachada.jpg
+onTouchStart:
+  - Se 2 dedos, guardar distancia inicial
+
+onTouchMove:
+  - Se 2 dedos, calcular nova distancia
+  - Ratio = novaDistancia / distanciaInicial
+  - Aplicar ao zoom
+
+onTouchEnd:
+  - Reset estado de pinch
+```
+
+### Pan/Arrastar
+```text
+onMouseDown / onTouchStart (1 dedo):
+  - isPanning = true
+  - Guardar posicao inicial
+
+onMouseMove / onTouchMove:
+  - Se isPanning, calcular delta
+  - Actualizar position { x, y }
+
+onMouseUp / onTouchEnd:
+  - isPanning = false
 ```
 
 ---
 
-## Metadata EXIF a Extrair
+## Keyboard Shortcuts
 
-Para imagens JPEG:
-- `DateTimeOriginal` → captured_at
-- `GPSLatitude` + `GPSLatitudeRef` → latitude
-- `GPSLongitude` + `GPSLongitudeRef` → longitude
-- `Make` + `Model` → device info (para logs)
-
-Para video: usar `lastModified` do File como fallback
+```text
+ESC        → Fechar viewer
+ArrowLeft  → Captura anterior
+ArrowRight → Proxima captura
++/=        → Zoom in
+-          → Zoom out
+0          → Reset zoom
+I          → Toggle info panel
+D          → Download (se implementado)
+Delete     → Eliminar (com confirmacao)
+```
 
 ---
 
-## Campos da Tabela captures
+## Dependencia Externa
 
+**Photo Sphere Viewer** para visualizacao 360:
 ```text
-id: uuid (auto)
-capture_point_id: uuid (obrigatorio)
-user_id: uuid (auth.uid())
-file_path: string (path no storage)
-source_type: enum (phone_manual por defeito)
-processing_status: enum (PENDING)
-captured_at: timestamp (EXIF ou now())
-size_bytes: number (file.size)
-mime_type: string (file.type)
+npm install @photo-sphere-viewer/core
 ```
+
+Alternativa sem dependencias:
+- Usar CSS 3D transforms
+- Mais limitado mas zero deps
+
+Recomendacao: Usar Photo Sphere Viewer pela qualidade e features.
 
 ---
 
 ## Traducoes a Adicionar
 
-Novas chaves para `pt.json` e `en.json`:
-
 ```text
-captures.dropFiles: "Arraste ficheiros ou clique para selecionar"
-captures.maxFiles: "Maximo de 10 ficheiros por vez"
-captures.filesSelected: "{{count}} ficheiro(s) selecionado(s)"
-captures.uploadProgress: "A carregar {{current}} de {{total}}"
-captures.extractingExif: "A extrair metadata..."
-captures.uploadComplete: "Upload concluido com sucesso"
-captures.uploadError: "Erro no upload de {{count}} ficheiro(s)"
-captures.removeFile: "Remover ficheiro"
-captures.retryUpload: "Tentar novamente"
-captures.gpsExtracted: "Coordenadas GPS extraidas"
-captures.dateExtracted: "Data de captura: {{date}}"
+captures.viewer.zoomIn: "Ampliar"
+captures.viewer.zoomOut: "Reduzir"
+captures.viewer.resetZoom: "Repor zoom"
+captures.viewer.showInfo: "Mostrar informacoes"
+captures.viewer.hideInfo: "Esconder informacoes"
+captures.viewer.deleteCapture: "Eliminar captura"
+captures.viewer.deleteConfirm: "Tem a certeza que deseja eliminar esta captura?"
+captures.viewer.deleteSuccess: "Captura eliminada com sucesso"
+captures.viewer.createNC: "Criar Nao-Conformidade"
+captures.viewer.downloadStarted: "Download iniciado"
+captures.viewer.fileSize: "Tamanho"
+captures.viewer.dimensions: "Dimensoes"
+captures.viewer.gpsCoordinates: "Coordenadas GPS"
+captures.viewer.captureNotes: "Notas"
+captures.viewer.noNotes: "Sem notas"
 ```
-
----
-
-## Consideracoes Tecnicas
-
-1. **RLS Policies**: O bucket "captures" ja tem policies configuradas para INSERT (users autenticados)
-
-2. **Signed URLs**: O bucket e privado, precisaremos de signed URLs para exibir (a implementar depois)
-
-3. **Limite de Tamanho**: Supabase tem limite de 50MB por ficheiro por defeito
-
-4. **Performance**: Upload sequencial para evitar timeout e permitir tracking de progresso
-
-5. **Cleanup**: Revogar URLs de preview ao fechar modal para libertar memoria
-
-6. **Fallbacks**: Se EXIF falhar, usar data actual e sem coordenadas
-
----
-
-## Simplificacao: Sem Ponto Obrigatorio
-
-O requisito menciona apenas Obra, Piso, Area como obrigatorios. Vou simplificar:
-- Se o user selecionar Area mas nao existirem pontos, criar um ponto automatico "Default"
-- Ou tornar o ponto opcional e criar automaticamente
 
 ---
 
@@ -213,19 +261,69 @@ O requisito menciona apenas Obra, Piso, Area como obrigatorios. Vou simplificar:
 
 | Ficheiro | Accao |
 |----------|-------|
-| src/lib/exif-parser.ts | Criar |
-| src/components/captures/DropZone.tsx | Criar |
-| src/components/captures/FilePreviewGrid.tsx | Criar |
-| src/components/captures/NewCaptureModal.tsx | Reescrever |
-| src/types/captures.ts | Adicionar tipos |
-| src/i18n/locales/en.json | Adicionar chaves |
-| src/i18n/locales/pt.json | Adicionar chaves |
+| src/components/captures/CaptureViewer.tsx | Reescrever completamente |
+| src/components/captures/ImageViewerWithZoom.tsx | Criar |
+| src/components/captures/PanoramaViewer.tsx | Criar |
+| src/components/captures/CaptureInfoPanel.tsx | Criar |
+| src/components/captures/CreateNCModal.tsx | Criar |
+| src/types/captures.ts | Adicionar tipos para zoom |
+| src/i18n/locales/en.json | Adicionar chaves viewer |
+| src/i18n/locales/pt.json | Adicionar chaves viewer |
+| package.json | Adicionar @photo-sphere-viewer/core |
+
+---
+
+## Consideracoes Tecnicas
+
+1. **Storage URLs**: O bucket "captures" e privado. Precisamos gerar signed URLs para exibir e download. Ate estar implementado, usar placeholder.
+
+2. **Performance**: Carregar imagens grandes pode ser lento. Considerar:
+   - Loading state com skeleton
+   - Progressive loading se possivel
+
+3. **Touch Events**: Prevenir scroll da pagina durante pinch/pan no mobile.
+
+4. **Accessibility**: 
+   - Focus trap dentro do dialog
+   - aria-labels nos botoes
+   - Keyboard navigation
+
+5. **Memoria**: Limpar event listeners no cleanup do useEffect.
+
+6. **NC sem Inspection**: A tabela nonconformities requer inspection_id. Opcoes:
+   - Criar modal que pede para selecionar inspection
+   - Ou criar inspection "avulsa" automaticamente
+   - Ou tornar optional no futuro (alteracao BD)
+
+---
+
+## Fluxo de Utilizacao
+
+```text
+1. User clica numa captura na grid
+   ↓
+2. CaptureViewer abre em fullscreen
+   ↓
+3. User pode:
+   a. Navegar entre capturas (setas/teclado)
+   b. Zoom in/out (scroll/pinch/botoes)
+   c. Pan para ver detalhes (arrastar)
+   d. Ver painel de info (toggle)
+   e. Download do ficheiro
+   f. Eliminar captura
+   g. Criar NC a partir da captura
+   ↓
+4. Se 360, viewer panoramico permite rotacao livre
+   ↓
+5. ESC ou X fecha o viewer
+```
 
 ---
 
 ## Proximos Passos Apos Implementacao
 
-1. Criar Edge Function para gerar signed URLs ao exibir capturas
-2. Implementar geracao automatica de thumbnails
-3. Adicionar validacao de tipos de ficheiro mais robusta
-4. Integrar com analise IA automatica apos upload
+1. Criar Edge Function para signed URLs do Storage
+2. Implementar integracao real com Storage para download
+3. Adicionar annotations/marcacoes sobre as imagens
+4. Implementar comparacao side-by-side de capturas
+5. Adicionar timeline de capturas do mesmo ponto
