@@ -80,6 +80,7 @@
     "sites": "Sites",
     "captures": "Captures",
     "inspections": "Inspections",
+    "nonconformities": "Non-Conformities",
     "reports": "Reports",
     "documents": "Documents",
     "drone": "Drones",
@@ -127,7 +128,58 @@
     "correctiveAction": "Corrective Action",
     "correctiveActionPlaceholder": "Describe the required corrective action...",
     "create": "Register NC",
-    "created": "Non-conformity registered successfully"
+    "created": "Non-conformity registered successfully",
+    "status": {
+      "open": "Open",
+      "in_progress": "In Progress",
+      "resolved": "To Verify",
+      "closed": "Closed"
+    },
+    "detail": {
+      "site": "Site",
+      "inspection": "Inspection",
+      "createdBy": "Created by",
+      "createdAt": "Created at",
+      "description": "Problem Description",
+      "standardViolated": "Standard Violated",
+      "dueDate": "Due Date",
+      "responsible": "Responsible",
+      "correctiveAction": "Corrective Action",
+      "evidence": "Evidence Photos",
+      "noEvidence": "No evidence photos",
+      "history": "History",
+      "changeStatus": "Change Status",
+      "statusChanged": "Status changed successfully",
+      "closeNC": "Close NC",
+      "closingPhotoRequired": "To close this NC, attach a photo proving the resolution",
+      "closingNotes": "Closing Notes",
+      "closingNotesPlaceholder": "Describe how it was resolved...",
+      "selectPhoto": "Select proof photo",
+      "ncClosed": "Non-conformity closed successfully"
+    }
+  },
+  "ncPage": {
+    "title": "Non-Conformities",
+    "subtitle": "Manage all registered non-conformities",
+    "exportExcel": "Export Excel",
+    "filterBySite": "Filter by site",
+    "filterBySeverity": "Filter by severity",
+    "filterByStatus": "Filter by status",
+    "allSites": "All sites",
+    "allSeverities": "All severities",
+    "allStatuses": "All statuses",
+    "clearFilters": "Clear filters",
+    "noResults": "No non-conformities found",
+    "noResultsDesc": "There are no NCs with the applied filters",
+    "columns": {
+      "id": "ID",
+      "site": "Site",
+      "description": "Description",
+      "severity": "Severity",
+      "status": "Status",
+      "dueDate": "Due Date",
+      "responsible": "Responsible"
+    }
   },
   "organizations": {
     "title": "Organizations",

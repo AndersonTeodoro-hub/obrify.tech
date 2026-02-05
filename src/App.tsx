@@ -25,6 +25,7 @@ import Drone from "./pages/app/Drone";
 import Settings from "./pages/app/Settings";
 import InspectionTemplates from "./pages/app/InspectionTemplates";
 import InspectionDetail from "./pages/app/InspectionDetail";
+import NonConformities from "./pages/app/NonConformities";
 
 const queryClient = new QueryClient();
 
@@ -54,6 +55,7 @@ const App = () => (
                 <Route path="captures" element={<Captures />} />
                 <Route path="inspections" element={<Inspections />} />
                 <Route path="inspections/:inspectionId" element={<InspectionDetail />} />
+                <Route path="nonconformities" element={<NonConformities />} />
                 <Route path="reports" element={<Reports />} />
                 <Route path="drone" element={<Drone />} />
                 <Route path="settings" element={<Settings />} />
