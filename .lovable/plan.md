@@ -1,126 +1,143 @@
 
-# Plano: Adicionar Analise IA ao CaptureViewer
+# Plano: Sistema de Alertas Baseado em Analises IA
 
 ## Resumo
-Adicionar funcionalidade de analise de imagens com IA ao visualizador de capturas, integrando com a Edge Function `ai-image-analysis` ja existente. Inclui botao de analise com dropdown de opcoes, painel de resultados, e criacao de NCs a partir de deteccoes.
+Implementar um sistema de alertas automaticos que notifica utilizadores quando analises IA detectam problemas criticos. Inclui nova tabela de alertas, componente AlertBell no header, dropdown de alertas, e integracao com a Edge Function existente.
 
 ---
 
 ## Analise do Estado Actual
 
-### CaptureViewer.tsx:
-- Ja tem toolbar com accoes (info, download, NC, delete)
-- Ja tem CaptureInfoPanel lateral (w-80)
-- Ja integra com CreateNCModal
-- Ja carrega imagens via signed URL
-
 ### Edge Function ai-image-analysis:
-- Aceita `{ capture_id, analysis_type: 'defects' | 'rebar' | 'general' }`
-- Retorna `{ detections, overall_assessment, recommendations, results_saved }`
-- Guarda resultados em `ai_analysis_results`
+- Ja guarda deteccoes em `ai_analysis_results`
+- Retorna severidade: critical, major, minor, observation
+- Local ideal para criar alertas automaticos
 
-### Tabela captures:
-- Nao tem flag `ai_analyzed` - precisa de adicionar
+### AppHeader.tsx:
+- Header simples com breadcrumbs e toggles
+- Espaco disponivel para AlertBell junto aos toggles
 
-### Tabela ai_analysis_results:
-- Ja tem todos os campos necessarios
-- Relaciona com capture_id
+### Tabelas existentes:
+- `ai_analysis_results` - resultados de analise
+- `captures` - capturas com file_path
 
 ---
 
 ## Alteracoes Necessarias
 
-### 1. Migracao de Base de Dados
-
-Adicionar campo `ai_analyzed` a tabela `captures`:
+### 1. Nova Tabela: alerts
 
 ```sql
-ALTER TABLE public.captures 
-ADD COLUMN ai_analyzed boolean DEFAULT false;
+CREATE TABLE public.alerts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  type text NOT NULL DEFAULT 'ai_detection',
+  message text NOT NULL,
+  severity text NOT NULL DEFAULT 'medium',
+  related_capture_id uuid REFERENCES public.captures(id) ON DELETE CASCADE,
+  related_site_id uuid REFERENCES public.sites(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL,
+  read boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 
-ALTER TABLE public.captures 
-ADD COLUMN ai_analyzed_at timestamp with time zone;
+-- RLS Policies
+ALTER TABLE public.alerts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own alerts" ON public.alerts
+  FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own alerts" ON public.alerts
+  FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "System can create alerts" ON public.alerts
+  FOR INSERT WITH CHECK (true);
 ```
 
-### 2. Novo Componente: AIAnalysisPanel
+### 2. Modificar Edge Function ai-image-analysis
 
-Painel lateral que mostra resultados da analise:
+Apos guardar deteccoes, criar alertas para severidades critical/major:
 
 ```text
-AIAnalysisPanel.tsx
-├── Header com titulo e botao fechar
-├── Estado: loading | results | error
-├── Loading: Spinner + mensagem
-├── Results:
-│   ├── Overall Assessment (texto)
-│   ├── Lista de Deteccoes
-│   │   ├── Badge de severidade (cor)
-│   │   ├── Tipo + Descricao
-│   │   ├── Localizacao
-│   │   ├── Confianca (%)
-│   │   └── Botao "Criar NC" (se critical/major)
-│   └── Recomendacoes (lista)
-└── Botao "Nova Analise" para repetir
+// Apos inserir em ai_analysis_results
+const criticalDetections = analysisResult.detections.filter(
+  d => d.severity === 'critical' || d.severity === 'major'
+);
+
+if (criticalDetections.length > 0) {
+  // Buscar membros da organizacao
+  const { data: site } = await supabase
+    .from('sites')
+    .select('org_id')
+    .eq('id', siteId)
+    .single();
+
+  const { data: members } = await supabase
+    .from('memberships')
+    .select('user_id')
+    .eq('org_id', site.org_id);
+
+  // Criar alerta para cada membro
+  for (const detection of criticalDetections) {
+    const alertInserts = members.map(m => ({
+      type: 'ai_detection',
+      message: `${detection.type}: ${detection.description}`,
+      severity: detection.severity,
+      related_capture_id: capture_id,
+      related_site_id: siteId,
+      user_id: m.user_id,
+    }));
+
+    await supabase.from('alerts').insert(alertInserts);
+  }
+}
 ```
-
-### 3. Modificar CaptureViewer.tsx
-
-Alteracoes necessarias:
-
-1. **Novos estados:**
-   - `showAIPanel: boolean`
-   - `isAnalyzing: boolean`
-   - `aiResults: AnalysisResult | null`
-   - `selectedDetection: Detection | null` (para criar NC)
-
-2. **Novo botao na toolbar:**
-   - Icone: `Sparkles` (lucide-react)
-   - Dropdown com 3 opcoes:
-     - Detectar Defeitos
-     - Verificar Armaduras
-     - Analise Geral
-   - Mostra loading enquanto analisa
-
-3. **Integracao com AIAnalysisPanel:**
-   - Mostrar a direita (como CaptureInfoPanel)
-   - Posicionar botao "next" correctamente
-
-4. **Criar NC a partir de deteccao:**
-   - Pre-preencher CreateNCModal com dados da deteccao
-   - Mapear severity: critical->critical, major->high, minor->medium, observation->low
 
 ---
 
-## Estrutura Visual
+## Novos Componentes
+
+### 3. AlertBell.tsx
+
+Componente do header com contador de alertas nao lidos:
 
 ```text
-┌─────────────────────────────────────────────────────────────────┐
-│  1/10  ▲────────────────────────────────────────────── [⚡AI▼]  │
-│        │                                                [ℹ][⬇] │
-│        │                                                [⚠][🗑] │
-├────────┼────────────────────────────────────────────────[✕]────┤
-│        │                                                        │
-│   ◀    │              [IMAGEM]                            │  ▶  │
-│        │                                                  │     │
-│        │                                                  │     │
-├────────┼──────────────────────────────────────────────────┼─────┤
-│        │                                                  │     │
-│        │                                        AI PANEL  │     │
-│        │                                        ────────  │     │
-│        │                                        Avaliação │     │
-│        │                                        Geral...  │     │
-│        │                                                  │     │
-│        │                                        Deteccoes │     │
-│        │                                        ┌───────┐ │     │
-│        │                                        │🔴 CRIT│ │     │
-│        │                                        │Fissura│ │     │
-│        │                                        │[NC]   │ │     │
-│        │                                        └───────┘ │     │
-│        │                                                  │     │
-│        │                                        Recomend. │     │
-│        │                                        • Item 1  │     │
-│        │                                        • Item 2  │     │
-└────────┴──────────────────────────────────────────────────┴─────┘
+AlertBell.tsx
+├── Estado: unreadCount (realtime)
+├── Icone Bell com badge contador
+├── Dropdown ao clicar:
+│   ├── Header "Alertas" + Botao "Marcar todos como lidos"
+│   ├── ScrollArea com lista de alertas recentes
+│   │   ├── Cada alerta:
+│   │   │   ├── Badge severidade (cor)
+│   │   │   ├── Mensagem truncada
+│   │   │   ├── Tempo relativo (ha 2 min)
+│   │   │   ├── Botao "Ver" -> navega para captura
+│   │   │   └── Botao "Criar NC" (se critical/major)
+│   │   └── Indicador de nao lido (circulo)
+│   └── Footer "Ver todos os alertas"
+└── Realtime subscription para updates
+```
+
+### Estrutura Visual do Dropdown:
+
+```text
+┌─────────────────────────────────────┐
+│  🔔 Alertas (3)    [Marcar lidas]  │
+├─────────────────────────────────────┤
+│  🔴 Fissura detectada               │
+│     Obra Centro - há 2 min    [Ver] │
+│  ●                                  │
+├─────────────────────────────────────┤
+│  🟠 Armadura exposta                │
+│     Obra Norte - há 15 min    [Ver] │
+│  ●                                  │
+├─────────────────────────────────────┤
+│  🟠 Segregacao betao                │
+│     Obra Sul - há 1 hora      [Ver] │
+│                                     │
+├─────────────────────────────────────┤
+│       Ver todos os alertas →        │
+└─────────────────────────────────────┘
 ```
 
 ---
@@ -129,281 +146,195 @@ Alteracoes necessarias:
 
 | Ficheiro | Accao |
 |----------|-------|
-| src/components/captures/AIAnalysisPanel.tsx | Criar |
-| src/components/captures/CaptureViewer.tsx | Modificar |
-| src/components/captures/CreateNCModal.tsx | Modificar (aceitar dados pre-preenchidos) |
-| src/types/captures.ts | Adicionar tipos AIAnalysisResult |
+| Migracao SQL | Criar tabela alerts |
+| supabase/functions/ai-image-analysis/index.ts | Adicionar criacao de alertas |
+| src/components/layout/AlertBell.tsx | Criar componente |
+| src/components/layout/AppHeader.tsx | Adicionar AlertBell |
+| src/pages/app/Alerts.tsx | Pagina completa de alertas (opcional) |
 | src/i18n/locales/pt.json | Adicionar traducoes |
 | src/i18n/locales/en.json | Adicionar traducoes |
-| Migracao SQL | Adicionar campo ai_analyzed |
 
 ---
 
-## Tipos a Adicionar (types/captures.ts)
+## Logica do AlertBell
+
+### Query de alertas:
 
 ```typescript
-export interface AIDetection {
-  type: string;
-  description: string;
-  severity: 'critical' | 'major' | 'minor' | 'observation';
-  location: string;
-  confidence: number;
-  measurements?: {
-    estimated_width_mm?: number;
-    estimated_length_cm?: number;
-    estimated_spacing_cm?: number;
-  };
-}
-
-export interface AIAnalysisResult {
-  success: boolean;
-  capture_id: string;
-  analysis_type: 'defects' | 'rebar' | 'general';
-  detections: AIDetection[];
-  overall_assessment: string;
-  recommendations: string[];
-  results_saved: number;
-}
+const { data: alerts } = await supabase
+  .from('alerts')
+  .select(`
+    *,
+    capture:captures(
+      id,
+      file_path,
+      capture_point:capture_points(
+        code,
+        area:areas(
+          name,
+          floor:floors(
+            name,
+            site:sites(id, name)
+          )
+        )
+      )
+    )
+  `)
+  .eq('user_id', user.id)
+  .order('created_at', { ascending: false })
+  .limit(10);
 ```
 
----
-
-## AIAnalysisPanel.tsx - Estrutura
-
-```text
-Props:
-- isLoading: boolean
-- results: AIAnalysisResult | null
-- error: string | null
-- onClose: () => void
-- onCreateNC: (detection: AIDetection) => void
-- onRetry: () => void
-- className?: string
-
-Badges de severidade:
-- critical: bg-red-500 text-white
-- major: bg-orange-500 text-white
-- minor: bg-yellow-500 text-black
-- observation: bg-blue-500 text-white
-
-Secoes:
-1. Header fixo com titulo e X
-2. ScrollArea para conteudo
-3. Loading state com Loader2 animado
-4. Error state com mensagem e botao retry
-5. Results state:
-   - Card com overall_assessment
-   - Lista de deteccoes com cards
-   - Lista de recomendacoes
-```
-
----
-
-## Modificacoes no CaptureViewer.tsx
-
-### Novos imports:
+### Contador em tempo real:
 
 ```typescript
-import { Sparkles } from 'lucide-react';
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuTrigger 
-} from '@/components/ui/dropdown-menu';
-import { AIAnalysisPanel } from './AIAnalysisPanel';
-import type { AIAnalysisResult, AIDetection } from '@/types/captures';
+// Contar nao lidos
+const { count } = await supabase
+  .from('alerts')
+  .select('*', { count: 'exact', head: true })
+  .eq('user_id', user.id)
+  .eq('read', false);
+
+// Subscription para updates
+const channel = supabase
+  .channel('alerts')
+  .on('postgres_changes', {
+    event: 'INSERT',
+    schema: 'public',
+    table: 'alerts',
+    filter: `user_id=eq.${user.id}`,
+  }, (payload) => {
+    // Incrementar contador e adicionar a lista
+    setUnreadCount(prev => prev + 1);
+    setAlerts(prev => [payload.new, ...prev].slice(0, 10));
+  })
+  .subscribe();
 ```
 
-### Novos estados:
+### Marcar como lido:
 
 ```typescript
-const [showAIPanel, setShowAIPanel] = useState(false);
-const [isAnalyzing, setIsAnalyzing] = useState(false);
-const [aiResults, setAiResults] = useState<AIAnalysisResult | null>(null);
-const [aiError, setAiError] = useState<string | null>(null);
-const [ncPreFillData, setNcPreFillData] = useState<{
-  title: string;
-  description: string;
-  severity: string;
-} | null>(null);
+const markAsRead = async (alertId: string) => {
+  await supabase
+    .from('alerts')
+    .update({ read: true })
+    .eq('id', alertId);
+};
+
+const markAllAsRead = async () => {
+  await supabase
+    .from('alerts')
+    .update({ read: true })
+    .eq('user_id', user.id)
+    .eq('read', false);
+};
 ```
 
-### Funcao de analise:
+### Navegacao para captura:
 
 ```typescript
-const handleAIAnalysis = async (analysisType: 'defects' | 'rebar' | 'general') => {
-  if (!capture) return;
-  
-  setIsAnalyzing(true);
-  setAiError(null);
-  setShowAIPanel(true);
-  
-  try {
-    const response = await fetch(
-      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-image-analysis`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
-        body: JSON.stringify({
-          capture_id: capture.id,
-          analysis_type: analysisType,
-        }),
-      }
-    );
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Analysis failed');
-    }
-
-    const results = await response.json();
-    setAiResults(results);
-    
-    // Marcar captura como analisada
-    await supabase
-      .from('captures')
-      .update({ ai_analyzed: true, ai_analyzed_at: new Date().toISOString() })
-      .eq('id', capture.id);
-      
-  } catch (err) {
-    setAiError(err instanceof Error ? err.message : 'Unknown error');
-  } finally {
-    setIsAnalyzing(false);
+const handleViewCapture = (alert: Alert) => {
+  markAsRead(alert.id);
+  const site = alert.capture?.capture_point?.area?.floor?.site;
+  if (site) {
+    navigate(`/app/sites/${site.id}?tab=captures&capture=${alert.related_capture_id}`);
   }
 };
 ```
 
-### Criar NC a partir de deteccao:
+---
+
+## Modificar Edge Function
+
+Adicionar ao final do handler, antes do return:
 
 ```typescript
-const handleCreateNCFromDetection = (detection: AIDetection) => {
-  const severityMap: Record<string, string> = {
-    critical: 'critical',
-    major: 'high',
-    minor: 'medium',
-    observation: 'low',
-  };
-  
-  setNcPreFillData({
-    title: `${detection.type}: ${detection.description.slice(0, 50)}`,
-    description: `${detection.description}\n\nLocalização: ${detection.location}\nConfiança: ${Math.round(detection.confidence * 100)}%`,
-    severity: severityMap[detection.severity] || 'medium',
-  });
-  setShowNCModal(true);
-};
+// Criar alertas para deteccoes criticas/importantes
+const alertDetections = analysisResult.detections.filter(
+  d => d.severity === 'critical' || d.severity === 'major'
+);
+
+if (alertDetections.length > 0) {
+  try {
+    // Buscar org_id do site
+    const { data: site } = await supabase
+      .from('sites')
+      .select('org_id')
+      .eq('id', siteId)
+      .single();
+
+    if (site?.org_id) {
+      // Buscar todos os membros da org
+      const { data: members } = await supabase
+        .from('memberships')
+        .select('user_id')
+        .eq('org_id', site.org_id);
+
+      if (members && members.length > 0) {
+        const alertInserts = [];
+        
+        for (const detection of alertDetections) {
+          for (const member of members) {
+            alertInserts.push({
+              type: 'ai_detection',
+              message: `${detection.type}: ${detection.description.slice(0, 100)}`,
+              severity: detection.severity,
+              related_capture_id: capture_id,
+              related_site_id: siteId,
+              user_id: member.user_id,
+            });
+          }
+        }
+
+        await supabase.from('alerts').insert(alertInserts);
+      }
+    }
+  } catch (alertError) {
+    // Log mas nao falhar o request principal
+    console.error('Failed to create alerts:', alertError);
+  }
+}
 ```
 
-### Dropdown na toolbar:
+---
+
+## Modificar AppHeader
+
+Adicionar AlertBell antes dos toggles:
 
 ```tsx
-<DropdownMenu>
-  <DropdownMenuTrigger asChild>
-    <Button
-      variant="ghost"
-      size="icon"
-      className="text-white hover:bg-white/20"
-      disabled={isAnalyzing || !imageUrl}
-    >
-      {isAnalyzing ? (
-        <Loader2 className="w-5 h-5 animate-spin" />
-      ) : (
-        <Sparkles className="w-5 h-5" />
-      )}
-    </Button>
-  </DropdownMenuTrigger>
-  <DropdownMenuContent align="end">
-    <DropdownMenuItem onClick={() => handleAIAnalysis('defects')}>
-      {t('captures.ai.detectDefects')}
-    </DropdownMenuItem>
-    <DropdownMenuItem onClick={() => handleAIAnalysis('rebar')}>
-      {t('captures.ai.verifyRebar')}
-    </DropdownMenuItem>
-    <DropdownMenuItem onClick={() => handleAIAnalysis('general')}>
-      {t('captures.ai.generalAnalysis')}
-    </DropdownMenuItem>
-  </DropdownMenuContent>
-</DropdownMenu>
+<div className="flex items-center gap-2">
+  <AlertBell />
+  <LanguageSwitcher />
+  <ThemeToggle />
+</div>
 ```
 
 ---
 
-## Modificacoes no CreateNCModal.tsx
-
-Aceitar props opcionais de pre-preenchimento:
-
-```typescript
-interface CreateNCModalProps {
-  capture: CaptureWithDetails;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSuccess?: () => void;
-  prefillData?: {
-    title: string;
-    description: string;
-    severity: string;
-  };
-}
-```
-
-E usar no useForm:
-
-```typescript
-const form = useForm<NCFormData>({
-  resolver: zodResolver(ncSchema),
-  defaultValues: {
-    title: prefillData?.title || '',
-    description: prefillData?.description || '',
-    severity: (prefillData?.severity as any) || 'medium',
-  },
-});
-
-// Reset quando prefillData muda
-useEffect(() => {
-  if (prefillData) {
-    form.reset({
-      title: prefillData.title,
-      description: prefillData.description,
-      severity: prefillData.severity as any,
-    });
-  }
-}, [prefillData, form]);
-```
-
----
-
-## Traducoes a Adicionar
+## Traducoes
 
 ### Portugues (pt.json):
 
 ```json
-"captures": {
-  "ai": {
-    "analyzeWithAI": "Analisar com IA",
-    "detectDefects": "Detectar Defeitos",
-    "verifyRebar": "Verificar Armaduras",
-    "generalAnalysis": "Análise Geral",
-    "analyzing": "A analisar imagem...",
-    "analysisComplete": "Análise concluída",
-    "analysisError": "Erro na análise",
-    "overallAssessment": "Avaliação Geral",
-    "detections": "Detecções",
-    "noDetections": "Nenhum problema detectado",
-    "recommendations": "Recomendações",
-    "confidence": "Confiança",
-    "location": "Localização",
-    "createNC": "Criar NC",
-    "retry": "Tentar Novamente",
-    "newAnalysis": "Nova Análise",
-    "severity": {
-      "critical": "Crítico",
-      "major": "Importante",
-      "minor": "Menor",
-      "observation": "Observação"
-    }
+"alerts": {
+  "title": "Alertas",
+  "markAllRead": "Marcar todas como lidas",
+  "viewAll": "Ver todos os alertas",
+  "noAlerts": "Sem alertas",
+  "noAlertsDesc": "Nao tem alertas por ler",
+  "unread": "{{count}} nao lido(s)",
+  "viewCapture": "Ver Captura",
+  "createNC": "Criar NC",
+  "markRead": "Marcar como lida",
+  "timeAgo": {
+    "justNow": "Agora mesmo",
+    "minutes": "ha {{count}} min",
+    "hours": "ha {{count}} hora(s)",
+    "days": "ha {{count}} dia(s)"
+  },
+  "types": {
+    "ai_detection": "Deteccao IA"
   }
 }
 ```
@@ -411,96 +342,103 @@ useEffect(() => {
 ### Ingles (en.json):
 
 ```json
-"captures": {
-  "ai": {
-    "analyzeWithAI": "Analyze with AI",
-    "detectDefects": "Detect Defects",
-    "verifyRebar": "Verify Rebar",
-    "generalAnalysis": "General Analysis",
-    "analyzing": "Analyzing image...",
-    "analysisComplete": "Analysis complete",
-    "analysisError": "Analysis error",
-    "overallAssessment": "Overall Assessment",
-    "detections": "Detections",
-    "noDetections": "No issues detected",
-    "recommendations": "Recommendations",
-    "confidence": "Confidence",
-    "location": "Location",
-    "createNC": "Create NC",
-    "retry": "Retry",
-    "newAnalysis": "New Analysis",
-    "severity": {
-      "critical": "Critical",
-      "major": "Major",
-      "minor": "Minor",
-      "observation": "Observation"
-    }
+"alerts": {
+  "title": "Alerts",
+  "markAllRead": "Mark all as read",
+  "viewAll": "View all alerts",
+  "noAlerts": "No alerts",
+  "noAlertsDesc": "You have no unread alerts",
+  "unread": "{{count}} unread",
+  "viewCapture": "View Capture",
+  "createNC": "Create NC",
+  "markRead": "Mark as read",
+  "timeAgo": {
+    "justNow": "Just now",
+    "minutes": "{{count}} min ago",
+    "hours": "{{count}} hour(s) ago",
+    "days": "{{count}} day(s) ago"
+  },
+  "types": {
+    "ai_detection": "AI Detection"
   }
 }
 ```
 
 ---
 
-## Layout do Painel de Resultados
-
-O AIAnalysisPanel fica posicionado de forma similar ao CaptureInfoPanel:
-- Largura fixa: w-80 (320px)
-- Posicao absoluta a direita
-- Pode coexistir com o InfoPanel (lado a lado) ou substituir
-
-Para simplicidade, quando showAIPanel = true, escondemos o InfoPanel (toggle entre os dois).
-
----
-
 ## Fluxo de Utilizacao
 
 ```text
-1. Utilizador abre CaptureViewer
+1. Utilizador analisa captura com IA
        │
        ▼
-2. Clica no botao ⚡ (Sparkles)
+2. Edge Function detecta problema critico
        │
        ▼
-3. Seleciona tipo de analise no dropdown
+3. Alerta criado para todos os membros da org
        │
        ▼
-4. Mostra painel lateral com loading
+4. Badge no AlertBell actualiza (realtime)
        │
        ▼
-5. Edge Function processa imagem
+5. Utilizador clica no sino
        │
        ▼
-6. Resultados aparecem no painel:
-   - Avaliacao geral
-   - Lista de deteccoes com badges
-   - Recomendacoes
+6. Ve lista de alertas recentes
        │
        ▼
-7. Para deteccoes critical/major:
-   - Botao "Criar NC" disponivel
-   - Abre CreateNCModal pre-preenchido
+7. Clica "Ver" -> navega para captura
+   OU clica "Criar NC" -> abre modal pre-preenchido
        │
        ▼
-8. Captura marcada como ai_analyzed = true
+8. Alerta marcado como lido
+```
+
+---
+
+## Notificacoes Push (Futuro)
+
+A infraestrutura de alertas permite adicionar notificacoes push posteriormente:
+- Registar service worker
+- Guardar push subscription na BD
+- Enviar notificacao quando alerta e criado (Edge Function)
+
+Este requisito fica preparado mas nao implementado nesta fase (requer setup adicional de service worker).
+
+---
+
+## RLS Policies
+
+```sql
+-- Utilizadores podem ver os seus proprios alertas
+CREATE POLICY "Users can view own alerts" ON public.alerts
+  FOR SELECT USING (auth.uid() = user_id);
+
+-- Utilizadores podem actualizar os seus proprios alertas (marcar como lido)
+CREATE POLICY "Users can update own alerts" ON public.alerts
+  FOR UPDATE USING (auth.uid() = user_id);
+
+-- Sistema pode criar alertas (via service role na Edge Function)
+CREATE POLICY "Service role can insert alerts" ON public.alerts
+  FOR INSERT WITH CHECK (true);
 ```
 
 ---
 
 ## Resumo das Alteracoes
 
-1. **Migracao SQL**: Adicionar campos `ai_analyzed` e `ai_analyzed_at` na tabela captures
-2. **AIAnalysisPanel.tsx**: Novo componente para mostrar resultados da analise
-3. **CaptureViewer.tsx**: Adicionar dropdown de analise IA e integracao com painel
-4. **CreateNCModal.tsx**: Aceitar dados pre-preenchidos
-5. **types/captures.ts**: Adicionar tipos para AIDetection e AIAnalysisResult
-6. **Traducoes**: Novas chaves para PT e EN
+1. **Migracao SQL**: Criar tabela `alerts` com RLS e enable realtime
+2. **Edge Function**: Adicionar logica de criacao de alertas para deteccoes criticas
+3. **AlertBell.tsx**: Componente com contador, dropdown, e realtime subscription
+4. **AppHeader.tsx**: Integrar AlertBell
+5. **Traducoes**: Novas chaves para PT e EN
 
 ---
 
 ## Consideracoes Tecnicas
 
-1. **Painel exclusivo**: Quando AI panel esta aberto, Info panel fecha (e vice-versa)
-2. **Cache de resultados**: Guardar aiResults no state para nao perder ao navegar
-3. **Rate limiting**: Tratar erros 429 com mensagem amigavel
-4. **Timeout**: A analise pode demorar 10-30s, manter loading visivel
-5. **Videos/Panoramas**: Desactivar botao de analise para conteudo nao-imagem
+1. **Realtime**: Usar Supabase realtime para updates instantaneos
+2. **Performance**: Limitar a 10 alertas no dropdown, paginacao na pagina completa
+3. **Cleanup**: Alertas antigos podem ser limpos via cron job (futuro)
+4. **Membros**: Alertas criados para todos os membros da org do site
+5. **Fallback**: Se falhar criacao de alertas, nao afecta a analise principal
