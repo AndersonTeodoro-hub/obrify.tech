@@ -207,81 +207,73 @@ export default function Sites() {
           </CardContent>
         </Card>
       ) : sites && sites.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {sites.map((site) => (
             <Card
               key={site.id}
-              className="glass border-border/50 hover:border-primary/50 transition-colors cursor-pointer"
+              className="group overflow-hidden hover:shadow-lg hover:-translate-y-1 hover:scale-[1.02] transition-all duration-300 cursor-pointer"
               onClick={() => navigate(`/app/sites/${site.id}`)}
             >
-              <CardHeader className="flex flex-row items-start justify-between space-y-0">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
-                    <HardHat className="w-6 h-6 text-primary" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">{site.name}</CardTitle>
-                    <Badge variant="default" className="mt-1">
-                      {t('sites.statusActive')}
-                    </Badge>
-                  </div>
+              {/* Imagem placeholder com gradiente */}
+              <div className="h-40 bg-gradient-to-br from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-800 flex items-center justify-center">
+                <HardHat className="w-12 h-12 text-slate-400 dark:text-slate-500 transition-transform group-hover:scale-110" />
+              </div>
+              
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between mb-2">
+                  <h3 className="text-lg font-semibold text-foreground line-clamp-1">{site.name}</h3>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 -mr-2">
+                        <MoreVertical className="w-4 h-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {canEditSite && (
+                        <DropdownMenuItem onClick={(e) => e.stopPropagation()}>
+                          <Pencil className="w-4 h-4 mr-2" />
+                          {t('common.edit')}
+                        </DropdownMenuItem>
+                      )}
+                      {canDeleteSite && (
+                        <DropdownMenuItem
+                          className="text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteSiteMutation.mutate(site.id);
+                          }}
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          {t('common.delete')}
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                    <Button variant="ghost" size="icon" className="h-8 w-8">
-                      <MoreVertical className="w-4 h-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="glass">
-                    {canEditSite && (
-                      <DropdownMenuItem onClick={(e) => e.stopPropagation()}>
-                        <Pencil className="w-4 h-4 mr-2" />
-                        {t('common.edit')}
-                      </DropdownMenuItem>
-                    )}
-                    {canDeleteSite && (
-                      <DropdownMenuItem
-                        className="text-destructive"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteSiteMutation.mutate(site.id);
-                        }}
-                      >
-                        <Trash2 className="w-4 h-4 mr-2" />
-                        {t('common.delete')}
-                      </DropdownMenuItem>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </CardHeader>
-              <CardContent>
+                
                 {site.address && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                    <MapPin className="w-4 h-4" />
-                    <span className="line-clamp-1">{site.address}</span>
-                  </div>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-1 mb-3">
+                    <MapPin className="w-3.5 h-3.5 inline mr-1" />
+                    {site.address}
+                  </p>
                 )}
-                <p className="text-sm text-muted-foreground line-clamp-2">
-                  {t('sites.description')}
-                </p>
-                <div className="flex items-center justify-between mt-4 pt-4 border-t border-border/50">
-                  <span className="text-xs text-muted-foreground">
-                    {(site as any).organizations?.name}
-                  </span>
-                  <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                
+                <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
+                  <Badge variant="default">{t('sites.statusActive')}</Badge>
+                  <span className="text-xs text-slate-400">{(site as any).organizations?.name}</span>
                 </div>
               </CardContent>
             </Card>
           ))}
         </div>
       ) : (
-        <Card className="glass border-border/50">
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <HardHat className="w-16 h-16 text-muted-foreground/50 mb-4" />
-            <h3 className="text-lg font-medium">{t('sites.noSites')}</h3>
-            <p className="text-muted-foreground text-center mt-1">{t('sites.createFirst')}</p>
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-16">
+            <HardHat className="w-16 h-16 text-slate-300 dark:text-slate-600 mb-4" />
+            <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{t('sites.noSites')}</h3>
+            <p className="text-slate-500 max-w-md mx-auto text-center mt-2">{t('sites.createFirst')}</p>
             {canCreateSite && (
-              <Button onClick={() => setIsCreateOpen(true)} className="mt-4">
+              <Button onClick={() => setIsCreateOpen(true)} className="mt-6" variant="accent">
                 <Plus className="w-4 h-4 mr-2" />
                 {t('sites.create')}
               </Button>

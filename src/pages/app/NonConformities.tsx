@@ -26,17 +26,19 @@ import {
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { NCDetailSheet } from '@/components/nonconformities/NCDetailSheet';
+import { cn } from '@/lib/utils';
 
 const severityConfig = {
-  critical: { label: 'severityCritical', color: 'bg-red-500/20 text-red-400 border-red-500/30' },
-  high: { label: 'severityHigh', color: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
-  medium: { label: 'severityMedium', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
+  critical: { label: 'severityCritical', color: 'bg-red-500/20 text-red-400 border-red-500/30', borderLeft: 'border-l-red-500' },
+  high: { label: 'severityHigh', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30', borderLeft: 'border-l-amber-500' },
+  medium: { label: 'severityMedium', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30', borderLeft: 'border-l-blue-500' },
+  low: { label: 'severityLow', color: 'bg-slate-500/20 text-slate-400 border-slate-500/30', borderLeft: 'border-l-slate-300 dark:border-l-slate-600' },
 };
 
 const statusConfig = {
   OPEN: { label: 'open', color: 'bg-red-500/20 text-red-400' },
   IN_PROGRESS: { label: 'in_progress', color: 'bg-blue-500/20 text-blue-400' },
-  RESOLVED: { label: 'resolved', color: 'bg-orange-500/20 text-orange-400' },
+  RESOLVED: { label: 'resolved', color: 'bg-amber-500/20 text-amber-400' },
   CLOSED: { label: 'closed', color: 'bg-green-500/20 text-green-400' },
 };
 
@@ -272,7 +274,10 @@ export default function NonConformities() {
                   const statConfig = statusConfig[nc.status as keyof typeof statusConfig] || statusConfig.OPEN;
                   
                   return (
-                    <TableRow key={nc.id}>
+                    <TableRow 
+                      key={nc.id}
+                      className={cn("border-l-4", sevConfig.borderLeft)}
+                    >
                       <TableCell className="font-mono text-sm">
                         #{String(index + 1).padStart(3, '0')}
                       </TableCell>
@@ -310,10 +315,10 @@ export default function NonConformities() {
               </TableBody>
             </Table>
           ) : (
-            <div className="text-center py-12">
-              <AlertTriangle className="w-12 h-12 mx-auto text-muted-foreground/50 mb-4" />
-              <h3 className="text-lg font-medium">{t('ncPage.noResults')}</h3>
-              <p className="text-muted-foreground">{t('ncPage.noResultsDesc')}</p>
+            <div className="text-center py-16">
+              <AlertTriangle className="w-16 h-16 mx-auto text-slate-300 dark:text-slate-600 mb-4" />
+              <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{t('ncPage.noResults')}</h3>
+              <p className="text-slate-500 max-w-md mx-auto mt-2">{t('ncPage.noResultsDesc')}</p>
             </div>
           )}
         </CardContent>
