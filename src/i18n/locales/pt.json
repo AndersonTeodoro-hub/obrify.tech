@@ -373,6 +373,30 @@
       "severityCritical": "Crítica",
       "ncCreated": "Não-conformidade criada",
       "ncCreatedDesc": "A não-conformidade foi registada com sucesso."
+    },
+    "ai": {
+      "analyzeWithAI": "Analisar com IA",
+      "detectDefects": "Detectar Defeitos",
+      "verifyRebar": "Verificar Armaduras",
+      "generalAnalysis": "Análise Geral",
+      "analyzing": "A analisar imagem...",
+      "analysisComplete": "Análise concluída",
+      "analysisError": "Erro na análise",
+      "overallAssessment": "Avaliação Geral",
+      "detections": "Detecções",
+      "noDetections": "Nenhum problema detectado",
+      "recommendations": "Recomendações",
+      "confidence": "Confiança",
+      "location": "Localização",
+      "createNC": "Criar NC",
+      "retry": "Tentar Novamente",
+      "newAnalysis": "Nova Análise",
+      "severity": {
+        "critical": "Crítico",
+        "major": "Importante",
+        "minor": "Menor",
+        "observation": "Observação"
+      }
     }
   },
   "inspections": {

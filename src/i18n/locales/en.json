@@ -373,6 +373,30 @@
       "severityCritical": "Critical",
       "ncCreated": "Non-conformity created",
       "ncCreatedDesc": "The non-conformity has been registered successfully."
+    },
+    "ai": {
+      "analyzeWithAI": "Analyze with AI",
+      "detectDefects": "Detect Defects",
+      "verifyRebar": "Verify Rebar",
+      "generalAnalysis": "General Analysis",
+      "analyzing": "Analyzing image...",
+      "analysisComplete": "Analysis complete",
+      "analysisError": "Analysis error",
+      "overallAssessment": "Overall Assessment",
+      "detections": "Detections",
+      "noDetections": "No issues detected",
+      "recommendations": "Recommendations",
+      "confidence": "Confidence",
+      "location": "Location",
+      "createNC": "Create NC",
+      "retry": "Retry",
+      "newAnalysis": "New Analysis",
+      "severity": {
+        "critical": "Critical",
+        "major": "Major",
+        "minor": "Minor",
+        "observation": "Observation"
+      }
     }
   },
   "inspections": {

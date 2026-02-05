@@ -534,6 +534,8 @@ export type Database = {
       }
       captures: {
         Row: {
+          ai_analyzed: boolean | null
+          ai_analyzed_at: string | null
           capture_point_id: string
           captured_at: string | null
           created_at: string
@@ -548,6 +550,8 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          ai_analyzed?: boolean | null
+          ai_analyzed_at?: string | null
           capture_point_id: string
           captured_at?: string | null
           created_at?: string
@@ -562,6 +566,8 @@ export type Database = {
           user_id: string
         }
         Update: {
+          ai_analyzed?: boolean | null
+          ai_analyzed_at?: string | null
           capture_point_id?: string
           captured_at?: string | null
           created_at?: string
