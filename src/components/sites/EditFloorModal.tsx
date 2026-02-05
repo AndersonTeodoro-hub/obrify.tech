@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -15,37 +15,51 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 
-interface AddFloorModalProps {
-  siteId: string;
+interface Floor {
+  id: string;
+  name: string;
+  level: number | null;
+  description?: string | null;
+}
+
+interface EditFloorModalProps {
+  floor: Floor | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
 }
 
-export function AddFloorModal({ siteId, open, onOpenChange, onSuccess }: AddFloorModalProps) {
+export function EditFloorModal({ floor, open, onOpenChange, onSuccess }: EditFloorModalProps) {
   const { t } = useTranslation();
   const [name, setName] = useState('');
   const [level, setLevel] = useState('');
   const [description, setDescription] = useState('');
 
-  const createMutation = useMutation({
+  useEffect(() => {
+    if (floor) {
+      setName(floor.name);
+      setLevel(floor.level?.toString() || '');
+      setDescription(floor.description || '');
+    }
+  }, [floor]);
+
+  const updateMutation = useMutation({
     mutationFn: async () => {
+      if (!floor) throw new Error('No floor to update');
+      
       const { error } = await supabase
         .from('floors')
-        .insert({
-          site_id: siteId,
+        .update({
           name,
           level: level ? parseInt(level, 10) : null,
           description: description || null,
-        });
+        })
+        .eq('id', floor.id);
 
       if (error) throw error;
     },
     onSuccess: () => {
-      toast.success(t('siteDetail.floorCreated'));
-      setName('');
-      setLevel('');
-      setDescription('');
+      toast.success(t('siteDetail.floorUpdated'));
       onSuccess();
     },
     onError: () => {
@@ -56,21 +70,21 @@ export function AddFloorModal({ siteId, open, onOpenChange, onSuccess }: AddFloo
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    createMutation.mutate();
+    updateMutation.mutate();
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>{t('siteDetail.addFloor')}</DialogTitle>
+          <DialogTitle>{t('siteDetail.editFloor')}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="floorName">{t('siteDetail.floorName')}</Label>
+              <Label htmlFor="editFloorName">{t('siteDetail.floorName')}</Label>
               <Input
-                id="floorName"
+                id="editFloorName"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={t('siteDetail.floorNamePlaceholder')}
@@ -79,9 +93,9 @@ export function AddFloorModal({ siteId, open, onOpenChange, onSuccess }: AddFloo
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="floorLevel">{t('siteDetail.floorLevel')}</Label>
+              <Label htmlFor="editFloorLevel">{t('siteDetail.floorLevel')}</Label>
               <Input
-                id="floorLevel"
+                id="editFloorLevel"
                 type="number"
                 value={level}
                 onChange={(e) => setLevel(e.target.value)}
@@ -90,9 +104,9 @@ export function AddFloorModal({ siteId, open, onOpenChange, onSuccess }: AddFloo
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="floorDescription">{t('siteDetail.floorDescription')}</Label>
+              <Label htmlFor="editFloorDescription">{t('siteDetail.floorDescription')}</Label>
               <Textarea
-                id="floorDescription"
+                id="editFloorDescription"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder={t('siteDetail.floorDescriptionPlaceholder')}
@@ -109,8 +123,8 @@ export function AddFloorModal({ siteId, open, onOpenChange, onSuccess }: AddFloo
             >
               {t('common.cancel')}
             </Button>
-            <Button type="submit" disabled={createMutation.isPending}>
-              {createMutation.isPending ? t('common.loading') : t('common.create')}
+            <Button type="submit" disabled={updateMutation.isPending}>
+              {updateMutation.isPending ? t('common.loading') : t('common.save')}
             </Button>
           </DialogFooter>
         </form>
