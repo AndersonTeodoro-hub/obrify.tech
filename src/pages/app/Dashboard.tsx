@@ -150,10 +150,19 @@ export default function Dashboard() {
         <p className="text-muted-foreground">{t('dashboard.welcomeDesc')}</p>
       </div>
 
-      {/* Stats Grid - Premium Design */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {statCards.map((stat) => (
-          <Card key={stat.title} className="group hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700 hover:-translate-y-1">
+      {/* Stats Grid - Premium Design with Staggered Animation */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        {statCards.map((stat, index) => (
+          <Card 
+            key={stat.title} 
+            className={cn(
+              "group hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700 hover:-translate-y-1 transition-all duration-300 opacity-0 animate-fade-in-up",
+              index === 0 && "animation-delay-0",
+              index === 1 && "animation-delay-100",
+              index === 2 && "animation-delay-200",
+              index === 3 && "animation-delay-300"
+            )}
+          >
             <CardContent className="p-6">
               <div className="flex items-start justify-between">
                 <div className="space-y-2">

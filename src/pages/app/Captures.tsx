@@ -226,19 +226,20 @@ export default function Captures() {
 
       {/* Content */}
       {isLoadingCaptures ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[...Array(6)].map((_, i) => (
-            <Skeleton key={i} className="aspect-[4/3] rounded-lg" />
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          {[...Array(8)].map((_, i) => (
+            <Skeleton key={i} className="aspect-video rounded-xl" />
           ))}
         </div>
       ) : captures.length === 0 ? (
-        <Card className="glass border-border/50">
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <Camera className="w-16 h-16 text-muted-foreground/50 mb-4" />
-            <h3 className="text-lg font-medium">{t('captures.noCaptures')}</h3>
-            <p className="text-muted-foreground text-center mt-1">{t('captures.startCapturing')}</p>
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-16">
+            <Camera className="w-16 h-16 text-slate-300 dark:text-slate-600 mb-4" />
+            <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{t('captures.noCaptures')}</h3>
+            <p className="text-slate-500 max-w-md mx-auto text-center mt-2">{t('captures.startCapturing')}</p>
             <Button 
-              className="mt-4 bg-gradient-to-r from-primary to-accent"
+              className="mt-6"
+              variant="accent"
               onClick={() => setIsCreateOpen(true)}
             >
               <Camera className="w-4 h-4 mr-2" />
@@ -247,7 +248,7 @@ export default function Captures() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {captures.map((capture) => (
             <CaptureCard
               key={capture.id}
