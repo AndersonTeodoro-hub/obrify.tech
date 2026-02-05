@@ -1,335 +1,543 @@
 
-# Plano: Sistema de Nao-Conformidades Integrado com Inspeccoes
+# Plano: Pagina de Gestao de Nao-Conformidades (NonConformities.tsx)
 
 ## Resumo
-Melhorar o sistema de nao-conformidades existente para incluir todos os campos requeridos, foto-evidencias, e contador de NCs abertas por obra no dashboard.
+Criar uma pagina completa para gestao de todas as nao-conformidades com tabela, filtros, painel lateral de detalhes, fluxo de estados, timeline de alteracoes, e exportacao para Excel.
 
 ---
 
 ## Analise do Estado Actual
 
-### O que ja existe:
-- Componente `CreateNCFromItem.tsx` com modal basico
-- Tabela `nonconformities` com campos: title, description, severity, due_date, corrective_action, responsible, status
-- `SiteOverviewTab.tsx` ja mostra contador de NCs abertas
-- Integracao com `InspectionDetail.tsx` que abre modal quando item e marcado como NC
+### Tabelas Existentes:
+- **nonconformities**: id, title, description, severity, status, due_date, responsible, corrective_action, site_id, inspection_id, inspection_item_id, standard_violated, created_by, created_at, updated_at
+- **nonconformity_evidence**: id, nonconformity_id, file_path, created_at
+- **sites**: id, name, address
+- **inspections**: id, site_id, template_id
 
-### O que falta implementar:
-1. Campo descricao obrigatorio (actualmente opcional)
-2. Novas opcoes de severidade: Critico (vermelho), Importante (laranja), Menor (amarelo)
-3. Date picker para prazo (actualmente usa input nativo)
-4. Upload de fotos de evidencia
-5. Campo para norma/especificacao violada
-6. Contador de NCs por obra no Dashboard
+### Estados Existentes (Enum):
+- `OPEN` - Aberta
+- `IN_PROGRESS` - Em Resolucao
+- `RESOLVED` - A Verificar (renomear na UI)
+- `CLOSED` - Fechada
 
----
-
-## Alteracoes na Base de Dados
-
-Adicionar novos campos a tabela `nonconformities`:
-
-```text
-ALTER TABLE nonconformities
-ADD COLUMN IF NOT EXISTS site_id uuid REFERENCES sites(id) ON DELETE CASCADE,
-ADD COLUMN IF NOT EXISTS standard_violated text,
-ADD COLUMN IF NOT EXISTS created_by uuid;
-
-CREATE INDEX IF NOT EXISTS idx_nonconformities_site_id ON nonconformities(site_id);
-```
-
-Criar tabela para evidencias de NC:
-
-```text
-CREATE TABLE IF NOT EXISTS nonconformity_evidence (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  nonconformity_id uuid REFERENCES nonconformities(id) ON DELETE CASCADE NOT NULL,
-  capture_id uuid REFERENCES captures(id) ON DELETE SET NULL,
-  file_path text NOT NULL,
-  created_at timestamptz DEFAULT now()
-);
-
-CREATE INDEX idx_nc_evidence_nc_id ON nonconformity_evidence(nonconformity_id);
-```
+### Componentes Existentes:
+- `CreateNCFromItem.tsx` - Modal para criar NC
+- `SitesWithNCs.tsx` - Contador de NCs por obra no dashboard
+- Componentes UI: Sheet, Table, Select, Badge, Button, Calendar
 
 ---
 
 ## Arquitectura da Solucao
 
 ```text
-CreateNCFromItem.tsx (melhorado)
-├── Titulo (editavel, pre-preenchido)
-├── Descricao * (obrigatorio)
-├── Severidade (nova UI com cores)
-│   ├── Critico (vermelho) - value: 'critical'
-│   ├── Importante (laranja) - value: 'high'
-│   └── Menor (amarelo) - value: 'medium'
-├── Prazo para Resolucao (DatePicker)
-├── Norma/Especificacao Violada (texto)
-├── Fotos de Evidencia (upload multiplo)
-│   └── DropZone + Grid de previews
-└── Accao Corretiva (opcional)
+NonConformities.tsx (Pagina Principal)
+├── Header
+│   ├── Titulo + Subtitulo
+│   └── Botao Exportar Excel
+│
+├── Filtros (NCFilters.tsx)
+│   ├── Por Obra (Select)
+│   ├── Por Severidade (Select)
+│   ├── Por Estado (Select)
+│   └── Limpar Filtros
+│
+├── Tabela de NCs
+│   ├── ID (codigo curto)
+│   ├── Obra (nome)
+│   ├── Descricao (truncada 50 chars)
+│   ├── Severidade (badge colorido)
+│   ├── Estado (badge)
+│   ├── Prazo (data formatada)
+│   ├── Responsavel
+│   └── Accoes (Ver)
+│
+└── Sheet Lateral (NCDetailSheet.tsx)
+    ├── Header com titulo + severidade
+    ├── Informacoes detalhadas
+    ├── Fotos de evidencia
+    ├── Timeline de alteracoes
+    ├── Selector de estado
+    └── Upload foto (se fechar)
 ```
 
 ---
 
-## Ficheiros a Modificar/Criar
+## Ficheiros a Criar/Modificar
 
 | Ficheiro | Accao |
 |----------|-------|
-| supabase/migrations/xxx.sql | Criar (adicionar campos) |
-| src/components/inspections/CreateNCFromItem.tsx | Reescrever |
-| src/pages/app/Dashboard.tsx | Modificar (adicionar NCs por obra) |
+| src/pages/app/NonConformities.tsx | Criar |
+| src/components/nonconformities/NCFilters.tsx | Criar |
+| src/components/nonconformities/NCDetailSheet.tsx | Criar |
+| src/components/nonconformities/NCStatusTimeline.tsx | Criar |
+| src/components/nonconformities/NCEvidenceGallery.tsx | Criar |
+| src/components/nonconformities/CloseNCModal.tsx | Criar |
+| src/components/layout/AppSidebar.tsx | Modificar (adicionar link) |
+| src/App.tsx | Modificar (adicionar rota) |
 | src/i18n/locales/pt.json | Adicionar chaves |
 | src/i18n/locales/en.json | Adicionar chaves |
 
----
+### Migracao de Base de Dados
+Criar tabela para registar historico de alteracoes de estado:
 
-## Componente CreateNCFromItem.tsx (Reescrito)
+```sql
+CREATE TABLE IF NOT EXISTS public.nonconformity_status_history (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nonconformity_id uuid REFERENCES public.nonconformities(id) ON DELETE CASCADE NOT NULL,
+  old_status text,
+  new_status text NOT NULL,
+  changed_by uuid,
+  notes text,
+  created_at timestamptz DEFAULT now()
+);
 
-### Interface Melhorada:
+CREATE INDEX idx_nc_status_history_nc_id ON public.nonconformity_status_history(nonconformity_id);
 
-```text
-┌─────────────────────────────────────────────────────────────┐
-│  ⚠ Criar Nao-Conformidade                             [X]  │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  Titulo                                                     │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │ NC - Cofragem com residuos                           │  │
-│  └───────────────────────────────────────────────────────┘  │
-│                                                             │
-│  Descricao do Problema *                                    │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │ Descreva o problema encontrado...                    │  │
-│  │                                                       │  │
-│  │                                                       │  │
-│  └───────────────────────────────────────────────────────┘  │
-│                                                             │
-│  Severidade                                                 │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐        │
-│  │ ● Critico    │ │   Importante │ │     Menor    │        │
-│  │   (vermelho) │ │   (laranja)  │ │   (amarelo)  │        │
-│  └──────────────┘ └──────────────┘ └──────────────┘        │
-│                                                             │
-│  Prazo para Resolucao         Norma/Especificacao Violada  │
-│  ┌─────────────────────────┐  ┌─────────────────────────┐  │
-│  │ 📅 15 Fev 2026          │  │ NP EN 206-1            │  │
-│  └─────────────────────────┘  └─────────────────────────┘  │
-│                                                             │
-│  Fotos de Evidencia                                         │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │  [📷] [📷] [📷]  [+ Adicionar]                        │  │
-│  └───────────────────────────────────────────────────────┘  │
-│                                                             │
-│  Accao Corretiva (opcional)                                 │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │ Descreva a acao corretiva...                         │  │
-│  └───────────────────────────────────────────────────────┘  │
-│                                                             │
-│                              [Cancelar]  [Registar NC]      │
-└─────────────────────────────────────────────────────────────┘
-```
+-- RLS Policies
+ALTER TABLE public.nonconformity_status_history ENABLE ROW LEVEL SECURITY;
 
-### Severidade com Cores:
+CREATE POLICY "Users can view status history for accessible NCs"
+  ON public.nonconformity_status_history FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM nonconformities nc
+      JOIN inspections i ON i.id = nc.inspection_id
+      WHERE nc.id = nonconformity_status_history.nonconformity_id
+      AND can_access_site(auth.uid(), i.site_id)
+    )
+  );
 
-```text
-| Valor    | Label       | Cor de Fundo      | Cor Texto |
-|----------|-------------|-------------------|-----------|
-| critical | Critico     | bg-red-500/20     | text-red  |
-| high     | Importante  | bg-orange-500/20  | text-orange|
-| medium   | Menor       | bg-yellow-500/20  | text-yellow|
-```
-
-### Fluxo de Upload de Fotos:
-
-```text
-1. Utilizador seleciona fotos via DropZone
-2. Upload para Storage (bucket: captures)
-3. Criar registo em captures com site_id
-4. Criar ligacao em nonconformity_evidence
-5. Mostrar preview com opcao de remover
+CREATE POLICY "Users can insert status history for accessible NCs"
+  ON public.nonconformity_status_history FOR INSERT
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM nonconformities nc
+      JOIN inspections i ON i.id = nc.inspection_id
+      WHERE nc.id = nonconformity_status_history.nonconformity_id
+      AND can_access_site(auth.uid(), i.site_id)
+    )
+  );
 ```
 
 ---
 
-## Dashboard com NCs por Obra
+## Componente NonConformities.tsx
 
-Adicionar secao ou modificar cards para mostrar NCs abertas por obra:
+### Estrutura Visual:
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│  Obras com Nao-Conformidades                                │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │ [🏗] Edificio Aurora          NCs Abertas: 5  [→]  │   │
-│  └─────────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │ [🏗] Residencial Mar          NCs Abertas: 2  [→]  │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  Nao-Conformidades                           [📥 Exportar Excel]│
+│  Gerir todas as nao-conformidades registadas                    │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ [Limpar]   │
+│  │ Obra ▼       │ │ Severidade ▼ │ │ Estado ▼     │             │
+│  └──────────────┘ └──────────────┘ └──────────────┘             │
+│                                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│  ID    │ Obra      │ Descricao      │ Sev. │ Estado │ Prazo    │
+├────────┼───────────┼────────────────┼──────┼────────┼──────────┤
+│  #001  │ Aurora    │ Fissura na...  │ 🔴   │ Aberta │ 15 Fev   │
+│  #002  │ Mar       │ Infiltracao... │ 🟠   │ Em Res.│ 20 Fev   │
+│  #003  │ Sol       │ Desvio no...   │ 🟡   │ A Ver. │ 10 Fev   │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### Query para NCs por Obra:
+### Query de Dados:
+
+```typescript
+const { data: nonconformities } = useQuery({
+  queryKey: ['all-nonconformities', siteFilter, severityFilter, statusFilter],
+  queryFn: async () => {
+    let query = supabase
+      .from('nonconformities')
+      .select(`
+        *,
+        sites!nonconformities_site_id_fkey(id, name),
+        inspections!nonconformities_inspection_id_fkey(
+          id, 
+          inspection_templates(name)
+        )
+      `)
+      .order('created_at', { ascending: false });
+
+    if (siteFilter !== 'all') {
+      query = query.eq('site_id', siteFilter);
+    }
+    if (severityFilter !== 'all') {
+      query = query.eq('severity', severityFilter);
+    }
+    if (statusFilter !== 'all') {
+      query = query.eq('status', statusFilter);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return data;
+  },
+});
+```
+
+---
+
+## Componente NCDetailSheet.tsx
+
+### Estrutura Visual:
 
 ```text
-SELECT 
-  s.id, s.name,
-  COUNT(nc.id) as open_ncs
-FROM sites s
-LEFT JOIN inspections i ON i.site_id = s.id
-LEFT JOIN nonconformities nc ON nc.inspection_id = i.id AND nc.status = 'OPEN'
-WHERE s.org_id IN (user_org_ids)
-GROUP BY s.id, s.name
-HAVING COUNT(nc.id) > 0
-ORDER BY open_ncs DESC
+┌─────────────────────────────────────────────┐
+│  NC #001                                [X] │
+│  ──────────────────────────────────────────│
+│                                             │
+│  ┌─────────────────────────────────────────┐│
+│  │ 🔴 CRITICO                      Aberta  ││
+│  └─────────────────────────────────────────┘│
+│                                             │
+│  Obra: Edificio Aurora                      │
+│  Inspecao: Pre-Betonagem Laje              │
+│  Criado por: Joao Silva                     │
+│  Data: 05 Fev 2026                         │
+│                                             │
+│  ─────────────────────────────────────────  │
+│  Descricao do Problema                      │
+│  ┌─────────────────────────────────────────┐│
+│  │ Fissura detectada na laje do piso 2    ││
+│  │ com largura aproximada de 2mm.         ││
+│  └─────────────────────────────────────────┘│
+│                                             │
+│  Norma Violada: NP EN 206-1                 │
+│  Prazo: 15 Fev 2026                         │
+│  Responsavel: Pedro Santos                  │
+│                                             │
+│  ─────────────────────────────────────────  │
+│  Fotos de Evidencia                         │
+│  ┌──────┐ ┌──────┐ ┌──────┐                │
+│  │ 📷   │ │ 📷   │ │ 📷   │                │
+│  └──────┘ └──────┘ └──────┘                │
+│                                             │
+│  ─────────────────────────────────────────  │
+│  Accao Corretiva                            │
+│  ┌─────────────────────────────────────────┐│
+│  │ Injectar resina epoxy nas fissuras...  ││
+│  └─────────────────────────────────────────┘│
+│                                             │
+│  ─────────────────────────────────────────  │
+│  Historico                                  │
+│  ○ Aberta - 05 Fev 2026 - Joao Silva       │
+│  │                                          │
+│  ○ Em Resolucao - 07 Fev 2026 - Pedro      │
+│  │  "Iniciada correcao com resina"         │
+│                                             │
+│  ─────────────────────────────────────────  │
+│  Alterar Estado                             │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐    │
+│  │ Aberta   │ │ Em Res.  │ │ A Verif. │    │
+│  └──────────┘ └──────────┘ └──────────┘    │
+│  ┌────────────────────────────────────┐    │
+│  │ Fechada (requer foto comprovacao)  │    │
+│  └────────────────────────────────────┘    │
+│                                             │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+## Componente NCStatusTimeline.tsx
+
+Timeline visual mostrando historico de mudancas de estado:
+
+```text
+interface StatusHistoryItem {
+  id: string;
+  old_status: string | null;
+  new_status: string;
+  changed_by: string;
+  notes: string | null;
+  created_at: string;
+  profiles?: { full_name: string };
+}
+```
+
+Estilo visual:
+- Linha vertical conectando os pontos
+- Circulo colorido por estado
+- Data + Nome do utilizador
+- Nota opcional abaixo
+
+---
+
+## Componente CloseNCModal.tsx
+
+Modal que aparece quando o utilizador tenta mudar estado para "Fechada":
+
+```text
+┌─────────────────────────────────────────────┐
+│  Fechar Nao-Conformidade               [X] │
+├─────────────────────────────────────────────┤
+│                                             │
+│  Para fechar esta NC, e necessario anexar  │
+│  uma foto comprovando a resolucao.          │
+│                                             │
+│  ┌─────────────────────────────────────────┐│
+│  │  [📷] Selecionar foto de comprovacao   ││
+│  └─────────────────────────────────────────┘│
+│                                             │
+│  Notas de Encerramento                      │
+│  ┌─────────────────────────────────────────┐│
+│  │ Descreva como foi resolvido...         ││
+│  └─────────────────────────────────────────┘│
+│                                             │
+│                  [Cancelar]  [Fechar NC]    │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+## Fluxo de Estados
+
+```text
+     ┌────────┐
+     │ ABERTA │ (Estado inicial)
+     └────┬───┘
+          │
+          ▼
+   ┌─────────────┐
+   │ EM RESOLUCAO│
+   └──────┬──────┘
+          │
+          ▼
+   ┌────────────┐
+   │ A VERIFICAR│
+   └──────┬─────┘
+          │ (requer foto)
+          ▼
+     ┌────────┐
+     │ FECHADA│ (Estado final)
+     └────────┘
+```
+
+### Logica de Transicao:
+- OPEN -> IN_PROGRESS: Pode mudar livremente
+- IN_PROGRESS -> RESOLVED: Pode mudar livremente
+- RESOLVED -> CLOSED: Requer foto de comprovacao
+- Qualquer estado pode voltar atras (exceto CLOSED)
+- CLOSED e estado final, nao pode ser alterado
+
+---
+
+## Exportacao Excel
+
+Usar biblioteca nativa do browser para gerar CSV (compativel com Excel):
+
+```typescript
+const exportToExcel = () => {
+  if (!nonconformities) return;
+  
+  const headers = ['ID', 'Obra', 'Descricao', 'Severidade', 'Estado', 'Prazo', 'Responsavel', 'Criado em'];
+  
+  const rows = nonconformities.map((nc, index) => [
+    `#${String(index + 1).padStart(3, '0')}`,
+    nc.sites?.name || '-',
+    nc.description || nc.title,
+    t(`nc.severity${nc.severity.charAt(0).toUpperCase() + nc.severity.slice(1)}`),
+    t(`nc.status.${nc.status.toLowerCase()}`),
+    nc.due_date ? format(new Date(nc.due_date), 'dd/MM/yyyy') : '-',
+    nc.responsible || '-',
+    format(new Date(nc.created_at), 'dd/MM/yyyy HH:mm'),
+  ]);
+  
+  const csv = [headers, ...rows]
+    .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';'))
+    .join('\n');
+  
+  const bom = '\uFEFF'; // BOM para suportar acentos
+  const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `nao-conformidades_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+```
+
+---
+
+## Navegacao - AppSidebar.tsx
+
+Adicionar link na navegacao principal:
+
+```typescript
+const mainItems = [
+  { title: t('nav.dashboard'), url: '/app', icon: LayoutDashboard },
+  { title: t('nav.organizations'), url: '/app/organizations', icon: Building2 },
+  { title: t('nav.sites'), url: '/app/sites', icon: HardHat },
+  { title: t('nav.captures'), url: '/app/captures', icon: Camera },
+  { title: t('nav.inspections'), url: '/app/inspections', icon: ClipboardCheck },
+  { title: t('nav.nonconformities'), url: '/app/nonconformities', icon: AlertTriangle }, // NOVO
+  { title: t('nav.reports'), url: '/app/reports', icon: BarChart3 },
+];
+```
+
+---
+
+## Rota - App.tsx
+
+Adicionar nova rota:
+
+```typescript
+import NonConformities from "./pages/app/NonConformities";
+
+// Dentro das rotas do AppLayout:
+<Route path="nonconformities" element={<NonConformities />} />
 ```
 
 ---
 
 ## Traducoes a Adicionar
 
-```text
-nc.title: "Titulo"
-nc.description: "Descricao do Problema"
-nc.descriptionRequired: "A descricao e obrigatoria"
-nc.severity: "Severidade"
-nc.severityCritical: "Critico"
-nc.severityHigh: "Importante"
-nc.severityMedium: "Menor"
-nc.dueDate: "Prazo para Resolucao"
-nc.standardViolated: "Norma/Especificacao Violada"
-nc.standardViolatedPlaceholder: "Ex: NP EN 206-1, Decreto-Lei..."
-nc.evidence: "Fotos de Evidencia"
-nc.addEvidence: "Adicionar Fotos"
-nc.correctiveAction: "Acao Corretiva"
-nc.correctiveActionPlaceholder: "Descreva a acao corretiva..."
-nc.create: "Registar NC"
-nc.created: "Nao-conformidade registada com sucesso"
-
-dashboard.sitesWithNCs: "Obras com Nao-Conformidades"
-dashboard.openNCsCount: "{{count}} NC(s) aberta(s)"
-dashboard.noOpenNCs: "Nenhuma NC aberta"
-```
-
----
-
-## Validacoes do Formulario
-
-```text
-Campos Obrigatorios:
-- Titulo (minimo 5 caracteres)
-- Descricao (minimo 10 caracteres)
-- Severidade (deve selecionar uma)
-
-Campos Opcionais:
-- Prazo para Resolucao
-- Norma/Especificacao Violada
-- Fotos de Evidencia
-- Accao Corretiva
-```
-
----
-
-## Fluxo Completo
-
-```text
-1. Utilizador marca item como "Nao Conforme" no checklist
-   ↓
-2. Modal de NC abre automaticamente
-   ↓
-3. Titulo pre-preenchido com "NC - [titulo do item]"
-   ↓
-4. Utilizador preenche descricao (obrigatorio)
-   ↓
-5. Seleciona severidade (Critico/Importante/Menor)
-   ↓
-6. Opcionalmente define prazo via DatePicker
-   ↓
-7. Opcionalmente indica norma violada
-   ↓
-8. Opcionalmente anexa fotos de evidencia
-   ↓
-9. Clica "Registar NC"
-   ↓
-10. Sistema cria:
-    - Registo em nonconformities com status = 'OPEN'
-    - Registos em nonconformity_evidence para cada foto
-   ↓
-11. Toast de sucesso
-12. Modal fecha
-13. Item do checklist permanece como NC
-```
-
----
-
-## Secao Tecnica
-
-### Props do Componente Melhorado:
-
-```text
-interface CreateNCFromItemProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  inspectionId: string;
-  inspectionItemId: string;
-  siteId: string;          // NOVO - para associar NC directamente a obra
-  itemTitle: string;
-  onSuccess: () => void;
+### Portugues (pt.json):
+```json
+"nav": {
+  "nonconformities": "Nao-Conformidades"
+},
+"ncPage": {
+  "title": "Nao-Conformidades",
+  "subtitle": "Gerir todas as nao-conformidades registadas",
+  "exportExcel": "Exportar Excel",
+  "filterBySite": "Filtrar por obra",
+  "filterBySeverity": "Filtrar por severidade",
+  "filterByStatus": "Filtrar por estado",
+  "allSites": "Todas as obras",
+  "allSeverities": "Todas as severidades",
+  "allStatuses": "Todos os estados",
+  "clearFilters": "Limpar filtros",
+  "noResults": "Nenhuma nao-conformidade encontrada",
+  "noResultsDesc": "Nao existem NCs com os filtros aplicados",
+  "columns": {
+    "id": "ID",
+    "site": "Obra",
+    "description": "Descricao",
+    "severity": "Severidade",
+    "status": "Estado",
+    "dueDate": "Prazo",
+    "responsible": "Responsavel"
+  }
+},
+"nc": {
+  "status": {
+    "open": "Aberta",
+    "in_progress": "Em Resolucao",
+    "resolved": "A Verificar",
+    "closed": "Fechada"
+  },
+  "detail": {
+    "site": "Obra",
+    "inspection": "Inspecao",
+    "createdBy": "Criado por",
+    "createdAt": "Data de Criacao",
+    "description": "Descricao do Problema",
+    "standardViolated": "Norma Violada",
+    "dueDate": "Prazo para Resolucao",
+    "responsible": "Responsavel",
+    "correctiveAction": "Accao Corretiva",
+    "evidence": "Fotos de Evidencia",
+    "noEvidence": "Sem fotos de evidencia",
+    "history": "Historico",
+    "changeStatus": "Alterar Estado",
+    "statusChanged": "Estado alterado com sucesso",
+    "closeNC": "Fechar NC",
+    "closingPhotoRequired": "Para fechar esta NC, anexe uma foto comprovando a resolucao",
+    "closingNotes": "Notas de Encerramento",
+    "closingNotesPlaceholder": "Descreva como foi resolvido...",
+    "selectPhoto": "Selecionar foto de comprovacao",
+    "ncClosed": "Nao-conformidade fechada com sucesso"
+  }
 }
 ```
 
-### Dados a Guardar:
-
-```text
-nonconformities:
-  - inspection_id
-  - inspection_item_id
-  - site_id (NOVO)
-  - title
-  - description (obrigatorio)
-  - severity ('critical' | 'high' | 'medium')
-  - due_date
-  - standard_violated (NOVO)
-  - corrective_action
-  - status = 'OPEN'
-  - created_by (NOVO)
-```
-
-### RLS para Nova Tabela:
-
-```text
--- nonconformity_evidence RLS
-CREATE POLICY "Users can view evidence for accessible NCs"
-  ON nonconformity_evidence FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM nonconformities nc
-      JOIN inspections i ON i.id = nc.inspection_id
-      WHERE nc.id = nonconformity_evidence.nonconformity_id
-      AND can_access_site(auth.uid(), i.site_id)
-    )
-  );
-
-CREATE POLICY "Users can insert evidence for accessible NCs"
-  ON nonconformity_evidence FOR INSERT
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM nonconformities nc
-      JOIN inspections i ON i.id = nc.inspection_id
-      WHERE nc.id = nonconformity_evidence.nonconformity_id
-      AND can_access_site(auth.uid(), i.site_id)
-    )
-  );
+### Ingles (en.json):
+```json
+"nav": {
+  "nonconformities": "Non-Conformities"
+},
+"ncPage": {
+  "title": "Non-Conformities",
+  "subtitle": "Manage all registered non-conformities",
+  "exportExcel": "Export Excel",
+  "filterBySite": "Filter by site",
+  "filterBySeverity": "Filter by severity",
+  "filterByStatus": "Filter by status",
+  "allSites": "All sites",
+  "allSeverities": "All severities",
+  "allStatuses": "All statuses",
+  "clearFilters": "Clear filters",
+  "noResults": "No non-conformities found",
+  "noResultsDesc": "There are no NCs with the applied filters",
+  "columns": {
+    "id": "ID",
+    "site": "Site",
+    "description": "Description",
+    "severity": "Severity",
+    "status": "Status",
+    "dueDate": "Due Date",
+    "responsible": "Responsible"
+  }
+},
+"nc": {
+  "status": {
+    "open": "Open",
+    "in_progress": "In Progress",
+    "resolved": "To Verify",
+    "closed": "Closed"
+  },
+  "detail": {
+    "site": "Site",
+    "inspection": "Inspection",
+    "createdBy": "Created by",
+    "createdAt": "Created at",
+    "description": "Problem Description",
+    "standardViolated": "Standard Violated",
+    "dueDate": "Due Date",
+    "responsible": "Responsible",
+    "correctiveAction": "Corrective Action",
+    "evidence": "Evidence Photos",
+    "noEvidence": "No evidence photos",
+    "history": "History",
+    "changeStatus": "Change Status",
+    "statusChanged": "Status changed successfully",
+    "closeNC": "Close NC",
+    "closingPhotoRequired": "To close this NC, attach a photo proving the resolution",
+    "closingNotes": "Closing Notes",
+    "closingNotesPlaceholder": "Describe how it was resolved...",
+    "selectPhoto": "Select proof photo",
+    "ncClosed": "Non-conformity closed successfully"
+  }
+}
 ```
 
 ---
 
 ## Resumo das Alteracoes
 
-1. **Migracao BD**: Adicionar campos `site_id`, `standard_violated`, `created_by` a nonconformities + criar tabela `nonconformity_evidence`
-2. **CreateNCFromItem.tsx**: Reescrever com nova UI, campos obrigatorios, DatePicker, upload de fotos
-3. **InspectionDetail.tsx**: Passar `siteId` ao modal de NC
-4. **Dashboard.tsx**: Adicionar secao de obras com NCs abertas
-5. **Traducoes**: Novas chaves em PT e EN
+1. **Migracao BD**: Criar tabela `nonconformity_status_history` para timeline
+2. **NonConformities.tsx**: Pagina principal com tabela e filtros
+3. **NCFilters.tsx**: Componente de filtros reutilizavel
+4. **NCDetailSheet.tsx**: Painel lateral com detalhes completos
+5. **NCStatusTimeline.tsx**: Timeline visual do historico
+6. **NCEvidenceGallery.tsx**: Galeria de fotos de evidencia
+7. **CloseNCModal.tsx**: Modal para fechar NC com foto obrigatoria
+8. **AppSidebar.tsx**: Adicionar link na navegacao
+9. **App.tsx**: Adicionar rota /app/nonconformities
+10. **Traducoes**: Novas chaves em PT e EN
+
+---
+
+## Consideracoes Tecnicas
+
+1. **Performance**: Usar paginacao se lista crescer muito
+2. **Exportacao**: CSV com BOM para suportar caracteres especiais
+3. **RLS**: Policies existentes garantem acesso apenas a NCs de sites acessiveis
+4. **Offline (futuro)**: Estrutura preparada para sincronizacao
+5. **Responsive**: Sheet lateral funciona bem em mobile
