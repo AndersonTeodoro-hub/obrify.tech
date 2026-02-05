@@ -80,6 +80,7 @@
     "sites": "Obras",
     "captures": "Capturas",
     "inspections": "Fiscalizações",
+    "nonconformities": "Não-Conformidades",
     "reports": "Relatórios",
     "documents": "Documentos",
     "drone": "Drones",
@@ -127,7 +128,58 @@
     "correctiveAction": "Ação Corretiva",
     "correctiveActionPlaceholder": "Descreva a ação corretiva necessária...",
     "create": "Registar NC",
-    "created": "Não-conformidade registada com sucesso"
+    "created": "Não-conformidade registada com sucesso",
+    "status": {
+      "open": "Aberta",
+      "in_progress": "Em Resolução",
+      "resolved": "A Verificar",
+      "closed": "Fechada"
+    },
+    "detail": {
+      "site": "Obra",
+      "inspection": "Inspeção",
+      "createdBy": "Criado por",
+      "createdAt": "Data de Criação",
+      "description": "Descrição do Problema",
+      "standardViolated": "Norma Violada",
+      "dueDate": "Prazo para Resolução",
+      "responsible": "Responsável",
+      "correctiveAction": "Ação Corretiva",
+      "evidence": "Fotos de Evidência",
+      "noEvidence": "Sem fotos de evidência",
+      "history": "Histórico",
+      "changeStatus": "Alterar Estado",
+      "statusChanged": "Estado alterado com sucesso",
+      "closeNC": "Fechar NC",
+      "closingPhotoRequired": "Para fechar esta NC, anexe uma foto comprovando a resolução",
+      "closingNotes": "Notas de Encerramento",
+      "closingNotesPlaceholder": "Descreva como foi resolvido...",
+      "selectPhoto": "Selecionar foto de comprovação",
+      "ncClosed": "Não-conformidade fechada com sucesso"
+    }
+  },
+  "ncPage": {
+    "title": "Não-Conformidades",
+    "subtitle": "Gerir todas as não-conformidades registadas",
+    "exportExcel": "Exportar Excel",
+    "filterBySite": "Filtrar por obra",
+    "filterBySeverity": "Filtrar por severidade",
+    "filterByStatus": "Filtrar por estado",
+    "allSites": "Todas as obras",
+    "allSeverities": "Todas as severidades",
+    "allStatuses": "Todos os estados",
+    "clearFilters": "Limpar filtros",
+    "noResults": "Nenhuma não-conformidade encontrada",
+    "noResultsDesc": "Não existem NCs com os filtros aplicados",
+    "columns": {
+      "id": "ID",
+      "site": "Obra",
+      "description": "Descrição",
+      "severity": "Severidade",
+      "status": "Estado",
+      "dueDate": "Prazo",
+      "responsible": "Responsável"
+    }
   },
   "organizations": {
     "title": "Organizações",

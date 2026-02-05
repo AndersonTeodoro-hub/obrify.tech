@@ -11,6 +11,7 @@ import {
   Settings,
   LogOut,
   Activity,
+  AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { NavLink } from '@/components/NavLink';
@@ -53,6 +54,7 @@ export function AppSidebar() {
     { title: t('nav.sites'), url: '/app/sites', icon: HardHat },
     { title: t('nav.captures'), url: '/app/captures', icon: Camera },
     { title: t('nav.inspections'), url: '/app/inspections', icon: ClipboardCheck },
+    { title: t('nav.nonconformities'), url: '/app/nonconformities', icon: AlertTriangle },
     { title: t('nav.reports'), url: '/app/reports', icon: BarChart3 },
   ];
 
