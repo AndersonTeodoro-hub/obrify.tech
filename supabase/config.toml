@@ -1,4 +1,7 @@
- project_id = "xwodfkscsdcgpblbnxhd"
- 
- [functions.ai-fiscal-agent]
- verify_jwt = false
+project_id = "xwodfkscsdcgpblbnxhd"
+
+[functions.ai-fiscal-agent]
+verify_jwt = false
+
+[functions.ai-image-analysis]
+verify_jwt = false
