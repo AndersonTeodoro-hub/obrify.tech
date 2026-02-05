@@ -1,63 +1,319 @@
 
-# Plano: Pagina de Gestao de Nao-Conformidades (NonConformities.tsx)
+# Plano: Servico de Geracao de PDFs
 
 ## Resumo
-Criar uma pagina completa para gestao de todas as nao-conformidades com tabela, filtros, painel lateral de detalhes, fluxo de estados, timeline de alteracoes, e exportacao para Excel.
+Instalar as bibliotecas jspdf e jspdf-autotable, e criar um servico completo de geracao de PDFs com tres funcoes principais: relatorio de inspecao, ficha de nao-conformidade, e auto de medicao.
 
 ---
 
-## Analise do Estado Actual
-
-### Tabelas Existentes:
-- **nonconformities**: id, title, description, severity, status, due_date, responsible, corrective_action, site_id, inspection_id, inspection_item_id, standard_violated, created_by, created_at, updated_at
-- **nonconformity_evidence**: id, nonconformity_id, file_path, created_at
-- **sites**: id, name, address
-- **inspections**: id, site_id, template_id
-
-### Estados Existentes (Enum):
-- `OPEN` - Aberta
-- `IN_PROGRESS` - Em Resolucao
-- `RESOLVED` - A Verificar (renomear na UI)
-- `CLOSED` - Fechada
-
-### Componentes Existentes:
-- `CreateNCFromItem.tsx` - Modal para criar NC
-- `SitesWithNCs.tsx` - Contador de NCs por obra no dashboard
-- Componentes UI: Sheet, Table, Select, Badge, Button, Calendar
-
----
-
-## Arquitectura da Solucao
+## Dependencias a Instalar
 
 ```text
-NonConformities.tsx (Pagina Principal)
-├── Header
-│   ├── Titulo + Subtitulo
-│   └── Botao Exportar Excel
+jspdf - Biblioteca base para geracao de PDFs
+jspdf-autotable - Plugin para criar tabelas formatadas automaticamente
+```
+
+---
+
+## Estrutura do Servico
+
+Criar ficheiro `/src/services/pdfGenerator.ts` com:
+
+```text
+pdfGenerator.ts
+├── Configuracao base (A4, margens, fonte)
+├── Funcoes auxiliares
+│   ├── addHeader() - Cabecalho com logo e titulo
+│   ├── addFooter() - Rodape com pagina e data
+│   └── loadImage() - Carregar imagens do Storage
 │
-├── Filtros (NCFilters.tsx)
-│   ├── Por Obra (Select)
-│   ├── Por Severidade (Select)
-│   ├── Por Estado (Select)
-│   └── Limpar Filtros
+├── generateInspectionReport(inspectionId)
+│   ├── Dados: inspecao, template, itens, resultados, fotos
+│   ├── Conteudo: cabecalho, info geral, checklist, resumo
+│   └── Retorna: Blob do PDF
 │
-├── Tabela de NCs
-│   ├── ID (codigo curto)
-│   ├── Obra (nome)
-│   ├── Descricao (truncada 50 chars)
-│   ├── Severidade (badge colorido)
-│   ├── Estado (badge)
-│   ├── Prazo (data formatada)
-│   ├── Responsavel
-│   └── Accoes (Ver)
+├── generateNCReport(ncId)
+│   ├── Dados: NC, obra, evidencias, historico
+│   ├── Conteudo: cabecalho, detalhes, fotos, timeline
+│   └── Retorna: Blob do PDF
 │
-└── Sheet Lateral (NCDetailSheet.tsx)
-    ├── Header com titulo + severidade
-    ├── Informacoes detalhadas
-    ├── Fotos de evidencia
-    ├── Timeline de alteracoes
-    ├── Selector de estado
-    └── Upload foto (se fechar)
+└── generateMeasurementAuto(siteId, period)
+    ├── Dados: obra, inspecoes do periodo
+    ├── Conteudo: cabecalho, resumo trabalhos, totais
+    └── Retorna: Blob do PDF
+```
+
+---
+
+## Configuracao Base do PDF
+
+```text
+Formato: A4 (210mm x 297mm)
+Margens: 20mm (equivalente a ~2cm)
+Fonte: Helvetica (similar a Arial, disponivel nativamente no jsPDF)
+Cores:
+  - Primaria: #3B82F6 (azul)
+  - Texto: #1F2937 (cinza escuro)
+  - Secundario: #6B7280 (cinza medio)
+```
+
+---
+
+## Funcao 1: generateInspectionReport(inspectionId)
+
+### Dados a Buscar:
+
+```text
+1. inspections (id, status, scheduled_at, created_by)
+   └── sites (name, address)
+   └── inspection_templates (name, category)
+   └── floors, areas, capture_points (localizacao)
+
+2. inspection_items (result, notes)
+   └── inspection_template_items (title, is_required)
+
+3. evidence_links + captures (fotos anexadas)
+
+4. profiles (nome do inspector)
+```
+
+### Estrutura do Relatorio:
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│  [LOGO]              RELATORIO DE INSPECAO              │
+│                                                          │
+│  Obra: Edificio Aurora                                  │
+│  Template: Pre-Betonagem Laje                           │
+│  Data: 05 Fevereiro 2026                                │
+│  Inspector: Joao Silva                                  │
+│  Localizacao: Piso 1 > Sala A > P01                    │
+├─────────────────────────────────────────────────────────┤
+│                                                          │
+│  RESUMO                                                  │
+│  ┌──────────────┬──────────────┬──────────────┐         │
+│  │ Conforme: 15 │ NC: 3        │ N/A: 2       │         │
+│  └──────────────┴──────────────┴──────────────┘         │
+│                                                          │
+│  CHECKLIST                                               │
+│  ┌────┬────────────────────┬──────────┬────────────────┐│
+│  │ #  │ Item               │ Resultado│ Observacoes    ││
+│  ├────┼────────────────────┼──────────┼────────────────┤│
+│  │ 1  │ Cofragem limpa     │ OK       │ -              ││
+│  │ 2  │ Armadura conforme  │ NC       │ Falta de rec...││
+│  │ 3  │ ...                │ ...      │ ...            ││
+│  └────┴────────────────────┴──────────┴────────────────┘│
+│                                                          │
+│  FOTOS ANEXADAS (se existirem)                          │
+│  ┌────────┐ ┌────────┐ ┌────────┐                       │
+│  │        │ │        │ │        │                       │
+│  └────────┘ └────────┘ └────────┘                       │
+│                                                          │
+├─────────────────────────────────────────────────────────┤
+│  Pagina 1 de 2                    Gerado em 05/02/2026  │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Funcao 2: generateNCReport(ncId)
+
+### Dados a Buscar:
+
+```text
+1. nonconformities (todos os campos)
+   └── sites (name, address)
+   └── inspections > inspection_templates (nome do template)
+
+2. nonconformity_evidence (file_path para fotos)
+
+3. nonconformity_status_history (timeline)
+   └── profiles (nome de quem alterou)
+
+4. profiles (nome do criador)
+```
+
+### Estrutura da Ficha NC:
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│  [LOGO]        FICHA DE NAO-CONFORMIDADE                │
+│                                                          │
+│  NC-001                              Estado: EM RESOLUCAO│
+│  Severidade: CRITICO                                     │
+├─────────────────────────────────────────────────────────┤
+│                                                          │
+│  DADOS GERAIS                                            │
+│  Obra: Edificio Aurora                                  │
+│  Inspecao: Pre-Betonagem Laje                           │
+│  Data Criacao: 05/02/2026                               │
+│  Prazo: 15/02/2026                                      │
+│  Responsavel: Pedro Santos                              │
+│  Norma Violada: NP EN 206-1                             │
+│                                                          │
+│  ──────────────────────────────────────────────────────  │
+│                                                          │
+│  DESCRICAO DO PROBLEMA                                   │
+│  ┌─────────────────────────────────────────────────────┐│
+│  │ Fissura detectada na laje do piso 2 com largura    ││
+│  │ aproximada de 2mm, comprometendo a integridade...  ││
+│  └─────────────────────────────────────────────────────┘│
+│                                                          │
+│  ACAO CORRETIVA                                          │
+│  ┌─────────────────────────────────────────────────────┐│
+│  │ Injectar resina epoxy nas fissuras. Aguardar cura  ││
+│  │ de 48 horas antes de proceder a verificacao...     ││
+│  └─────────────────────────────────────────────────────┘│
+│                                                          │
+│  EVIDENCIAS FOTOGRAFICAS                                 │
+│  ┌────────┐ ┌────────┐                                  │
+│  │        │ │        │                                  │
+│  │ Foto 1 │ │ Foto 2 │                                  │
+│  └────────┘ └────────┘                                  │
+│                                                          │
+│  HISTORICO DE ALTERACOES                                 │
+│  ○ 05/02/2026 10:30 - Aberta (Joao Silva)              │
+│  │                                                       │
+│  ○ 07/02/2026 14:15 - Em Resolucao (Pedro Santos)       │
+│    "Iniciada intervencao com resina epoxy"              │
+│                                                          │
+├─────────────────────────────────────────────────────────┤
+│  Pagina 1 de 1                    Gerado em 05/02/2026  │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Funcao 3: generateMeasurementAuto(siteId, period)
+
+### Dados a Buscar:
+
+```text
+1. sites (name, address, org_id)
+   └── organizations (name - dono da obra)
+
+2. inspections do periodo
+   └── inspection_templates (nome)
+   └── inspection_items (resumo de resultados)
+
+3. nonconformities do periodo (resumo)
+```
+
+### Estrutura do Auto de Medicao:
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│  [LOGO]              AUTO DE MEDICAO                    │
+│                                                          │
+│  Periodo: 01/01/2026 a 31/01/2026                       │
+├─────────────────────────────────────────────────────────┤
+│                                                          │
+│  IDENTIFICACAO                                           │
+│  Obra: Edificio Aurora                                  │
+│  Morada: Rua das Flores, 123, Lisboa                    │
+│  Dono de Obra: Empresa XYZ, Lda                         │
+│  Fiscalizacao: SitePulse                                │
+│                                                          │
+│  ──────────────────────────────────────────────────────  │
+│                                                          │
+│  RESUMO DO PERIODO                                       │
+│  ┌───────────────────────────────┬─────────────────────┐│
+│  │ Fiscalizacoes Realizadas      │ 12                  ││
+│  │ Itens Verificados             │ 156                 ││
+│  │ Conformes                     │ 142 (91%)           ││
+│  │ Nao Conformes                 │ 8 (5%)              ││
+│  │ Observacoes                   │ 6 (4%)              ││
+│  └───────────────────────────────┴─────────────────────┘│
+│                                                          │
+│  NAO-CONFORMIDADES DO PERIODO                            │
+│  ┌────┬─────────────────┬──────────┬───────────────────┐│
+│  │ NC │ Descricao       │ Severid. │ Estado            ││
+│  ├────┼─────────────────┼──────────┼───────────────────┤│
+│  │ 001│ Fissura laje    │ Critico  │ Em Resolucao     ││
+│  │ 002│ Infiltracao     │ Importante│ Fechada          ││
+│  └────┴─────────────────┴──────────┴───────────────────┘│
+│                                                          │
+│  OBSERVACOES GERAIS                                      │
+│  [Espaco para notas adicionais]                         │
+│                                                          │
+│  ──────────────────────────────────────────────────────  │
+│                                                          │
+│  ASSINATURAS                                             │
+│  Fiscalizacao: ___________________ Data: ___________    │
+│  Dono de Obra: ___________________ Data: ___________    │
+│                                                          │
+├─────────────────────────────────────────────────────────┤
+│  Pagina 1 de 1                    Gerado em 05/02/2026  │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Implementacao Tecnica
+
+### Estrutura do Ficheiro pdfGenerator.ts:
+
+```text
+// Importacoes
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { supabase } from '@/integrations/supabase/client';
+import { format } from 'date-fns';
+import { pt } from 'date-fns/locale';
+
+// Constantes de configuracao
+const PAGE_WIDTH = 210;  // mm (A4)
+const PAGE_HEIGHT = 297; // mm (A4)
+const MARGIN = 20;       // mm (~2cm)
+const CONTENT_WIDTH = PAGE_WIDTH - (MARGIN * 2);
+
+// Cores
+const COLORS = {
+  primary: [59, 130, 246],    // #3B82F6
+  text: [31, 41, 55],         // #1F2937
+  secondary: [107, 114, 128], // #6B7280
+  success: [34, 197, 94],     // #22C55E
+  danger: [239, 68, 68],      // #EF4444
+  warning: [234, 179, 8],     // #EAB308
+};
+
+// Funcao auxiliar para adicionar cabecalho
+function addHeader(doc: jsPDF, title: string): number
+
+// Funcao auxiliar para adicionar rodape
+function addFooter(doc: jsPDF, pageNum: number, totalPages: number): void
+
+// Funcao para carregar imagem do Storage
+async function loadImageFromStorage(filePath: string): Promise<string | null>
+
+// Funcoes principais exportadas
+export async function generateInspectionReport(inspectionId: string): Promise<Blob>
+export async function generateNCReport(ncId: string): Promise<Blob>
+export async function generateMeasurementAuto(siteId: string, period: { start: Date; end: Date }): Promise<Blob>
+```
+
+### Utilizacao nos Componentes:
+
+```text
+import { generateInspectionReport, generateNCReport } from '@/services/pdfGenerator';
+
+// Exemplo de uso
+const handleDownloadReport = async () => {
+  setIsGenerating(true);
+  try {
+    const blob = await generateInspectionReport(inspectionId);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `relatorio-inspecao-${format(new Date(), 'yyyy-MM-dd')}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    toast({ title: t('common.error'), variant: 'destructive' });
+  } finally {
+    setIsGenerating(false);
+  }
+};
 ```
 
 ---
@@ -66,478 +322,58 @@ NonConformities.tsx (Pagina Principal)
 
 | Ficheiro | Accao |
 |----------|-------|
-| src/pages/app/NonConformities.tsx | Criar |
-| src/components/nonconformities/NCFilters.tsx | Criar |
-| src/components/nonconformities/NCDetailSheet.tsx | Criar |
-| src/components/nonconformities/NCStatusTimeline.tsx | Criar |
-| src/components/nonconformities/NCEvidenceGallery.tsx | Criar |
-| src/components/nonconformities/CloseNCModal.tsx | Criar |
-| src/components/layout/AppSidebar.tsx | Modificar (adicionar link) |
-| src/App.tsx | Modificar (adicionar rota) |
-| src/i18n/locales/pt.json | Adicionar chaves |
-| src/i18n/locales/en.json | Adicionar chaves |
-
-### Migracao de Base de Dados
-Criar tabela para registar historico de alteracoes de estado:
-
-```sql
-CREATE TABLE IF NOT EXISTS public.nonconformity_status_history (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  nonconformity_id uuid REFERENCES public.nonconformities(id) ON DELETE CASCADE NOT NULL,
-  old_status text,
-  new_status text NOT NULL,
-  changed_by uuid,
-  notes text,
-  created_at timestamptz DEFAULT now()
-);
-
-CREATE INDEX idx_nc_status_history_nc_id ON public.nonconformity_status_history(nonconformity_id);
-
--- RLS Policies
-ALTER TABLE public.nonconformity_status_history ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can view status history for accessible NCs"
-  ON public.nonconformity_status_history FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM nonconformities nc
-      JOIN inspections i ON i.id = nc.inspection_id
-      WHERE nc.id = nonconformity_status_history.nonconformity_id
-      AND can_access_site(auth.uid(), i.site_id)
-    )
-  );
-
-CREATE POLICY "Users can insert status history for accessible NCs"
-  ON public.nonconformity_status_history FOR INSERT
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM nonconformities nc
-      JOIN inspections i ON i.id = nc.inspection_id
-      WHERE nc.id = nonconformity_status_history.nonconformity_id
-      AND can_access_site(auth.uid(), i.site_id)
-    )
-  );
-```
-
----
-
-## Componente NonConformities.tsx
-
-### Estrutura Visual:
-
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│  Nao-Conformidades                           [📥 Exportar Excel]│
-│  Gerir todas as nao-conformidades registadas                    │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ [Limpar]   │
-│  │ Obra ▼       │ │ Severidade ▼ │ │ Estado ▼     │             │
-│  └──────────────┘ └──────────────┘ └──────────────┘             │
-│                                                                  │
-├─────────────────────────────────────────────────────────────────┤
-│  ID    │ Obra      │ Descricao      │ Sev. │ Estado │ Prazo    │
-├────────┼───────────┼────────────────┼──────┼────────┼──────────┤
-│  #001  │ Aurora    │ Fissura na...  │ 🔴   │ Aberta │ 15 Fev   │
-│  #002  │ Mar       │ Infiltracao... │ 🟠   │ Em Res.│ 20 Fev   │
-│  #003  │ Sol       │ Desvio no...   │ 🟡   │ A Ver. │ 10 Fev   │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Query de Dados:
-
-```typescript
-const { data: nonconformities } = useQuery({
-  queryKey: ['all-nonconformities', siteFilter, severityFilter, statusFilter],
-  queryFn: async () => {
-    let query = supabase
-      .from('nonconformities')
-      .select(`
-        *,
-        sites!nonconformities_site_id_fkey(id, name),
-        inspections!nonconformities_inspection_id_fkey(
-          id, 
-          inspection_templates(name)
-        )
-      `)
-      .order('created_at', { ascending: false });
-
-    if (siteFilter !== 'all') {
-      query = query.eq('site_id', siteFilter);
-    }
-    if (severityFilter !== 'all') {
-      query = query.eq('severity', severityFilter);
-    }
-    if (statusFilter !== 'all') {
-      query = query.eq('status', statusFilter);
-    }
-
-    const { data, error } = await query;
-    if (error) throw error;
-    return data;
-  },
-});
-```
-
----
-
-## Componente NCDetailSheet.tsx
-
-### Estrutura Visual:
-
-```text
-┌─────────────────────────────────────────────┐
-│  NC #001                                [X] │
-│  ──────────────────────────────────────────│
-│                                             │
-│  ┌─────────────────────────────────────────┐│
-│  │ 🔴 CRITICO                      Aberta  ││
-│  └─────────────────────────────────────────┘│
-│                                             │
-│  Obra: Edificio Aurora                      │
-│  Inspecao: Pre-Betonagem Laje              │
-│  Criado por: Joao Silva                     │
-│  Data: 05 Fev 2026                         │
-│                                             │
-│  ─────────────────────────────────────────  │
-│  Descricao do Problema                      │
-│  ┌─────────────────────────────────────────┐│
-│  │ Fissura detectada na laje do piso 2    ││
-│  │ com largura aproximada de 2mm.         ││
-│  └─────────────────────────────────────────┘│
-│                                             │
-│  Norma Violada: NP EN 206-1                 │
-│  Prazo: 15 Fev 2026                         │
-│  Responsavel: Pedro Santos                  │
-│                                             │
-│  ─────────────────────────────────────────  │
-│  Fotos de Evidencia                         │
-│  ┌──────┐ ┌──────┐ ┌──────┐                │
-│  │ 📷   │ │ 📷   │ │ 📷   │                │
-│  └──────┘ └──────┘ └──────┘                │
-│                                             │
-│  ─────────────────────────────────────────  │
-│  Accao Corretiva                            │
-│  ┌─────────────────────────────────────────┐│
-│  │ Injectar resina epoxy nas fissuras...  ││
-│  └─────────────────────────────────────────┘│
-│                                             │
-│  ─────────────────────────────────────────  │
-│  Historico                                  │
-│  ○ Aberta - 05 Fev 2026 - Joao Silva       │
-│  │                                          │
-│  ○ Em Resolucao - 07 Fev 2026 - Pedro      │
-│  │  "Iniciada correcao com resina"         │
-│                                             │
-│  ─────────────────────────────────────────  │
-│  Alterar Estado                             │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐    │
-│  │ Aberta   │ │ Em Res.  │ │ A Verif. │    │
-│  └──────────┘ └──────────┘ └──────────┘    │
-│  ┌────────────────────────────────────┐    │
-│  │ Fechada (requer foto comprovacao)  │    │
-│  └────────────────────────────────────┘    │
-│                                             │
-└─────────────────────────────────────────────┘
-```
-
----
-
-## Componente NCStatusTimeline.tsx
-
-Timeline visual mostrando historico de mudancas de estado:
-
-```text
-interface StatusHistoryItem {
-  id: string;
-  old_status: string | null;
-  new_status: string;
-  changed_by: string;
-  notes: string | null;
-  created_at: string;
-  profiles?: { full_name: string };
-}
-```
-
-Estilo visual:
-- Linha vertical conectando os pontos
-- Circulo colorido por estado
-- Data + Nome do utilizador
-- Nota opcional abaixo
-
----
-
-## Componente CloseNCModal.tsx
-
-Modal que aparece quando o utilizador tenta mudar estado para "Fechada":
-
-```text
-┌─────────────────────────────────────────────┐
-│  Fechar Nao-Conformidade               [X] │
-├─────────────────────────────────────────────┤
-│                                             │
-│  Para fechar esta NC, e necessario anexar  │
-│  uma foto comprovando a resolucao.          │
-│                                             │
-│  ┌─────────────────────────────────────────┐│
-│  │  [📷] Selecionar foto de comprovacao   ││
-│  └─────────────────────────────────────────┘│
-│                                             │
-│  Notas de Encerramento                      │
-│  ┌─────────────────────────────────────────┐│
-│  │ Descreva como foi resolvido...         ││
-│  └─────────────────────────────────────────┘│
-│                                             │
-│                  [Cancelar]  [Fechar NC]    │
-└─────────────────────────────────────────────┘
-```
-
----
-
-## Fluxo de Estados
-
-```text
-     ┌────────┐
-     │ ABERTA │ (Estado inicial)
-     └────┬───┘
-          │
-          ▼
-   ┌─────────────┐
-   │ EM RESOLUCAO│
-   └──────┬──────┘
-          │
-          ▼
-   ┌────────────┐
-   │ A VERIFICAR│
-   └──────┬─────┘
-          │ (requer foto)
-          ▼
-     ┌────────┐
-     │ FECHADA│ (Estado final)
-     └────────┘
-```
-
-### Logica de Transicao:
-- OPEN -> IN_PROGRESS: Pode mudar livremente
-- IN_PROGRESS -> RESOLVED: Pode mudar livremente
-- RESOLVED -> CLOSED: Requer foto de comprovacao
-- Qualquer estado pode voltar atras (exceto CLOSED)
-- CLOSED e estado final, nao pode ser alterado
-
----
-
-## Exportacao Excel
-
-Usar biblioteca nativa do browser para gerar CSV (compativel com Excel):
-
-```typescript
-const exportToExcel = () => {
-  if (!nonconformities) return;
-  
-  const headers = ['ID', 'Obra', 'Descricao', 'Severidade', 'Estado', 'Prazo', 'Responsavel', 'Criado em'];
-  
-  const rows = nonconformities.map((nc, index) => [
-    `#${String(index + 1).padStart(3, '0')}`,
-    nc.sites?.name || '-',
-    nc.description || nc.title,
-    t(`nc.severity${nc.severity.charAt(0).toUpperCase() + nc.severity.slice(1)}`),
-    t(`nc.status.${nc.status.toLowerCase()}`),
-    nc.due_date ? format(new Date(nc.due_date), 'dd/MM/yyyy') : '-',
-    nc.responsible || '-',
-    format(new Date(nc.created_at), 'dd/MM/yyyy HH:mm'),
-  ]);
-  
-  const csv = [headers, ...rows]
-    .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';'))
-    .join('\n');
-  
-  const bom = '\uFEFF'; // BOM para suportar acentos
-  const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `nao-conformidades_${format(new Date(), 'yyyy-MM-dd')}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-};
-```
-
----
-
-## Navegacao - AppSidebar.tsx
-
-Adicionar link na navegacao principal:
-
-```typescript
-const mainItems = [
-  { title: t('nav.dashboard'), url: '/app', icon: LayoutDashboard },
-  { title: t('nav.organizations'), url: '/app/organizations', icon: Building2 },
-  { title: t('nav.sites'), url: '/app/sites', icon: HardHat },
-  { title: t('nav.captures'), url: '/app/captures', icon: Camera },
-  { title: t('nav.inspections'), url: '/app/inspections', icon: ClipboardCheck },
-  { title: t('nav.nonconformities'), url: '/app/nonconformities', icon: AlertTriangle }, // NOVO
-  { title: t('nav.reports'), url: '/app/reports', icon: BarChart3 },
-];
-```
-
----
-
-## Rota - App.tsx
-
-Adicionar nova rota:
-
-```typescript
-import NonConformities from "./pages/app/NonConformities";
-
-// Dentro das rotas do AppLayout:
-<Route path="nonconformities" element={<NonConformities />} />
-```
+| package.json | Adicionar jspdf e jspdf-autotable |
+| src/services/pdfGenerator.ts | Criar (servico principal) |
+| src/i18n/locales/pt.json | Adicionar chaves de traducao |
+| src/i18n/locales/en.json | Adicionar chaves de traducao |
 
 ---
 
 ## Traducoes a Adicionar
 
-### Portugues (pt.json):
-```json
-"nav": {
-  "nonconformities": "Nao-Conformidades"
-},
-"ncPage": {
-  "title": "Nao-Conformidades",
-  "subtitle": "Gerir todas as nao-conformidades registadas",
-  "exportExcel": "Exportar Excel",
-  "filterBySite": "Filtrar por obra",
-  "filterBySeverity": "Filtrar por severidade",
-  "filterByStatus": "Filtrar por estado",
-  "allSites": "Todas as obras",
-  "allSeverities": "Todas as severidades",
-  "allStatuses": "Todos os estados",
-  "clearFilters": "Limpar filtros",
-  "noResults": "Nenhuma nao-conformidade encontrada",
-  "noResultsDesc": "Nao existem NCs com os filtros aplicados",
-  "columns": {
-    "id": "ID",
-    "site": "Obra",
-    "description": "Descricao",
-    "severity": "Severidade",
-    "status": "Estado",
-    "dueDate": "Prazo",
-    "responsible": "Responsavel"
-  }
-},
-"nc": {
-  "status": {
-    "open": "Aberta",
-    "in_progress": "Em Resolucao",
-    "resolved": "A Verificar",
-    "closed": "Fechada"
-  },
-  "detail": {
-    "site": "Obra",
-    "inspection": "Inspecao",
-    "createdBy": "Criado por",
-    "createdAt": "Data de Criacao",
-    "description": "Descricao do Problema",
-    "standardViolated": "Norma Violada",
-    "dueDate": "Prazo para Resolucao",
-    "responsible": "Responsavel",
-    "correctiveAction": "Accao Corretiva",
-    "evidence": "Fotos de Evidencia",
-    "noEvidence": "Sem fotos de evidencia",
-    "history": "Historico",
-    "changeStatus": "Alterar Estado",
-    "statusChanged": "Estado alterado com sucesso",
-    "closeNC": "Fechar NC",
-    "closingPhotoRequired": "Para fechar esta NC, anexe uma foto comprovando a resolucao",
-    "closingNotes": "Notas de Encerramento",
-    "closingNotesPlaceholder": "Descreva como foi resolvido...",
-    "selectPhoto": "Selecionar foto de comprovacao",
-    "ncClosed": "Nao-conformidade fechada com sucesso"
-  }
-}
+```text
+reports.inspectionReport: "Relatorio de Inspecao"
+reports.ncReport: "Ficha de Nao-Conformidade"
+reports.measurementAuto: "Auto de Medicao"
+reports.generating: "A gerar PDF..."
+reports.downloadPdf: "Descarregar PDF"
+reports.summary: "Resumo"
+reports.compliant: "Conforme"
+reports.nonCompliant: "Nao Conforme"
+reports.observations: "Observacoes"
+reports.notApplicable: "N/A"
+reports.period: "Periodo"
+reports.generalInfo: "Informacao Geral"
+reports.checklist: "Checklist"
+reports.photos: "Fotos"
+reports.history: "Historico"
+reports.signatures: "Assinaturas"
+reports.generatedAt: "Gerado em"
+reports.page: "Pagina"
+reports.of: "de"
 ```
-
-### Ingles (en.json):
-```json
-"nav": {
-  "nonconformities": "Non-Conformities"
-},
-"ncPage": {
-  "title": "Non-Conformities",
-  "subtitle": "Manage all registered non-conformities",
-  "exportExcel": "Export Excel",
-  "filterBySite": "Filter by site",
-  "filterBySeverity": "Filter by severity",
-  "filterByStatus": "Filter by status",
-  "allSites": "All sites",
-  "allSeverities": "All severities",
-  "allStatuses": "All statuses",
-  "clearFilters": "Clear filters",
-  "noResults": "No non-conformities found",
-  "noResultsDesc": "There are no NCs with the applied filters",
-  "columns": {
-    "id": "ID",
-    "site": "Site",
-    "description": "Description",
-    "severity": "Severity",
-    "status": "Status",
-    "dueDate": "Due Date",
-    "responsible": "Responsible"
-  }
-},
-"nc": {
-  "status": {
-    "open": "Open",
-    "in_progress": "In Progress",
-    "resolved": "To Verify",
-    "closed": "Closed"
-  },
-  "detail": {
-    "site": "Site",
-    "inspection": "Inspection",
-    "createdBy": "Created by",
-    "createdAt": "Created at",
-    "description": "Problem Description",
-    "standardViolated": "Standard Violated",
-    "dueDate": "Due Date",
-    "responsible": "Responsible",
-    "correctiveAction": "Corrective Action",
-    "evidence": "Evidence Photos",
-    "noEvidence": "No evidence photos",
-    "history": "History",
-    "changeStatus": "Change Status",
-    "statusChanged": "Status changed successfully",
-    "closeNC": "Close NC",
-    "closingPhotoRequired": "To close this NC, attach a photo proving the resolution",
-    "closingNotes": "Closing Notes",
-    "closingNotesPlaceholder": "Describe how it was resolved...",
-    "selectPhoto": "Select proof photo",
-    "ncClosed": "Non-conformity closed successfully"
-  }
-}
-```
-
----
-
-## Resumo das Alteracoes
-
-1. **Migracao BD**: Criar tabela `nonconformity_status_history` para timeline
-2. **NonConformities.tsx**: Pagina principal com tabela e filtros
-3. **NCFilters.tsx**: Componente de filtros reutilizavel
-4. **NCDetailSheet.tsx**: Painel lateral com detalhes completos
-5. **NCStatusTimeline.tsx**: Timeline visual do historico
-6. **NCEvidenceGallery.tsx**: Galeria de fotos de evidencia
-7. **CloseNCModal.tsx**: Modal para fechar NC com foto obrigatoria
-8. **AppSidebar.tsx**: Adicionar link na navegacao
-9. **App.tsx**: Adicionar rota /app/nonconformities
-10. **Traducoes**: Novas chaves em PT e EN
 
 ---
 
 ## Consideracoes Tecnicas
 
-1. **Performance**: Usar paginacao se lista crescer muito
-2. **Exportacao**: CSV com BOM para suportar caracteres especiais
-3. **RLS**: Policies existentes garantem acesso apenas a NCs de sites acessiveis
-4. **Offline (futuro)**: Estrutura preparada para sincronizacao
-5. **Responsive**: Sheet lateral funciona bem em mobile
+1. **Fonte**: jsPDF nao suporta Arial nativamente. Usar Helvetica (muito similar) que e a fonte padrao.
+
+2. **Imagens**: As fotos do Storage devem ser convertidas para base64 antes de inserir no PDF. Limitar tamanho para performance.
+
+3. **Logo Placeholder**: Usar um retangulo cinza com texto "LOGO" ate ter logo real.
+
+4. **Paginacao**: autoTable ja lida automaticamente com quebras de pagina.
+
+5. **Tamanho do Ficheiro**: Comprimir imagens antes de inserir. Limitar a 10 fotos por relatorio para manter tamanho razoavel.
+
+6. **Caracteres Especiais**: jsPDF suporta UTF-8, mas os acentos portugueses funcionam bem com a fonte padrao.
+
+---
+
+## Resumo das Alteracoes
+
+1. **Instalar dependencias**: jspdf e jspdf-autotable
+2. **Criar servico**: /src/services/pdfGenerator.ts com 3 funcoes principais
+3. **Funcoes auxiliares**: addHeader, addFooter, loadImageFromStorage
+4. **Traducoes**: Novas chaves em PT e EN para labels dos PDFs
