@@ -1,6 +1,39 @@
-
-
-# Plano Completo: Sistema Autonomo de Fiscalizacao com Drone + IA
+ # Plano Completo: Sistema Autonomo de Fiscalizacao com Drone + IA
+ 
+ ## Estado Actual de Implementacao
+ 
+ ### ✅ FASE 1: Infraestrutura de Dados - CONCLUÍDA
+ - [x] Enums: mission_type, mission_status, ai_detection_type, drone_status, ai_report_type
+ - [x] Tabela project_coordinates (coordenadas GPS)
+ - [x] Tabela drones (registo de equipamentos)
+ - [x] Tabela cameras_360 (camaras 360)
+ - [x] Tabela drone_missions (missoes de voo)
+ - [x] Tabela capture_sessions (sessoes de captura)
+ - [x] Tabela ai_analysis_results (resultados IA)
+ - [x] Tabela ai_reports (relatorios gerados)
+ - [x] Tabela ai_conversations (conversas com agente)
+ - [x] Tabela ai_messages (mensagens do chat)
+ - [x] RLS policies para todas as tabelas
+ - [x] Indexes para performance
+ 
+ ### ✅ FASE 2: Agente IA de Fiscalizacao - CONCLUÍDA
+ - [x] Edge Function ai-fiscal-agent
+ - [x] Streaming de respostas
+ - [x] Contexto da obra actual
+ - [x] System prompt especializado
+ 
+ ### ✅ FASE 6.1: Interface de Chat - CONCLUÍDA
+ - [x] Componente AIChat com streaming
+ - [x] Quick commands
+ - [x] Pagina Drone actualizada com dashboard
+ 
+ ### 🔄 PRÓXIMOS PASSOS
+ - [ ] FASE 3: Integracao com Drone (Capacitor + DJI SDK)
+ - [ ] FASE 4: Analise por Visao Computacional
+ - [ ] FASE 5: Geracao Automatica de Documentos
+ - [ ] FASE 6: Interface completa (Missoes, Analises, Relatorios)
+ 
+ ---
 
 ## Visao Geral do Sistema Desejado
 

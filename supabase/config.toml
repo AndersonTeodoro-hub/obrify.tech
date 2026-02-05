@@ -1,1 +1,4 @@
-project_id = "xwodfkscsdcgpblbnxhd"
+ project_id = "xwodfkscsdcgpblbnxhd"
+ 
+ [functions.ai-fiscal-agent]
+ verify_jwt = false
