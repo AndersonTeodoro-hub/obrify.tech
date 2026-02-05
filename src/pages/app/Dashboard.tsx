@@ -151,7 +151,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Grid - Premium Design with Staggered Animation */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div data-tour="dashboard-stats" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         {statCards.map((stat, index) => (
           <Card 
             key={stat.title} 

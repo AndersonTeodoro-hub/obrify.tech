@@ -728,5 +728,30 @@
       "generateReports": "Gerar relatórios",
       "exportData": "Exportar dados"
     }
+  },
+  "onboarding": {
+    "welcomeTitle": "Bem-vindo ao SitePulse",
+    "welcomeDesc": "A plataforma inteligente de fiscalização de obras",
+    "stat1Value": "94%",
+    "stat1Label": "Menos tempo em relatórios",
+    "stat2Value": "3x",
+    "stat2Label": "Mais obras por fiscalizador",
+    "stat3Value": "IA",
+    "stat3Label": "Deteção automática",
+    "exploreAlone": "Explorar sozinho",
+    "startTour": "Iniciar Tour Guiado",
+    "helpCenter": "Centro de Ajuda",
+    "howCanWeHelp": "Como podemos ajudar?",
+    "guidedTour": "Tour Guiado",
+    "guidedTourDesc": "Conheça todas as funcionalidades",
+    "documentation": "Documentação",
+    "documentationDesc": "Guias e tutoriais detalhados",
+    "talkToSupport": "Falar com Suporte",
+    "talkToSupportDesc": "Estamos aqui para ajudar",
+    "keyboardShortcuts": "Atalhos de Teclado",
+    "keyboardShortcutsDesc": "Seja mais produtivo",
+    "version": "Versão",
+    "releaseNotes": "Notas de versão",
+    "discoverSitePulse": "Descobrir SitePulse"
   }
 }

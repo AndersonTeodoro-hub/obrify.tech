@@ -728,5 +728,30 @@
       "generateReports": "Generate reports",
       "exportData": "Export data"
     }
+  },
+  "onboarding": {
+    "welcomeTitle": "Welcome to SitePulse",
+    "welcomeDesc": "The smart construction inspection platform",
+    "stat1Value": "94%",
+    "stat1Label": "Less time on reports",
+    "stat2Value": "3x",
+    "stat2Label": "More sites per inspector",
+    "stat3Value": "AI",
+    "stat3Label": "Automatic detection",
+    "exploreAlone": "Explore on my own",
+    "startTour": "Start Guided Tour",
+    "helpCenter": "Help Center",
+    "howCanWeHelp": "How can we help?",
+    "guidedTour": "Guided Tour",
+    "guidedTourDesc": "Discover all features",
+    "documentation": "Documentation",
+    "documentationDesc": "Detailed guides and tutorials",
+    "talkToSupport": "Talk to Support",
+    "talkToSupportDesc": "We're here to help",
+    "keyboardShortcuts": "Keyboard Shortcuts",
+    "keyboardShortcutsDesc": "Be more productive",
+    "version": "Version",
+    "releaseNotes": "Release notes",
+    "discoverSitePulse": "Discover SitePulse"
   }
 }
