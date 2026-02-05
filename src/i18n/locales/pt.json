@@ -516,5 +516,26 @@
     "en": "English",
     "es": "Español",
     "fr": "Français"
+  },
+  "reports": {
+    "inspectionReport": "Relatório de Inspeção",
+    "ncReport": "Ficha de Não-Conformidade",
+    "measurementAuto": "Auto de Medição",
+    "generating": "A gerar PDF...",
+    "downloadPdf": "Descarregar PDF",
+    "summary": "Resumo",
+    "compliant": "Conforme",
+    "nonCompliant": "Não Conforme",
+    "observations": "Observações",
+    "notApplicable": "N/A",
+    "period": "Período",
+    "generalInfo": "Informação Geral",
+    "checklist": "Checklist",
+    "photos": "Fotos",
+    "history": "Histórico",
+    "signatures": "Assinaturas",
+    "generatedAt": "Gerado em",
+    "page": "Página",
+    "of": "de"
   }
 }

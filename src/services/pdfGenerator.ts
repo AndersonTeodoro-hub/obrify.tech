@@ -1,0 +1,756 @@
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { supabase } from '@/integrations/supabase/client';
+import { format } from 'date-fns';
+import { pt } from 'date-fns/locale';
+
+// Page configuration (A4)
+const PAGE_WIDTH = 210;  // mm
+const PAGE_HEIGHT = 297; // mm
+const MARGIN = 20;       // mm (~2cm)
+const CONTENT_WIDTH = PAGE_WIDTH - (MARGIN * 2);
+
+// Colors (RGB)
+const COLORS = {
+  primary: [59, 130, 246] as [number, number, number],
+  text: [31, 41, 55] as [number, number, number],
+  secondary: [107, 114, 128] as [number, number, number],
+  success: [34, 197, 94] as [number, number, number],
+  danger: [239, 68, 68] as [number, number, number],
+  warning: [234, 179, 8] as [number, number, number],
+  lightGray: [229, 231, 235] as [number, number, number],
+};
+
+// Status labels
+const STATUS_LABELS: Record<string, string> = {
+  'OPEN': 'Aberta',
+  'IN_PROGRESS': 'Em Resolução',
+  'RESOLVED': 'A Verificar',
+  'CLOSED': 'Fechada',
+};
+
+const SEVERITY_LABELS: Record<string, string> = {
+  'critical': 'Crítico',
+  'high': 'Importante',
+  'medium': 'Menor',
+};
+
+const RESULT_LABELS: Record<string, string> = {
+  'OK': 'Conforme',
+  'NC': 'Não Conforme',
+  'OBS': 'Observação',
+  'NA': 'N/A',
+};
+
+/**
+ * Add header with logo placeholder and title
+ */
+function addHeader(doc: jsPDF, title: string): number {
+  const startY = MARGIN;
+  
+  // Logo placeholder (gray rectangle)
+  doc.setFillColor(...COLORS.lightGray);
+  doc.rect(MARGIN, startY, 30, 15, 'F');
+  doc.setFontSize(8);
+  doc.setTextColor(...COLORS.secondary);
+  doc.text('LOGO', MARGIN + 15, startY + 9, { align: 'center' });
+  
+  // Title
+  doc.setFontSize(18);
+  doc.setTextColor(...COLORS.primary);
+  doc.setFont('helvetica', 'bold');
+  doc.text(title, PAGE_WIDTH - MARGIN, startY + 10, { align: 'right' });
+  
+  // Separator line
+  const lineY = startY + 20;
+  doc.setDrawColor(...COLORS.primary);
+  doc.setLineWidth(0.5);
+  doc.line(MARGIN, lineY, PAGE_WIDTH - MARGIN, lineY);
+  
+  return lineY + 5;
+}
+
+/**
+ * Add footer with page number and generation date
+ */
+function addFooter(doc: jsPDF, pageNum: number, totalPages: number): void {
+  const footerY = PAGE_HEIGHT - 10;
+  
+  doc.setFontSize(8);
+  doc.setTextColor(...COLORS.secondary);
+  doc.setFont('helvetica', 'normal');
+  
+  // Page number
+  doc.text(`Página ${pageNum} de ${totalPages}`, MARGIN, footerY);
+  
+  // Generation date
+  const dateStr = `Gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: pt })}`;
+  doc.text(dateStr, PAGE_WIDTH - MARGIN, footerY, { align: 'right' });
+}
+
+/**
+ * Load image from Supabase Storage and convert to base64
+ */
+async function loadImageFromStorage(filePath: string): Promise<string | null> {
+  try {
+    const { data } = supabase.storage.from('captures').getPublicUrl(filePath);
+    
+    const response = await fetch(data.publicUrl);
+    if (!response.ok) return null;
+    
+    const blob = await response.blob();
+    
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Add a section title
+ */
+function addSectionTitle(doc: jsPDF, title: string, y: number): number {
+  doc.setFontSize(12);
+  doc.setTextColor(...COLORS.text);
+  doc.setFont('helvetica', 'bold');
+  doc.text(title, MARGIN, y);
+  
+  return y + 6;
+}
+
+/**
+ * Add info row (label: value)
+ */
+function addInfoRow(doc: jsPDF, label: string, value: string, y: number): number {
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...COLORS.secondary);
+  doc.text(`${label}:`, MARGIN, y);
+  
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...COLORS.text);
+  doc.text(value || '-', MARGIN + 35, y);
+  
+  return y + 5;
+}
+
+/**
+ * Generate Inspection Report PDF
+ */
+export async function generateInspectionReport(inspectionId: string): Promise<Blob> {
+  // Fetch inspection data
+  const { data: inspection, error: inspectionError } = await supabase
+    .from('inspections')
+    .select(`
+      *,
+      sites!inspections_site_id_fkey(id, name, address),
+      inspection_templates!inspections_template_id_fkey(id, name, category),
+      floors!inspections_floor_id_fkey(id, name),
+      areas!inspections_area_id_fkey(id, name),
+      capture_points!inspections_capture_point_id_fkey(id, code)
+    `)
+    .eq('id', inspectionId)
+    .single();
+
+  if (inspectionError || !inspection) {
+    throw new Error('Inspection not found');
+  }
+
+  // Fetch inspection items with template details
+  const { data: items } = await supabase
+    .from('inspection_items')
+    .select(`
+      *,
+      inspection_template_items!inspection_items_template_item_id_fkey(
+        id, title, is_required, section
+      )
+    `)
+    .eq('inspection_id', inspectionId)
+    .order('created_at');
+
+  // Fetch inspector profile
+  const { data: inspector } = await supabase
+    .from('profiles')
+    .select('full_name')
+    .eq('user_id', inspection.created_by)
+    .single();
+
+  // Fetch evidence photos
+  const { data: evidenceLinks } = await supabase
+    .from('evidence_links')
+    .select(`
+      *,
+      captures!evidence_links_capture_id_fkey(id, file_path)
+    `)
+    .eq('inspection_id', inspectionId)
+    .limit(10);
+
+  // Initialize PDF
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  let currentY = addHeader(doc, 'RELATÓRIO DE INSPEÇÃO');
+  currentY += 5;
+
+  // Site & inspection info
+  const siteName = (inspection.sites as { name: string })?.name || '-';
+  const siteAddress = (inspection.sites as { address?: string })?.address || '-';
+  const templateName = (inspection.inspection_templates as { name: string })?.name || '-';
+  const floorName = (inspection.floors as { name?: string })?.name;
+  const areaName = (inspection.areas as { name?: string })?.name;
+  const pointCode = (inspection.capture_points as { code?: string })?.code;
+  
+  let location = '';
+  if (floorName) location += floorName;
+  if (areaName) location += ` > ${areaName}`;
+  if (pointCode) location += ` > ${pointCode}`;
+  
+  const inspectionDate = inspection.scheduled_at 
+    ? format(new Date(inspection.scheduled_at), "dd 'de' MMMM 'de' yyyy", { locale: pt })
+    : format(new Date(inspection.created_at), "dd 'de' MMMM 'de' yyyy", { locale: pt });
+
+  currentY = addInfoRow(doc, 'Obra', siteName, currentY);
+  currentY = addInfoRow(doc, 'Morada', siteAddress, currentY);
+  currentY = addInfoRow(doc, 'Template', templateName, currentY);
+  currentY = addInfoRow(doc, 'Data', inspectionDate, currentY);
+  currentY = addInfoRow(doc, 'Inspetor', inspector?.full_name || '-', currentY);
+  if (location) {
+    currentY = addInfoRow(doc, 'Local', location, currentY);
+  }
+
+  currentY += 5;
+
+  // Summary box
+  const okCount = items?.filter(i => i.result === 'OK').length || 0;
+  const ncCount = items?.filter(i => i.result === 'NC').length || 0;
+  const obsCount = items?.filter(i => i.result === 'OBS').length || 0;
+  const naCount = items?.filter(i => i.result === 'NA').length || 0;
+
+  currentY = addSectionTitle(doc, 'RESUMO', currentY);
+  
+  doc.setFillColor(...COLORS.lightGray);
+  doc.roundedRect(MARGIN, currentY, CONTENT_WIDTH, 12, 2, 2, 'F');
+  
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  const summaryY = currentY + 8;
+  const colWidth = CONTENT_WIDTH / 4;
+  
+  doc.setTextColor(...COLORS.success);
+  doc.text(`Conforme: ${okCount}`, MARGIN + 5, summaryY);
+  
+  doc.setTextColor(...COLORS.danger);
+  doc.text(`NC: ${ncCount}`, MARGIN + colWidth + 5, summaryY);
+  
+  doc.setTextColor(...COLORS.warning);
+  doc.text(`OBS: ${obsCount}`, MARGIN + colWidth * 2 + 5, summaryY);
+  
+  doc.setTextColor(...COLORS.secondary);
+  doc.text(`N/A: ${naCount}`, MARGIN + colWidth * 3 + 5, summaryY);
+
+  currentY += 18;
+
+  // Checklist table
+  currentY = addSectionTitle(doc, 'CHECKLIST', currentY);
+
+  const tableData = items?.map((item, index) => {
+    const templateItem = item.inspection_template_items as { title: string; section?: string };
+    return [
+      String(index + 1),
+      templateItem?.title || '-',
+      RESULT_LABELS[item.result || ''] || '-',
+      item.notes || '-',
+    ];
+  }) || [];
+
+  autoTable(doc, {
+    startY: currentY,
+    head: [['#', 'Item', 'Resultado', 'Observações']],
+    body: tableData,
+    margin: { left: MARGIN, right: MARGIN },
+    headStyles: {
+      fillColor: COLORS.primary,
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 9,
+    },
+    bodyStyles: {
+      fontSize: 8,
+      textColor: COLORS.text,
+    },
+    columnStyles: {
+      0: { cellWidth: 10 },
+      1: { cellWidth: 70 },
+      2: { cellWidth: 25 },
+      3: { cellWidth: 'auto' },
+    },
+    alternateRowStyles: {
+      fillColor: [249, 250, 251],
+    },
+  });
+
+  currentY = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
+
+  // Photos section (if any)
+  if (evidenceLinks && evidenceLinks.length > 0) {
+    // Check if we need a new page
+    if (currentY > PAGE_HEIGHT - 60) {
+      doc.addPage();
+      currentY = MARGIN;
+    }
+
+    currentY = addSectionTitle(doc, 'FOTOS ANEXADAS', currentY);
+    
+    const photoWidth = 40;
+    const photoHeight = 30;
+    const photosPerRow = 4;
+    let photoX = MARGIN;
+    let photoY = currentY;
+    
+    for (let i = 0; i < Math.min(evidenceLinks.length, 8); i++) {
+      const capture = evidenceLinks[i].captures as { file_path?: string };
+      if (capture?.file_path) {
+        const imageData = await loadImageFromStorage(capture.file_path);
+        if (imageData) {
+          try {
+            doc.addImage(imageData, 'JPEG', photoX, photoY, photoWidth, photoHeight);
+          } catch {
+            // If image fails, draw placeholder
+            doc.setFillColor(...COLORS.lightGray);
+            doc.rect(photoX, photoY, photoWidth, photoHeight, 'F');
+          }
+        } else {
+          doc.setFillColor(...COLORS.lightGray);
+          doc.rect(photoX, photoY, photoWidth, photoHeight, 'F');
+        }
+        
+        photoX += photoWidth + 3;
+        if ((i + 1) % photosPerRow === 0) {
+          photoX = MARGIN;
+          photoY += photoHeight + 3;
+        }
+      }
+    }
+  }
+
+  // Add footers to all pages
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    addFooter(doc, i, totalPages);
+  }
+
+  return doc.output('blob');
+}
+
+/**
+ * Generate Non-Conformity Report PDF
+ */
+export async function generateNCReport(ncId: string): Promise<Blob> {
+  // Fetch NC data
+  const { data: nc, error: ncError } = await supabase
+    .from('nonconformities')
+    .select(`
+      *,
+      sites!nonconformities_site_id_fkey(id, name, address),
+      inspections!nonconformities_inspection_id_fkey(
+        id,
+        inspection_templates!inspections_template_id_fkey(id, name)
+      )
+    `)
+    .eq('id', ncId)
+    .single();
+
+  if (ncError || !nc) {
+    throw new Error('Non-conformity not found');
+  }
+
+  // Fetch evidence photos
+  const { data: evidence } = await supabase
+    .from('nonconformity_evidence')
+    .select('*')
+    .eq('nonconformity_id', ncId)
+    .limit(6);
+
+  // Fetch status history
+  const { data: history } = await supabase
+    .from('nonconformity_status_history')
+    .select('*')
+    .eq('nonconformity_id', ncId)
+    .order('created_at', { ascending: true });
+
+  // Fetch creator profile
+  const { data: creator } = nc.created_by
+    ? await supabase.from('profiles').select('full_name').eq('user_id', nc.created_by).single()
+    : { data: null };
+
+  // Fetch history user names
+  const historyUserIds = history?.map(h => h.changed_by).filter(Boolean) as string[] || [];
+  const { data: historyUsers } = historyUserIds.length > 0
+    ? await supabase.from('profiles').select('user_id, full_name').in('user_id', historyUserIds)
+    : { data: [] };
+
+  const userNameMap = new Map<string, string | null>(historyUsers?.map(u => [u.user_id, u.full_name] as [string, string | null]) || []);
+
+  // Initialize PDF
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  let currentY = addHeader(doc, 'FICHA DE NÃO-CONFORMIDADE');
+  currentY += 5;
+
+  // NC ID and status badge
+  doc.setFontSize(14);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...COLORS.text);
+  doc.text(`NC-${ncId.slice(0, 8).toUpperCase()}`, MARGIN, currentY);
+
+  // Status badge
+  const statusLabel = STATUS_LABELS[nc.status] || nc.status;
+  const statusWidth = doc.getTextWidth(statusLabel) + 10;
+  doc.setFillColor(...(nc.status === 'CLOSED' ? COLORS.success : nc.status === 'OPEN' ? COLORS.danger : COLORS.warning));
+  doc.roundedRect(PAGE_WIDTH - MARGIN - statusWidth, currentY - 5, statusWidth, 7, 1, 1, 'F');
+  doc.setFontSize(8);
+  doc.setTextColor(255, 255, 255);
+  doc.text(statusLabel, PAGE_WIDTH - MARGIN - statusWidth / 2, currentY - 1, { align: 'center' });
+
+  currentY += 5;
+
+  // Severity badge
+  const severityLabel = SEVERITY_LABELS[nc.severity] || nc.severity;
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  const severityColor = nc.severity === 'critical' ? COLORS.danger : nc.severity === 'high' ? COLORS.warning : COLORS.secondary;
+  doc.setTextColor(...severityColor);
+  doc.text(`Severidade: ${severityLabel.toUpperCase()}`, MARGIN, currentY);
+
+  currentY += 10;
+
+  // General info
+  currentY = addSectionTitle(doc, 'DADOS GERAIS', currentY);
+  
+  const siteName = (nc.sites as { name: string })?.name || '-';
+  const inspectionData = nc.inspections as { inspection_templates?: { name: string } };
+  const templateName = inspectionData?.inspection_templates?.name || '-';
+  
+  currentY = addInfoRow(doc, 'Obra', siteName, currentY);
+  currentY = addInfoRow(doc, 'Inspeção', templateName, currentY);
+  currentY = addInfoRow(doc, 'Criado por', creator?.full_name || '-', currentY);
+  currentY = addInfoRow(doc, 'Data Criação', format(new Date(nc.created_at), 'dd/MM/yyyy', { locale: pt }), currentY);
+  if (nc.due_date) {
+    currentY = addInfoRow(doc, 'Prazo', format(new Date(nc.due_date), 'dd/MM/yyyy', { locale: pt }), currentY);
+  }
+  if (nc.responsible) {
+    currentY = addInfoRow(doc, 'Responsável', nc.responsible, currentY);
+  }
+  if (nc.standard_violated) {
+    currentY = addInfoRow(doc, 'Norma Violada', nc.standard_violated, currentY);
+  }
+
+  currentY += 5;
+
+  // Description
+  if (nc.description) {
+    currentY = addSectionTitle(doc, 'DESCRIÇÃO DO PROBLEMA', currentY);
+    
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...COLORS.text);
+    
+    const descriptionLines = doc.splitTextToSize(nc.description, CONTENT_WIDTH);
+    doc.text(descriptionLines, MARGIN, currentY);
+    currentY += descriptionLines.length * 4 + 5;
+  }
+
+  // Corrective action
+  if (nc.corrective_action) {
+    currentY = addSectionTitle(doc, 'AÇÃO CORRETIVA', currentY);
+    
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...COLORS.text);
+    
+    const actionLines = doc.splitTextToSize(nc.corrective_action, CONTENT_WIDTH);
+    doc.text(actionLines, MARGIN, currentY);
+    currentY += actionLines.length * 4 + 5;
+  }
+
+  // Evidence photos
+  if (evidence && evidence.length > 0) {
+    if (currentY > PAGE_HEIGHT - 50) {
+      doc.addPage();
+      currentY = MARGIN;
+    }
+
+    currentY = addSectionTitle(doc, 'EVIDÊNCIAS FOTOGRÁFICAS', currentY);
+    
+    const photoWidth = 50;
+    const photoHeight = 40;
+    let photoX = MARGIN;
+    
+    for (let i = 0; i < Math.min(evidence.length, 4); i++) {
+      const imageData = await loadImageFromStorage(evidence[i].file_path);
+      if (imageData) {
+        try {
+          doc.addImage(imageData, 'JPEG', photoX, currentY, photoWidth, photoHeight);
+        } catch {
+          doc.setFillColor(...COLORS.lightGray);
+          doc.rect(photoX, currentY, photoWidth, photoHeight, 'F');
+        }
+      } else {
+        doc.setFillColor(...COLORS.lightGray);
+        doc.rect(photoX, currentY, photoWidth, photoHeight, 'F');
+      }
+      photoX += photoWidth + 5;
+    }
+    currentY += photoHeight + 10;
+  }
+
+  // Status history
+  if (history && history.length > 0) {
+    if (currentY > PAGE_HEIGHT - 40) {
+      doc.addPage();
+      currentY = MARGIN;
+    }
+
+    currentY = addSectionTitle(doc, 'HISTÓRICO DE ALTERAÇÕES', currentY);
+    
+    for (const entry of history) {
+      const date = format(new Date(entry.created_at!), "dd/MM/yyyy HH:mm", { locale: pt });
+      const userName = entry.changed_by ? userNameMap.get(entry.changed_by) || 'Utilizador' : 'Sistema';
+      const statusLabel = STATUS_LABELS[entry.new_status] || entry.new_status;
+      
+      // Timeline dot
+      doc.setFillColor(...COLORS.primary);
+      doc.circle(MARGIN + 2, currentY - 1, 1.5, 'F');
+      
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...COLORS.text);
+      doc.text(`${date} - ${statusLabel} (${userName})`, MARGIN + 6, currentY);
+      
+      currentY += 4;
+      
+      if (entry.notes) {
+        doc.setFontSize(7);
+        doc.setTextColor(...COLORS.secondary);
+        doc.text(`"${entry.notes}"`, MARGIN + 8, currentY);
+        currentY += 4;
+      }
+      
+      currentY += 2;
+    }
+  }
+
+  // Add footers
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    addFooter(doc, i, totalPages);
+  }
+
+  return doc.output('blob');
+}
+
+/**
+ * Generate Measurement Report (Auto de Medição) PDF
+ */
+export async function generateMeasurementAuto(
+  siteId: string, 
+  period: { start: Date; end: Date }
+): Promise<Blob> {
+  // Fetch site data
+  const { data: site, error: siteError } = await supabase
+    .from('sites')
+    .select(`
+      *,
+      organizations!sites_org_id_fkey(id, name)
+    `)
+    .eq('id', siteId)
+    .single();
+
+  if (siteError || !site) {
+    throw new Error('Site not found');
+  }
+
+  // Fetch inspections in period
+  const { data: inspections } = await supabase
+    .from('inspections')
+    .select(`
+      *,
+      inspection_templates!inspections_template_id_fkey(id, name)
+    `)
+    .eq('site_id', siteId)
+    .gte('created_at', period.start.toISOString())
+    .lte('created_at', period.end.toISOString())
+    .order('created_at');
+
+  // Get all inspection items for these inspections
+  const inspectionIds = inspections?.map(i => i.id) || [];
+  const { data: allItems } = inspectionIds.length > 0
+    ? await supabase.from('inspection_items').select('*').in('inspection_id', inspectionIds)
+    : { data: [] };
+
+  // Fetch NCs in period
+  const { data: ncs } = await supabase
+    .from('nonconformities')
+    .select('*')
+    .eq('site_id', siteId)
+    .gte('created_at', period.start.toISOString())
+    .lte('created_at', period.end.toISOString())
+    .order('created_at');
+
+  // Initialize PDF
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  let currentY = addHeader(doc, 'AUTO DE MEDIÇÃO');
+  currentY += 3;
+
+  // Period info
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...COLORS.secondary);
+  const periodStr = `Período: ${format(period.start, 'dd/MM/yyyy')} a ${format(period.end, 'dd/MM/yyyy')}`;
+  doc.text(periodStr, PAGE_WIDTH / 2, currentY, { align: 'center' });
+  currentY += 10;
+
+  // Identification section
+  currentY = addSectionTitle(doc, 'IDENTIFICAÇÃO', currentY);
+  
+  currentY = addInfoRow(doc, 'Obra', site.name, currentY);
+  currentY = addInfoRow(doc, 'Morada', site.address || '-', currentY);
+  currentY = addInfoRow(doc, 'Dono de Obra', (site.organizations as { name: string })?.name || '-', currentY);
+  currentY = addInfoRow(doc, 'Fiscalização', 'SitePulse', currentY);
+
+  currentY += 8;
+
+  // Period summary
+  currentY = addSectionTitle(doc, 'RESUMO DO PERÍODO', currentY);
+
+  const totalItems = allItems?.length || 0;
+  const okItems = allItems?.filter(i => i.result === 'OK').length || 0;
+  const ncItems = allItems?.filter(i => i.result === 'NC').length || 0;
+  const obsItems = allItems?.filter(i => i.result === 'OBS').length || 0;
+
+  const summaryData: string[][] = [
+    ['Fiscalizações Realizadas', String(inspections?.length || 0)],
+    ['Itens Verificados', String(totalItems)],
+    ['Conformes', totalItems > 0 ? `${okItems} (${Math.round(okItems / totalItems * 100)}%)` : '0'],
+    ['Não Conformes', totalItems > 0 ? `${ncItems} (${Math.round(ncItems / totalItems * 100)}%)` : '0'],
+    ['Observações', totalItems > 0 ? `${obsItems} (${Math.round(obsItems / totalItems * 100)}%)` : '0'],
+  ];
+
+  autoTable(doc, {
+    startY: currentY,
+    body: summaryData,
+    margin: { left: MARGIN, right: MARGIN },
+    theme: 'plain',
+    bodyStyles: {
+      fontSize: 10,
+      textColor: COLORS.text,
+    },
+    columnStyles: {
+      0: { fontStyle: 'bold', cellWidth: 80 },
+      1: { halign: 'right' },
+    },
+    alternateRowStyles: {
+      fillColor: [249, 250, 251],
+    },
+  });
+
+  currentY = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
+
+  // NCs in period
+  if (ncs && ncs.length > 0) {
+    currentY = addSectionTitle(doc, 'NÃO-CONFORMIDADES DO PERÍODO', currentY);
+
+    const ncData = ncs.map((nc, index) => [
+      String(index + 1).padStart(3, '0'),
+      (nc.description || nc.title || '-').slice(0, 40) + ((nc.description || nc.title || '').length > 40 ? '...' : ''),
+      SEVERITY_LABELS[nc.severity] || nc.severity,
+      STATUS_LABELS[nc.status] || nc.status,
+    ]);
+
+    autoTable(doc, {
+      startY: currentY,
+      head: [['NC', 'Descrição', 'Severidade', 'Estado']],
+      body: ncData,
+      margin: { left: MARGIN, right: MARGIN },
+      headStyles: {
+        fillColor: COLORS.primary,
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 9,
+      },
+      bodyStyles: {
+        fontSize: 8,
+        textColor: COLORS.text,
+      },
+      columnStyles: {
+        0: { cellWidth: 15 },
+        1: { cellWidth: 'auto' },
+        2: { cellWidth: 25 },
+        3: { cellWidth: 30 },
+      },
+    });
+
+    currentY = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
+  }
+
+  // General observations
+  currentY = addSectionTitle(doc, 'OBSERVAÇÕES GERAIS', currentY);
+  
+  doc.setFillColor(...COLORS.lightGray);
+  doc.rect(MARGIN, currentY, CONTENT_WIDTH, 20, 'F');
+  currentY += 25;
+
+  // Signatures section
+  if (currentY > PAGE_HEIGHT - 50) {
+    doc.addPage();
+    currentY = MARGIN;
+  }
+
+  currentY = addSectionTitle(doc, 'ASSINATURAS', currentY);
+  currentY += 5;
+
+  // Fiscalization signature
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...COLORS.text);
+  doc.text('Fiscalização:', MARGIN, currentY);
+  doc.line(MARGIN + 25, currentY, MARGIN + 80, currentY);
+  doc.text('Data:', MARGIN + 90, currentY);
+  doc.line(MARGIN + 100, currentY, MARGIN + 130, currentY);
+
+  currentY += 10;
+
+  // Owner signature
+  doc.text('Dono de Obra:', MARGIN, currentY);
+  doc.line(MARGIN + 28, currentY, MARGIN + 80, currentY);
+  doc.text('Data:', MARGIN + 90, currentY);
+  doc.line(MARGIN + 100, currentY, MARGIN + 130, currentY);
+
+  // Add footers
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    addFooter(doc, i, totalPages);
+  }
+
+  return doc.output('blob');
+}
