@@ -10,7 +10,6 @@ import {
   Plane,
   Settings,
   LogOut,
-  Activity,
   AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
@@ -26,7 +25,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarTrigger,
   useSidebar,
 } from '@/components/ui/sidebar';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -77,16 +75,16 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar collapsible="icon" className="border-r border-border/50">
+    <Sidebar collapsible="icon" className="border-r border-border/50 transition-all duration-300">
       <SidebarHeader className="border-b border-border/50 p-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center glow-primary flex-shrink-0">
-            <Activity className="w-5 h-5 text-primary-foreground" />
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center shadow-sm flex-shrink-0">
+            <span className="text-white font-bold text-lg">S</span>
           </div>
           {!isCollapsed && (
             <div className="flex flex-col">
-              <span className="font-bold gradient-text">{t('brand.name')}</span>
-              <span className="text-xs text-muted-foreground">{t('brand.tagline')}</span>
+              <span className="font-bold text-foreground">{t('brand.name')}</span>
+              <span className="text-xs text-muted-foreground">Fiscalização Inteligente</span>
             </div>
           )}
         </div>
@@ -109,11 +107,11 @@ export function AppSidebar() {
                     <NavLink
                       to={item.url}
                       end={item.url === '/app'}
-                      className="flex items-center gap-3 px-3 py-2 rounded-lg transition-colors hover:bg-muted/50"
-                      activeClassName="bg-primary/10 text-primary"
+                      className="flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      activeClassName="bg-gradient-to-r from-accent-100 to-transparent dark:from-slate-800/50 text-accent-600 dark:text-accent-400"
                     >
                       <item.icon className="w-5 h-5 flex-shrink-0" />
-                      {!isCollapsed && <span>{item.title}</span>}
+                      {!isCollapsed && <span className="font-medium">{item.title}</span>}
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -137,13 +135,13 @@ export function AppSidebar() {
                   >
                     <NavLink
                       to={item.url}
-                      className="flex items-center gap-3 px-3 py-2 rounded-lg transition-colors hover:bg-muted/50 opacity-60"
-                      activeClassName="bg-primary/10 text-primary"
+                      className="flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 hover:bg-slate-100 dark:hover:bg-slate-800 opacity-60"
+                      activeClassName="bg-gradient-to-r from-accent-100 to-transparent dark:from-slate-800/50 text-accent-600 dark:text-accent-400"
                     >
                       <item.icon className="w-5 h-5 flex-shrink-0" />
                       {!isCollapsed && (
                         <>
-                          <span className="flex-1">{item.title}</span>
+                          <span className="flex-1 font-medium">{item.title}</span>
                           {item.badge && (
                             <Badge variant="outline" className="text-[10px] px-1.5 py-0">
                               {item.badge}
@@ -170,11 +168,11 @@ export function AppSidebar() {
                 >
                   <NavLink
                     to="/app/settings"
-                    className="flex items-center gap-3 px-3 py-2 rounded-lg transition-colors hover:bg-muted/50"
-                    activeClassName="bg-primary/10 text-primary"
+                    className="flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    activeClassName="bg-gradient-to-r from-accent-100 to-transparent dark:from-slate-800/50 text-accent-600 dark:text-accent-400"
                   >
                     <Settings className="w-5 h-5 flex-shrink-0" />
-                    {!isCollapsed && <span>{t('nav.settings')}</span>}
+                    {!isCollapsed && <span className="font-medium">{t('nav.settings')}</span>}
                   </NavLink>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -188,10 +186,10 @@ export function AppSidebar() {
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
-              className="w-full justify-start gap-3 px-2 py-6 h-auto hover:bg-muted/50"
+              className="w-full justify-start gap-3 px-2 py-6 h-auto hover:bg-slate-100 dark:hover:bg-slate-800"
             >
               <Avatar className="w-8 h-8">
-                <AvatarFallback className="bg-primary/10 text-primary text-sm">
+                <AvatarFallback className="bg-gradient-to-br from-accent-500 to-accent-600 text-white text-sm font-medium">
                   {userInitials}
                 </AvatarFallback>
               </Avatar>
