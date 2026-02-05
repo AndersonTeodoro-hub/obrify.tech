@@ -710,5 +710,23 @@
     "language": "Language",
     "notifications": "Notifications",
     "notificationsComingSoon": "Notification settings coming soon."
+  },
+  "permissions": {
+    "noPermission": "No permission",
+    "noPermissionDesc": "You do not have permission to perform this action",
+    "contactAdmin": "Contact the organization administrator",
+    "actions": {
+      "createSite": "Create site",
+      "editSite": "Edit site",
+      "deleteSite": "Delete site",
+      "createInspection": "Create inspection",
+      "approveInspection": "Approve inspection",
+      "createNC": "Create non-conformity",
+      "closeNC": "Close non-conformity",
+      "inviteMembers": "Invite members",
+      "manageRoles": "Manage roles",
+      "generateReports": "Generate reports",
+      "exportData": "Export data"
+    }
   }
 }

@@ -1773,6 +1773,14 @@ export type Database = {
         Returns: boolean
       }
       get_org_from_site: { Args: { _site_id: string }; Returns: string }
+      has_any_org_role: {
+        Args: {
+          _org_id: string
+          _roles: Database["public"]["Enums"]["membership_role"][]
+          _user_id: string
+        }
+        Returns: boolean
+      }
       has_org_role: {
         Args: {
           _org_id: string

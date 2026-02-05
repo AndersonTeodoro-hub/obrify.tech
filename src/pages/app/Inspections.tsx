@@ -19,12 +19,14 @@ import {
 import { supabase } from '@/integrations/supabase/client';
 import { InspectionFilters } from '@/components/inspections/InspectionFilters';
 import { NewInspectionWizard } from '@/components/inspections/NewInspectionWizard';
+import { usePermissions } from '@/hooks/use-permissions';
 
 type DateFilter = 'all' | 'last7' | 'last30' | 'thisMonth' | 'lastMonth';
 
 export default function Inspections() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  const { canCreateInspection } = usePermissions();
   const [wizardOpen, setWizardOpen] = useState(false);
   
   // Filter state
@@ -157,10 +159,12 @@ export default function Inspections() {
           <h1 className="text-2xl font-bold">{t('inspections.title')}</h1>
           <p className="text-muted-foreground">{t('inspections.subtitle')}</p>
         </div>
-        <Button className="bg-gradient-to-r from-primary to-accent" onClick={() => setWizardOpen(true)}>
-          <Plus className="w-4 h-4 mr-2" />
-          {t('inspections.new')}
-        </Button>
+        {canCreateInspection && (
+          <Button className="bg-gradient-to-r from-primary to-accent" onClick={() => setWizardOpen(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            {t('inspections.new')}
+          </Button>
+        )}
       </div>
 
       <InspectionFilters
@@ -237,10 +241,12 @@ export default function Inspections() {
             <ClipboardCheck className="w-16 h-16 text-muted-foreground/50 mb-4" />
             <h3 className="text-lg font-medium">{t('inspections.noInspections')}</h3>
             <p className="text-muted-foreground text-center mt-1">{t('inspections.startInspecting')}</p>
-            <Button className="mt-4" onClick={() => setWizardOpen(true)}>
-              <Plus className="w-4 h-4 mr-2" />
-              {t('inspections.new')}
-            </Button>
+            {canCreateInspection && (
+              <Button className="mt-4" onClick={() => setWizardOpen(true)}>
+                <Plus className="w-4 h-4 mr-2" />
+                {t('inspections.new')}
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}

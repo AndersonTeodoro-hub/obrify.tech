@@ -5,6 +5,7 @@ import { format } from 'date-fns';
 import { FileDown, AlertTriangle, Eye, X } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
+import { usePermissions } from '@/hooks/use-permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -42,6 +43,7 @@ const statusConfig = {
 export default function NonConformities() {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const { canExportData } = usePermissions();
   const [siteFilter, setSiteFilter] = useState('all');
   const [severityFilter, setSeverityFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -181,10 +183,12 @@ export default function NonConformities() {
           <h1 className="text-2xl font-bold">{t('ncPage.title')}</h1>
           <p className="text-muted-foreground">{t('ncPage.subtitle')}</p>
         </div>
-        <Button onClick={exportToExcel} disabled={!nonconformities?.length}>
-          <FileDown className="w-4 h-4 mr-2" />
-          {t('ncPage.exportExcel')}
-        </Button>
+        {canExportData && (
+          <Button onClick={exportToExcel} disabled={!nonconformities?.length}>
+            <FileDown className="w-4 h-4 mr-2" />
+            {t('ncPage.exportExcel')}
+          </Button>
+        )}
       </div>
 
       {/* Filters */}
