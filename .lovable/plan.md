@@ -1,8 +1,8 @@
 
-# Plano: Redesign Premium dos Componentes UI
+# Plano: Finalizar Redesign Premium - Animacoes e Polish
 
 ## Resumo
-Actualizar todos os componentes base do design system (Button, Card, Input, Badge, Table) e os Stat Cards do Dashboard para um visual premium e coeso com a nova paleta slate/accent.
+Completar o redesign premium aplicando animacoes de entrada, estilos refinados para cards, listas, galerias, empty states e loading states. Adicionar novas animacoes globais ao CSS.
 
 ---
 
@@ -10,270 +10,367 @@ Actualizar todos os componentes base do design system (Button, Card, Input, Badg
 
 | Ficheiro | Alteracao |
 |----------|-----------|
-| src/components/ui/button.tsx | Novas variantes premium com gradientes |
-| src/components/ui/card.tsx | Rounded-xl, shadow refinado, hover interactivo |
-| src/components/ui/input.tsx | Border slate, focus ring primary, rounded-lg |
-| src/components/ui/badge.tsx | Variantes de severidade com gradientes |
-| src/components/ui/table.tsx | Header uppercase, rows premium, cells refinadas |
-| src/pages/app/Dashboard.tsx | Stat Cards redesenhados com estilo premium |
+| src/index.css | Animacoes globais (fadeInUp, shimmer), dark mode refinado |
+| src/components/ui/skeleton.tsx | Skeleton com efeito shimmer premium |
+| src/pages/app/Dashboard.tsx | Animacoes staggered nos stat cards |
+| src/pages/app/Sites.tsx | Grid responsivo, cards premium, empty state |
+| src/pages/app/NonConformities.tsx | Border-left colorida por severidade |
+| src/pages/app/Captures.tsx | Grid 4 colunas, aspect-video, gap-4 |
+| src/components/captures/CaptureCard.tsx | Hover scale, overlay gradiente, rounded-xl |
 
 ---
 
-## 1. Button (src/components/ui/button.tsx)
+## 1. CSS Global - Animacoes (src/index.css)
 
-### Novas variantes:
+### Adicionar keyframes e classes:
 
-```typescript
-const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-semibold ring-offset-background transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
-  {
-    variants: {
-      variant: {
-        // Primary com gradiente e elevacao no hover
-        default: "bg-gradient-to-br from-primary-600 to-primary-700 text-white shadow-sm hover:from-primary-500 hover:to-primary-600 hover:shadow-md hover:-translate-y-0.5 active:translate-y-0",
-        
-        // Destructive com gradiente vermelho
-        destructive: "bg-gradient-to-br from-red-600 to-red-700 text-white shadow-sm hover:from-red-500 hover:to-red-600 hover:shadow-md hover:-translate-y-0.5 active:translate-y-0",
-        
-        // Outline/Secondary com border slate
-        outline: "border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-foreground",
-        
-        // Secondary igual ao outline
-        secondary: "border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-foreground",
-        
-        // Ghost transparente
-        ghost: "bg-transparent hover:bg-slate-100 dark:hover:bg-slate-800 text-foreground",
-        
-        // Link
-        link: "text-primary underline-offset-4 hover:underline",
-        
-        // Accent (NOVA variante)
-        accent: "bg-gradient-to-br from-accent-500 to-accent-600 text-white shadow-sm hover:from-accent-400 hover:to-accent-500 hover:shadow-md hover:-translate-y-0.5 active:translate-y-0",
-      },
-      size: {
-        default: "h-10 px-4 py-2",
-        sm: "h-9 rounded-lg px-3",
-        lg: "h-11 rounded-lg px-8",
-        icon: "h-10 w-10",
-      },
-    },
-    defaultVariants: {
-      variant: "default",
-      size: "default",
-    },
-  },
-);
+```css
+@layer base {
+  /* Animacao fadeInUp */
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  /* Animacao shimmer para skeletons */
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+}
+
+@layer utilities {
+  /* Classe de animacao fadeInUp */
+  .animate-fade-in-up {
+    animation: fadeInUp 0.5s ease-out forwards;
+  }
+  
+  /* Delays para stagger */
+  .animation-delay-100 { animation-delay: 100ms; }
+  .animation-delay-200 { animation-delay: 200ms; }
+  .animation-delay-300 { animation-delay: 300ms; }
+  .animation-delay-400 { animation-delay: 400ms; }
+  
+  /* Shimmer effect */
+  .animate-shimmer {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--muted)) 0%,
+      hsl(var(--muted)/0.5) 50%,
+      hsl(var(--muted)) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+}
 ```
 
----
-
-## 2. Card (src/components/ui/card.tsx)
-
-### Card base:
-```typescript
-// rounded-xl (12px), border slate, hover interactivo
-const Card = React.forwardRef<...>(({ className, ...props }, ref) => (
-  <div 
-    ref={ref} 
-    className={cn(
-      "rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700",
-      className
-    )} 
-    {...props} 
-  />
-));
-```
-
-### CardHeader, CardContent, CardFooter:
-- Manter estrutura actual
-- Padding consistente
+### Dark mode review - garantir cores consistentes:
+- Backgrounds: bg-slate-950 (base), bg-slate-900 (cards)
+- Texto: text-slate-50 (primary), text-slate-400 (secondary)
+- Borders: border-slate-800
 
 ---
 
-## 3. Input (src/components/ui/input.tsx)
+## 2. Skeleton Premium (src/components/ui/skeleton.tsx)
 
-### Estilos actualizados:
+Actualizar com efeito shimmer:
+
 ```typescript
-<input
-  className={cn(
-    "flex h-10 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2.5 text-base ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground transition-all duration-200 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
-    className,
-  )}
-/>
+function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div 
+      className={cn(
+        "rounded-lg bg-gradient-to-r from-slate-200 via-slate-100 to-slate-200 dark:from-slate-800 dark:via-slate-700 dark:to-slate-800 animate-shimmer bg-[length:200%_100%]",
+        className
+      )} 
+      {...props} 
+    />
+  );
+}
 ```
 
 ---
 
-## 4. Badge (src/components/ui/badge.tsx)
+## 3. Dashboard - Animacoes Staggered (src/pages/app/Dashboard.tsx)
 
-### Novas variantes de severidade:
-
-```typescript
-const badgeVariants = cva(
-  "inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-  {
-    variants: {
-      variant: {
-        default: "border-transparent bg-primary text-primary-foreground",
-        secondary: "border-transparent bg-secondary text-secondary-foreground",
-        destructive: "border-transparent bg-destructive text-destructive-foreground",
-        outline: "text-foreground border-slate-200 dark:border-slate-700",
-        
-        // Variantes de severidade (NOVAS)
-        critical: "border-transparent bg-gradient-to-r from-red-600 to-red-700 text-white",
-        high: "border-transparent bg-gradient-to-r from-amber-500 to-amber-600 text-slate-900",
-        medium: "border-transparent bg-gradient-to-r from-blue-500 to-blue-600 text-white",
-        low: "border-transparent bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300",
-        
-        // Status
-        success: "border-transparent bg-gradient-to-r from-green-500 to-green-600 text-white",
-      },
-    },
-    defaultVariants: {
-      variant: "default",
-    },
-  },
-);
-```
-
----
-
-## 5. Table (src/components/ui/table.tsx)
-
-### TableHeader:
-```typescript
-// Header premium: bg cinza, texto uppercase, tracking wider
-<thead ref={ref} className={cn("bg-slate-50 dark:bg-slate-800/50 [&_tr]:border-b", className)} {...props} />
-```
-
-### TableHead:
-```typescript
-// Celulas do header: uppercase, tracking, slate-500
-<th className={cn(
-  "h-12 px-5 text-left align-middle text-xs uppercase tracking-wider font-medium text-slate-500 dark:text-slate-400 [&:has([role=checkbox])]:pr-0",
-  className,
-)} />
-```
-
-### TableRow:
-```typescript
-// Rows: hover suave, border refinado
-<tr className={cn(
-  "border-b border-slate-100 dark:border-slate-800 transition-colors data-[state=selected]:bg-muted hover:bg-slate-50 dark:hover:bg-slate-800/50",
-  className,
-)} />
-```
-
-### TableCell:
-```typescript
-// Cells: padding aumentado
-<td className={cn("py-4 px-5 align-middle [&:has([role=checkbox])]:pr-0", className)} />
-```
-
----
-
-## 6. Dashboard Stat Cards (src/pages/app/Dashboard.tsx)
-
-### Redesign dos Stat Cards:
+### Stats Grid:
+- gap-6 (em vez de gap-4)
+- Cada card com classe de animacao e delay incremental
 
 ```tsx
-const statCards = [
-  { 
-    title: t('dashboard.totalSites'), 
-    value: stats?.sites || 0, 
-    icon: HardHat, 
-    iconBg: 'bg-primary-100 dark:bg-primary-900/30',
-    iconColor: 'text-primary-600 dark:text-primary-400'
-  },
-  // ... outras cards
-];
+<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+  {statCards.map((stat, index) => (
+    <Card 
+      key={stat.title} 
+      className={cn(
+        "group hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700 hover:-translate-y-1 opacity-0 animate-fade-in-up",
+        index === 0 && "animation-delay-0",
+        index === 1 && "animation-delay-100",
+        index === 2 && "animation-delay-200",
+        index === 3 && "animation-delay-300"
+      )}
+    >
+      {/* conteudo existente */}
+    </Card>
+  ))}
+</div>
+```
 
-// Renderizacao:
-<Card key={stat.title} className="group">
-  <CardContent className="p-6">
-    <div className="flex items-start justify-between">
-      <div className="space-y-2">
-        {/* Label uppercase */}
-        <p className="text-xs uppercase tracking-wider font-medium text-slate-500 dark:text-slate-400">
-          {stat.title}
-        </p>
-        {/* Valor grande e elegante */}
-        <p className="text-4xl font-light tracking-tight text-foreground">
-          {stat.value}
-        </p>
-      </div>
-      {/* Icone com fundo colorido */}
-      <div className={cn(
-        "w-12 h-12 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110",
-        stat.iconBg
-      )}>
-        <stat.icon className={cn("w-6 h-6", stat.iconColor)} />
-      </div>
+---
+
+## 4. Sites - Cards Premium (src/pages/app/Sites.tsx)
+
+### Grid:
+```tsx
+<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+```
+
+### Site Card redesenhado:
+
+```tsx
+<Card
+  key={site.id}
+  className="group overflow-hidden hover:shadow-lg hover:-translate-y-1 hover:scale-[1.02] transition-all duration-300 cursor-pointer"
+  onClick={() => navigate(`/app/sites/${site.id}`)}
+>
+  {/* Imagem placeholder com gradiente */}
+  <div className="h-40 bg-gradient-to-br from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-800 flex items-center justify-center">
+    <HardHat className="w-12 h-12 text-slate-400 dark:text-slate-500" />
+  </div>
+  
+  <CardContent className="p-4">
+    <div className="flex items-start justify-between mb-2">
+      <h3 className="text-lg font-semibold text-foreground line-clamp-1">{site.name}</h3>
+      <DropdownMenu>...</DropdownMenu>
+    </div>
+    
+    {site.address && (
+      <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-1 mb-3">
+        <MapPin className="w-3.5 h-3.5 inline mr-1" />
+        {site.address}
+      </p>
+    )}
+    
+    <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
+      <Badge variant="default">{t('sites.statusActive')}</Badge>
+      <span className="text-xs text-slate-400">{site.organizations?.name}</span>
     </div>
   </CardContent>
 </Card>
 ```
 
-### Cores dos icones por card:
-- Sites: primary (slate-azulado)
-- Capturas: green
-- Inspeccoes: accent (cobre)
-- NCs: amber/orange
+### Empty State premium:
 
----
-
-## Resultado Visual
-
-```text
-+----------------------------------------+
-|  BUTTON PRIMARY                        |
-|  ┌──────────────────────────────────┐  |
-|  │  Gradient slate-600 → 700        │  |
-|  │  Hover: elevacao + translate     │  |
-|  └──────────────────────────────────┘  |
-+----------------------------------------+
-
-+----------------------------------------+
-|  CARD PREMIUM                          |
-|  ┌──────────────────────────────────┐  |
-|  │  Border: slate-200               │  |
-|  │  Shadow: sm → md on hover        │  |
-|  │  Radius: xl (12px)               │  |
-|  └──────────────────────────────────┘  |
-+----------------------------------------+
-
-+----------------------------------------+
-|  STAT CARD                             |
-|  ┌──────────────────────────────────┐  |
-|  │  TOTAL OBRAS        [icon]       │  |
-|  │  47                              │  |
-|  │  (text-4xl font-light)           │  |
-|  └──────────────────────────────────┘  |
-+----------------------------------------+
+```tsx
+<Card>
+  <CardContent className="flex flex-col items-center justify-center py-16">
+    <HardHat className="w-16 h-16 text-slate-300 dark:text-slate-600 mb-4" />
+    <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{t('sites.noSites')}</h3>
+    <p className="text-slate-500 max-w-md mx-auto text-center mt-2">{t('sites.createFirst')}</p>
+    {canCreateSite && (
+      <Button onClick={() => setIsCreateOpen(true)} className="mt-6" variant="accent">
+        <Plus className="w-4 h-4 mr-2" />
+        {t('sites.create')}
+      </Button>
+    )}
+  </CardContent>
+</Card>
 ```
 
 ---
 
-## Paleta de Cores Consistente
+## 5. NonConformities - Border por Severidade (src/pages/app/NonConformities.tsx)
 
-| Elemento | Light | Dark |
-|----------|-------|------|
-| Button Primary | slate-600/700 | slate-500/600 |
-| Button Accent | accent-500/600 | accent-400/500 |
-| Card Border | slate-200 | slate-800 |
-| Card Hover | slate-300 | slate-700 |
-| Input Border | slate-200 | slate-700 |
-| Input Focus | primary-500 | primary-500 |
-| Table Header | slate-50 | slate-800/50 |
-| Table Row Hover | slate-50 | slate-800/50 |
+### Configuracao de cores para border-left:
+
+```typescript
+const severityBorderColor = {
+  critical: 'border-l-red-500',
+  high: 'border-l-amber-500',
+  medium: 'border-l-blue-500',
+  low: 'border-l-slate-300 dark:border-l-slate-600',
+};
+```
+
+### TableRow com border-left:
+
+```tsx
+<TableRow 
+  key={nc.id}
+  className={cn(
+    "border-l-4",
+    severityBorderColor[nc.severity as keyof typeof severityBorderColor] || severityBorderColor.medium
+  )}
+>
+  {/* celulas existentes */}
+</TableRow>
+```
+
+### Empty State premium:
+
+```tsx
+<div className="text-center py-16">
+  <AlertTriangle className="w-16 h-16 mx-auto text-slate-300 dark:text-slate-600 mb-4" />
+  <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{t('ncPage.noResults')}</h3>
+  <p className="text-slate-500 max-w-md mx-auto mt-2">{t('ncPage.noResultsDesc')}</p>
+</div>
+```
+
+---
+
+## 6. Captures - Galeria Premium (src/pages/app/Captures.tsx)
+
+### Grid 4 colunas:
+
+```tsx
+{/* Loading state com skeletons */}
+<div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+  {[...Array(8)].map((_, i) => (
+    <Skeleton key={i} className="aspect-video rounded-xl" />
+  ))}
+</div>
+
+{/* Content grid */}
+<div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+  {captures.map((capture) => (
+    <CaptureCard
+      key={capture.id}
+      capture={capture}
+      onClick={() => handleCaptureClick(capture)}
+    />
+  ))}
+</div>
+```
+
+### Empty State:
+
+```tsx
+<Card>
+  <CardContent className="flex flex-col items-center justify-center py-16">
+    <Camera className="w-16 h-16 text-slate-300 dark:text-slate-600 mb-4" />
+    <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{t('captures.noCaptures')}</h3>
+    <p className="text-slate-500 max-w-md mx-auto text-center mt-2">{t('captures.startCapturing')}</p>
+    <Button onClick={() => setIsCreateOpen(true)} className="mt-6" variant="accent">
+      <Camera className="w-4 h-4 mr-2" />
+      {t('captures.new')}
+    </Button>
+  </CardContent>
+</Card>
+```
+
+---
+
+## 7. CaptureCard - Visual Premium (src/components/captures/CaptureCard.tsx)
+
+### Card redesenhado:
+
+```tsx
+<Card 
+  className="overflow-hidden rounded-xl cursor-pointer group"
+  onClick={onClick}
+>
+  <CardContent className="p-0">
+    <AspectRatio ratio={16 / 9}>
+      <div className="relative w-full h-full bg-slate-100 dark:bg-slate-800">
+        <img
+          src={/* url */}
+          alt={capture.capture_point.code}
+          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+        />
+        
+        {/* Type badge */}
+        <div className="absolute top-3 left-3">
+          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium backdrop-blur-sm ${TYPE_COLORS[category]}`}>
+            <Icon className="w-3 h-3" />
+            {t(`captures.${category}`)}
+          </div>
+        </div>
+
+        {/* Hover overlay com gradiente */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
+        {/* Info sempre visivel no fundo */}
+        <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 to-transparent">
+          <p className="text-sm font-medium text-white truncate">{capture.capture_point.code}</p>
+          <p className="text-xs text-white/70 truncate">
+            {capture.capture_point.area.floor.name} • {capture.capture_point.area.name}
+          </p>
+          <p className="text-[10px] text-white/50 mt-1">
+            {format(new Date(captureDate), 'dd/MM/yyyy HH:mm')}
+          </p>
+        </div>
+      </div>
+    </AspectRatio>
+  </CardContent>
+</Card>
+```
+
+### Cores de tipo actualizadas (remover roxo):
+
+```typescript
+const TYPE_COLORS: Record<CaptureCategory, string> = {
+  photo: 'bg-green-500/20 text-green-400 border-green-500/30',
+  video: 'bg-slate-500/20 text-slate-300 border-slate-500/30',
+  panorama: 'bg-accent-500/20 text-accent-400 border-accent-500/30',
+};
+```
+
+---
+
+## Resumo de Alteracoes Visuais
+
+```text
++----------------------------------------------+
+|  DASHBOARD                                   |
+|  ┌────┐ ┌────┐ ┌────┐ ┌────┐                |
+|  │ 47 │ │ 12 │ │ 89 │ │  5 │  <- stagger    |
+|  └────┘ └────┘ └────┘ └────┘     animation  |
+|    0ms   100ms  200ms  300ms                 |
++----------------------------------------------+
+
++----------------------------------------------+
+|  SITES GRID (3 colunas)                      |
+|  ┌──────────┐ ┌──────────┐ ┌──────────┐     |
+|  │  [img]   │ │  [img]   │ │  [img]   │     |
+|  │ Site A   │ │ Site B   │ │ Site C   │     |
+|  │ Rua...   │ │ Av...    │ │ Trav...  │     |
+|  └──────────┘ └──────────┘ └──────────┘     |
+|  hover: scale(1.02) + shadow-lg             |
++----------------------------------------------+
+
++----------------------------------------------+
+|  NC TABLE (border-left por severidade)       |
+|  ┃ #001 │ Obra X │ Desc... │ CRITICAL       |
+|  ┃ #002 │ Obra Y │ Desc... │ HIGH           |
+|  ┃ #003 │ Obra Z │ Desc... │ MEDIUM         |
+|  red    amber    blue                        |
++----------------------------------------------+
+
++----------------------------------------------+
+|  CAPTURES GALLERY (4 colunas)                |
+|  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐            |
+|  │16:9 │ │16:9 │ │16:9 │ │16:9 │            |
+|  └─────┘ └─────┘ └─────┘ └─────┘            |
+|  hover: scale(1.05) + overlay gradient      |
++----------------------------------------------+
+```
 
 ---
 
 ## Ordem de Implementacao
 
-1. Actualizar Button com novas variantes
-2. Actualizar Card com rounded-xl e hover
-3. Actualizar Input com border e focus states
-4. Actualizar Badge com variantes de severidade
-5. Actualizar Table com estilo premium
-6. Redesenhar Dashboard Stat Cards
+1. Actualizar CSS global com animacoes
+2. Actualizar Skeleton com shimmer
+3. Adicionar animacoes staggered ao Dashboard
+4. Redesenhar cards na pagina Sites
+5. Adicionar border-left nas NCs
+6. Actualizar grid de Captures para 4 colunas
+7. Redesenhar CaptureCard com aspect-video e hover
+
