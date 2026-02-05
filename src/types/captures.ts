@@ -1,7 +1,19 @@
 import type { Database } from '@/integrations/supabase/types';
+import type { ExifData } from '@/lib/exif-parser';
 
 export type CaptureSource = Database['public']['Enums']['capture_source'];
 export type ProcessingStatus = Database['public']['Enums']['processing_status'];
+
+// File upload types
+export interface FileWithPreview {
+  id: string;
+  file: File;
+  preview: string;
+  exifData: ExifData | null;
+  status: 'pending' | 'uploading' | 'success' | 'error';
+  progress: number;
+  error?: string;
+}
 
 export interface CaptureWithDetails {
   id: string;
