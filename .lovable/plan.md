@@ -1,49 +1,68 @@
 
-# Plano: Pagina de Fiscalizacoes Completa
+# Plano: Pagina de Preenchimento de Inspeccao (InspectionDetail.tsx)
 
 ## Resumo
-Implementar a pagina Inspections.tsx com lista de fiscalizacoes, filtros avancados e um wizard de 3 passos para criar novas fiscalizacoes. A criacao insere um registo na tabela `inspections` com estado "draft" e redireciona para uma pagina de preenchimento.
+Reescrever a pagina `InspectionDetail.tsx` para permitir o preenchimento completo de uma inspeccao, incluindo marcacao de conformidade por item, observacoes, anexos de fotos, e criacao automatica de nao-conformidades quando um item e marcado como "Nao Conforme".
 
 ---
 
 ## Analise do Estado Actual
 
-### Tabela `inspections` (ja existe):
-- `id`, `site_id`, `template_id`, `created_by`
-- `floor_id`, `area_id`, `capture_point_id` (opcional)
-- `status` (text, default 'DRAFT')
-- `scheduled_at`, `assigned_to`, `structure_type`
-- `created_at`, `updated_at`
+### Tabelas Existentes:
+- **inspections**: Dados da inspeccao (site, template, status, etc.)
+- **inspection_items**: Resultados por item (result: OK/NC/OBS/NA, notes, severity)
+- **inspection_template_items**: Itens do template (title, item_type, is_required)
+- **nonconformities**: Nao-conformidades (inspection_id, inspection_item_id, title, severity, status)
+- **evidence_links**: Ligacao entre capturas e inspeccoes (capture_id, inspection_id, kind)
 
-### O que ja existe:
-- Pagina placeholder em `Inspections.tsx`
-- Componente `SiteInspectionsTab.tsx` com padrao de listagem
-- Sistema de templates funcional
-- Filtros em `CaptureFilters.tsx` como referencia
+### Enums Relevantes:
+- `inspection_result`: OK, NC, OBS, NA
+- `nonconformity_status`: OPEN, IN_PROGRESS, RESOLVED, CLOSED
 
-### O que falta:
-1. Lista de fiscalizacoes com dados completos
-2. Filtros por obra, estado e data
-3. Wizard de 3 passos para criar fiscalizacao
-4. Rota para pagina de preenchimento
+### Pagina Actual:
+- Mostra informacoes basicas da inspeccao
+- Lista itens do template (apenas visualizacao)
+- Botoes placeholder sem funcionalidade
 
 ---
 
 ## Arquitectura da Solucao
 
 ```text
-Inspections.tsx
-├── Header (titulo + botao Nova Fiscalizacao)
-├── InspectionFilters.tsx
-│   ├── Filtro por Obra (Select)
-│   ├── Filtro por Estado (Select)
-│   └── Filtro por Data (DatePicker ou Select com intervalos)
-├── InspectionsList
-│   └── Table com: Data, Obra, Template, Estado, Inspector, Acoes
-└── NewInspectionWizard.tsx (Dialog)
-    ├── Passo 1: Selecionar Obra e Elemento
-    ├── Passo 2: Selecionar Template
-    └── Passo 3: Confirmar e Criar
+InspectionDetail.tsx
+├── Header Fixo
+│   ├── Botao Voltar
+│   ├── Nome do Template
+│   ├── Badges (Categoria, Estado)
+│   └── Nome da Obra
+│
+├── Cards de Info
+│   ├── Data
+│   ├── Localizacao
+│   ├── Inspector
+│   └── Progresso (X/Y itens)
+│
+├── Secçao Checklist
+│   └── ChecklistItem (por cada item)
+│       ├── Numero + Titulo
+│       ├── Radio/Botoes: OK | NC | OBS | NA
+│       ├── Campo Observacoes (expandivel)
+│       ├── Botao Anexar Foto (abre modal upload)
+│       └── Badge Obrigatorio (se aplicavel)
+│
+├── Secçao Fotos Gerais
+│   ├── DropZone para upload multiplo
+│   └── Grid de fotos anexadas
+│
+├── Modal Criar NC (quando NC selecionado)
+│   ├── Titulo (pre-preenchido com item)
+│   ├── Descricao
+│   ├── Gravidade
+│   └── Accao Corretiva
+│
+└── Barra de Accoes (sticky bottom)
+    ├── Guardar Rascunho
+    └── Concluir Inspeccao
 ```
 
 ---
@@ -52,294 +71,310 @@ Inspections.tsx
 
 | Ficheiro | Accao |
 |----------|-------|
-| src/pages/app/Inspections.tsx | Reescrever completamente |
-| src/components/inspections/InspectionFilters.tsx | Criar |
-| src/components/inspections/NewInspectionWizard.tsx | Criar |
-| src/pages/app/InspectionDetail.tsx | Criar (pagina de preenchimento) |
-| src/App.tsx | Adicionar rota `/app/inspections/:id` |
+| src/pages/app/InspectionDetail.tsx | Reescrever completamente |
+| src/components/inspections/ChecklistItem.tsx | Criar |
+| src/components/inspections/CreateNCFromItem.tsx | Criar |
+| src/components/inspections/InspectionPhotos.tsx | Criar |
+| src/components/inspections/PhotoUploadModal.tsx | Criar |
 | src/i18n/locales/pt.json | Adicionar chaves |
 | src/i18n/locales/en.json | Adicionar chaves |
 
 ---
 
-## Componentes Detalhados
+## Fluxo de Dados
 
-### 1. Inspections.tsx (Pagina Principal)
-
-**Estrutura:**
+### 1. Inicializacao:
 ```text
-- Query para listar fiscalizacoes com joins:
-  - site (nome)
-  - template (nome)
-  - created_by (perfil do inspector)
-  
-- Estado para filtros:
-  - siteId: string | null
-  - status: 'all' | 'draft' | 'in_progress' | 'completed'
-  - dateFrom: Date | null
-  - dateTo: Date | null
-
-- Tabela com colunas:
-  - Data (scheduled_at ou created_at)
-  - Obra (site.name)
-  - Template (template.name)
-  - Estado (badge colorido)
-  - Inspector (profiles.full_name via created_by)
-  - Acoes (Ver, Editar)
+1. Carregar inspeccao com joins (site, template, floors, areas, points)
+2. Carregar template_items ordenados por order_index
+3. Carregar inspection_items existentes (pode estar vazio se primeira vez)
+4. Carregar evidence_links para fotos anexadas
+5. Criar mapa local: templateItemId -> resultado + notas
 ```
 
-**Query SQL equivalente:**
+### 2. Criar Inspection Items (se nao existirem):
 ```text
-SELECT 
-  i.*,
-  s.name as site_name,
-  t.name as template_name,
-  p.full_name as inspector_name
-FROM inspections i
-JOIN sites s ON s.id = i.site_id
-JOIN inspection_templates t ON t.id = i.template_id
-LEFT JOIN profiles p ON p.user_id = i.created_by
-WHERE [filtros]
-ORDER BY i.created_at DESC
+Quando a inspeccao e aberta pela primeira vez:
+- Para cada template_item, verificar se existe inspection_item
+- Se nao existir, criar com result = null
+- Isto permite guardar progresso parcial
 ```
 
-### 2. InspectionFilters.tsx
-
-**Filtros:**
-1. **Obra** - Select com todas as obras do utilizador
-2. **Estado** - Select com opcoes:
-   - Todos
-   - Rascunho (draft)
-   - Em Curso (in_progress)
-   - Concluida (completed)
-3. **Periodo** - Select com intervalos pre-definidos:
-   - Todos
-   - Ultimos 7 dias
-   - Ultimos 30 dias
-   - Este mes
-   - Mes anterior
-
-**Botao Limpar** - Aparece quando ha filtros activos
-
-### 3. NewInspectionWizard.tsx
-
-**Wizard de 3 passos com navegacao:**
-
-#### Passo 1: Selecionar Obra e Elemento
+### 3. Actualizar Item:
 ```text
-<Select> Obra * (obrigatorio)
-<Select> Piso (opcional, carrega quando obra selecionada)
-<Select> Area (opcional, carrega quando piso selecionado)
-<Select> Ponto de Captura (opcional, carrega quando area selecionada)
+Quando o utilizador muda o resultado de um item:
+1. UPDATE inspection_items SET result = 'OK'/'NC'/'OBS'/'NA', notes = '...'
+2. Se result = 'NC' → Abrir modal para criar NC
+3. Actualizar estado local imediatamente (optimistic update)
 ```
 
-#### Passo 2: Selecionar Template
+### 4. Anexar Foto a Item:
 ```text
-<RadioGroup ou Cards clicaveis>
-  - Mostrar templates da organizacao
-  - Cada card mostra: nome, categoria (badge), numero de itens
-  - Template selecionado destacado
-</RadioGroup>
+1. Abrir modal de upload
+2. Upload para Storage (bucket captures ou novo bucket inspection_evidence)
+3. Criar registo em evidence_links com kind = 'item_evidence' e inspection_item_id
+4. Mostrar thumbnail no item
 ```
 
-#### Passo 3: Confirmar e Criar
+### 5. Fotos Gerais:
 ```text
-Resumo:
-  - Obra: [nome da obra]
-  - Localizacao: [piso > area > ponto] ou "Geral"
-  - Template: [nome do template]
-  - Inspector: [nome do utilizador actual]
-  
-<Button>Criar Fiscalizacao</Button>
+1. Upload multiplo via DropZone
+2. Criar registo em evidence_links com kind = 'general'
+3. Mostrar grid de fotos
 ```
 
-**Mutation:**
+### 6. Guardar Rascunho:
 ```text
-INSERT INTO inspections (
-  site_id,
-  template_id,
-  created_by,
-  floor_id,      -- opcional
-  area_id,       -- opcional
-  capture_point_id, -- opcional
-  status,
-  scheduled_at
-) VALUES (...)
-RETURNING id
+1. Guardar todos os inspection_items com resultados actuais
+2. UPDATE inspections SET status = 'IN_PROGRESS'
+3. Toast de sucesso
 ```
 
-**Apos criar:**
-- Toast de sucesso
-- navigate(`/app/inspections/${newId}`)
-
-### 4. InspectionDetail.tsx (Pagina de Preenchimento)
-
-**Estrutura inicial (placeholder para futuro):**
+### 7. Concluir Inspeccao:
 ```text
-- Cabecalho com info da fiscalizacao
-- Lista de itens do template para preencher
-- Botoes: Guardar Rascunho, Concluir
-```
-
-Para esta fase, criar apenas um placeholder que mostra os dados basicos da fiscalizacao.
-
----
-
-## Navegacao do Wizard
-
-```text
-Estado: currentStep (1 | 2 | 3)
-
-Passo 1 → Passo 2: Botao "Seguinte" (habilitado se obra selecionada)
-Passo 2 → Passo 3: Botao "Seguinte" (habilitado se template selecionado)
-Passo 3 → Criar: Botao "Criar Fiscalizacao"
-
-Navegacao:
-- Voltar: permite voltar aos passos anteriores
-- Indicador visual de passos (1 - 2 - 3)
+1. Validar: todos os itens obrigatorios tem resultado
+2. Validar: itens que requerem evidencia tem fotos anexadas
+3. UPDATE inspections SET status = 'COMPLETED'
+4. Bloquear edicao (modo read-only)
+5. Redirigir ou mostrar resumo
 ```
 
 ---
 
-## Estados e Badges
+## Componente ChecklistItem.tsx
 
-| Estado | Valor BD | Cor |
-|--------|----------|-----|
-| Rascunho | draft | Cinza (muted) |
-| Em Curso | in_progress | Amarelo |
-| Concluida | completed | Verde |
+```text
+interface ChecklistItemProps {
+  templateItem: TemplateItem;
+  inspectionItem: InspectionItem | null;
+  onResultChange: (itemId: string, result: InspectionResult, notes: string) => void;
+  onAddPhoto: (itemId: string) => void;
+  photos: EvidenceLink[];
+  isReadOnly: boolean;
+}
+
+Estrutura Visual:
+┌─────────────────────────────────────────────────────────────────┐
+│  [1]  Cofragem limpa e isenta de residuos         [Obrigatorio] │
+│                                                                  │
+│  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐                           │
+│  │  OK  │ │  NC  │ │ OBS  │ │ N/A  │                           │
+│  └──────┘ └──────┘ └──────┘ └──────┘                           │
+│                                                                  │
+│  Observacoes: ____________________________________________      │
+│                                                                  │
+│  Fotos: [+] [📷] [📷]                                          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+Comportamento dos botoes de resultado:
+- **OK** (verde): Conforme
+- **NC** (vermelho): Nao Conforme → Abre modal NC
+- **OBS** (amarelo): Observacao (conforme com nota)
+- **NA** (cinza): Nao Aplicavel
+
+---
+
+## Modal Criar NC (CreateNCFromItem.tsx)
+
+```text
+Quando o utilizador marca um item como NC:
+1. Modal abre automaticamente
+2. Titulo pre-preenchido: "NC - [titulo do item]"
+3. Campos:
+   - Titulo (editavel)
+   - Descricao (textarea)
+   - Gravidade: Baixa / Media / Alta / Critica
+   - Accao Corretiva (opcional)
+   - Responsavel (opcional)
+   - Data Limite (opcional)
+4. Guardar cria registo em nonconformities
+5. Fechar modal, item fica marcado como NC
+```
+
+---
+
+## Secçao Fotos Gerais (InspectionPhotos.tsx)
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│  Fotos Gerais da Inspeccao                          [+ Anexar]  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐                  │
+│  │ 📷   │ │ 📷   │ │ 📷   │ │ 📷   │ │  +   │                  │
+│  │      │ │      │ │      │ │      │ │      │                  │
+│  └──────┘ └──────┘ └──────┘ └──────┘ └──────┘                  │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+- Reutilizar DropZone existente
+- Upload vai para Storage
+- Criar evidence_link com inspection_id
+
+---
+
+## Barra de Accoes
+
+```text
+Inspeccao em DRAFT ou IN_PROGRESS:
+┌─────────────────────────────────────────────────────────────────┐
+│                   [Guardar Rascunho]  [Concluir Inspeccao]     │
+└─────────────────────────────────────────────────────────────────┘
+
+Inspeccao COMPLETED:
+- Botoes desabilitados ou escondidos
+- Badge "Inspeccao Concluida" visivel
+- Todos os campos em modo read-only
+```
+
+---
+
+## Validacao ao Concluir
+
+```text
+Verificar antes de permitir conclusao:
+
+1. Itens obrigatorios (is_required = true) devem ter resultado != null
+2. Itens com requires_evidence = true devem ter pelo menos 1 foto
+3. Se alguma validacao falhar:
+   - Mostrar toast com lista de erros
+   - Highlight nos itens com problema
+   - Nao permitir conclusao
+```
 
 ---
 
 ## Traducoes a Adicionar
 
 ```text
-inspections.filterBySite: "Filtrar por obra"
-inspections.filterByStatus: "Filtrar por estado"
-inspections.filterByDate: "Filtrar por data"
-inspections.allStatuses: "Todos os estados"
-inspections.last7Days: "Últimos 7 dias"
-inspections.last30Days: "Últimos 30 dias"
-inspections.thisMonth: "Este mês"
-inspections.lastMonth: "Mês anterior"
-inspections.allDates: "Todas as datas"
-inspections.clearFilters: "Limpar filtros"
-inspections.site: "Obra"
-inspections.location: "Localização"
-inspections.inspector: "Inspector"
-inspections.date: "Data"
-inspections.general: "Geral"
-inspections.createdSuccessfully: "Fiscalização criada com sucesso"
-inspections.wizard.title: "Nova Fiscalização"
-inspections.wizard.step1Title: "Selecionar Obra"
-inspections.wizard.step1Desc: "Escolha a obra e o local da fiscalização"
-inspections.wizard.step2Title: "Selecionar Template"
-inspections.wizard.step2Desc: "Escolha o checklist a utilizar"
-inspections.wizard.step3Title: "Confirmar"
-inspections.wizard.step3Desc: "Reveja os dados e crie a fiscalização"
-inspections.wizard.summary: "Resumo"
-inspections.wizard.selectSite: "Selecione uma obra"
-inspections.wizard.selectTemplate: "Selecione um template"
-inspections.wizard.optionalLocation: "Localização (opcional)"
-inspections.view: "Ver"
-inspections.continue: "Continuar"
+inspections.detail.progress: "Progresso"
+inspections.detail.itemsCompleted: "{{completed}} de {{total}} itens"
+inspections.detail.generalPhotos: "Fotos Gerais"
+inspections.detail.attachPhoto: "Anexar Foto"
+inspections.detail.addPhotos: "Adicionar Fotos"
+inspections.detail.resultOK: "Conforme"
+inspections.detail.resultNC: "Não Conforme"
+inspections.detail.resultOBS: "Observação"
+inspections.detail.resultNA: "N/A"
+inspections.detail.observations: "Observações"
+inspections.detail.observationsPlaceholder: "Adicionar observações..."
+inspections.detail.saveDraft: "Guardar Rascunho"
+inspections.detail.completeInspection: "Concluir Inspeção"
+inspections.detail.savedSuccessfully: "Alterações guardadas"
+inspections.detail.completedSuccessfully: "Inspeção concluída com sucesso"
+inspections.detail.readOnly: "Esta inspeção já foi concluída e não pode ser editada"
+inspections.detail.missingRequired: "Existem itens obrigatórios por preencher"
+inspections.detail.missingEvidence: "Existem itens que necessitam de evidência fotográfica"
+inspections.detail.createNC: "Criar Não-Conformidade"
+inspections.detail.ncTitle: "Título da NC"
+inspections.detail.ncDescription: "Descrição"
+inspections.detail.ncSeverity: "Gravidade"
+inspections.detail.ncCorrectiveAction: "Ação Corretiva"
+inspections.detail.ncResponsible: "Responsável"
+inspections.detail.ncDueDate: "Data Limite"
+inspections.detail.ncCreated: "Não-conformidade registada"
+inspections.detail.photoUploaded: "Foto anexada com sucesso"
+inspections.detail.noPhotos: "Sem fotos anexadas"
 ```
 
 ---
 
-## Rota Nova
+## Migracao de Base de Dados (se necessario)
 
-Adicionar em App.tsx:
+A tabela `evidence_links` ja existe mas pode precisar de campo adicional para referenciar `inspection_item_id`:
+
+```sql
+-- Adicionar referencia ao item especifico (opcional, para fotos por item)
+ALTER TABLE evidence_links
+ADD COLUMN IF NOT EXISTS inspection_item_id uuid REFERENCES inspection_items(id);
+
+-- Adicionar tipo de evidencia
+-- O campo 'kind' ja existe e pode ser usado: 'general', 'item_evidence'
+```
+
+---
+
+## Estado Local da Pagina
+
 ```text
-<Route path="inspections/:inspectionId" element={<InspectionDetail />} />
+interface InspectionDetailState {
+  // Dados carregados
+  inspection: Inspection;
+  templateItems: TemplateItem[];
+  
+  // Estado de preenchimento
+  itemResults: Map<string, {
+    inspectionItemId: string;
+    result: 'OK' | 'NC' | 'OBS' | 'NA' | null;
+    notes: string;
+  }>;
+  
+  // Fotos
+  itemPhotos: Map<string, EvidenceLink[]>;
+  generalPhotos: EvidenceLink[];
+  
+  // UI
+  isSubmitting: boolean;
+  showNCModal: boolean;
+  currentNCItem: TemplateItem | null;
+  showPhotoModal: boolean;
+  currentPhotoItem: TemplateItem | null;
+}
 ```
 
 ---
 
 ## Fluxo de Utilizacao
 
-### Listar Fiscalizacoes:
 ```text
-1. Utilizador acede a /app/inspections
-2. Ve tabela com todas as fiscalizacoes
-3. Usa filtros para refinar busca
-4. Clica em "Ver" para abrir detalhe
-```
-
-### Criar Nova Fiscalizacao:
-```text
-1. Clica em "+ Nova Fiscalizacao"
-2. Wizard abre no Passo 1
-3. Seleciona obra (obrigatorio)
-4. Opcionalmente seleciona piso/area/ponto
-5. Clica "Seguinte"
-6. No Passo 2, seleciona template
-7. Clica "Seguinte"
-8. No Passo 3, revisa resumo
-9. Clica "Criar Fiscalizacao"
-10. Registo criado com status "draft"
-11. Redireciona para /app/inspections/:id
+1. Utilizador abre inspeccao (/app/inspections/:id)
+   ↓
+2. Sistema carrega dados e cria inspection_items se necessario
+   ↓
+3. Utilizador percorre checklist:
+   - Marca cada item como OK, NC, OBS ou NA
+   - Adiciona observacoes quando necessario
+   - Anexa fotos por item ou gerais
+   ↓
+4. Se marca NC:
+   - Modal abre para criar nao-conformidade
+   - Preenche detalhes e guarda
+   ↓
+5. Clica "Guardar Rascunho" periodicamente
+   - Estado = IN_PROGRESS
+   ↓
+6. Quando termina, clica "Concluir Inspeccao"
+   - Validacao de itens obrigatorios
+   - Estado = COMPLETED
+   - Pagina fica read-only
 ```
 
 ---
 
 ## Consideracoes Tecnicas
 
-1. **Queries Optimizadas**: Usar joins para evitar N+1 queries
+1. **Auto-save**: Implementar debounce para guardar automaticamente a cada 30 segundos
 
-2. **Filtros**: Aplicar filtros no lado do cliente inicialmente, migrar para servidor se lista crescer
+2. **Optimistic Updates**: Actualizar UI imediatamente, fazer sync em background
 
-3. **Wizard State**: Manter estado local no componente, resetar ao fechar
+3. **Offline Support (futuro)**: Estrutura preparada para guardar localmente
 
-4. **RLS**: Fiscalizacoes ja tem policies que verificam `can_access_site()`
+4. **Performance**: Usar React Query para cache dos dados
 
-5. **Status Mapping**: 
-   - BD usa maiusculas (DRAFT, IN_PROGRESS, COMPLETED)
-   - Normalizar para minusculas no frontend ou ajustar badges
+5. **RLS**: Policies ja existem para inspection_items e nonconformities
 
-6. **Inspector**: Usar tabela `profiles` para obter nome do utilizador via `created_by`
-
----
-
-## Interface Visual do Wizard
-
-```text
-┌────────────────────────────────────────────────────────┐
-│  Nova Fiscalização                              [X]   │
-├────────────────────────────────────────────────────────┤
-│                                                        │
-│   ● ───── ○ ───── ○                                   │
-│   1       2       3                                    │
-│  Obra  Template Confirmar                             │
-│                                                        │
-│ ┌────────────────────────────────────────────────┐    │
-│ │                                                │    │
-│ │  Selecionar Obra                               │    │
-│ │  Escolha a obra e o local da fiscalizacao      │    │
-│ │                                                │    │
-│ │  Obra *                                        │    │
-│ │  ┌──────────────────────────────────────────┐ │    │
-│ │  │ Selecione uma obra              ▼        │ │    │
-│ │  └──────────────────────────────────────────┘ │    │
-│ │                                                │    │
-│ │  Piso (opcional)                               │    │
-│ │  ┌──────────────────────────────────────────┐ │    │
-│ │  │ Todos os pisos                 ▼        │ │    │
-│ │  └──────────────────────────────────────────┘ │    │
-│ │                                                │    │
-│ └────────────────────────────────────────────────┘    │
-│                                                        │
-│                              [Cancelar]  [Seguinte →] │
-└────────────────────────────────────────────────────────┘
-```
+6. **Storage**: Usar bucket "captures" existente ou criar "inspection-evidence"
 
 ---
 
 ## Resumo das Alteracoes
 
-1. **Inspections.tsx**: Lista completa com tabela e filtros
-2. **InspectionFilters.tsx**: Componente de filtros reutilizavel
-3. **NewInspectionWizard.tsx**: Wizard de 3 passos
-4. **InspectionDetail.tsx**: Pagina placeholder para preenchimento
-5. **App.tsx**: Nova rota para detalhe
-6. **Traducoes**: Novas chaves em PT e EN
+1. **InspectionDetail.tsx**: Reescrita completa com funcionalidade de preenchimento
+2. **ChecklistItem.tsx**: Componente para cada item do checklist
+3. **CreateNCFromItem.tsx**: Modal para criar NC quando item marcado como NC
+4. **InspectionPhotos.tsx**: Componente para fotos gerais
+5. **PhotoUploadModal.tsx**: Modal para upload de foto por item
+6. **Migracao BD**: Adicionar `inspection_item_id` a `evidence_links`
+7. **Traducoes**: Novas chaves em PT e EN
