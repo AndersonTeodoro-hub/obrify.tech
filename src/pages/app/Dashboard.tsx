@@ -1,9 +1,7 @@
-import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  Building2,
   HardHat,
   Camera,
   ClipboardCheck,
@@ -16,6 +14,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { SitesWithNCs } from '@/components/dashboard/SitesWithNCs';
 
 export default function Dashboard() {
   const { t } = useTranslation();
@@ -222,6 +221,9 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Sites with Open NCs */}
+      <SitesWithNCs orgIds={orgIds} />
     </div>
   );
 }
