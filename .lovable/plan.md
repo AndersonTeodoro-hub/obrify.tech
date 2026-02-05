@@ -1,379 +1,290 @@
 
-# Plano: Servico de Geracao de PDFs
+# Plano: Implementacao Completa do Relatorio de Inspecao em PDF
 
 ## Resumo
-Instalar as bibliotecas jspdf e jspdf-autotable, e criar um servico completo de geracao de PDFs com tres funcoes principais: relatorio de inspecao, ficha de nao-conformidade, e auto de medicao.
+Refactorizar a funcao `generateInspectionReport` no servico `pdfGenerator.ts` para implementar a estrutura completa do relatorio de inspecao, e adicionar botao "Gerar PDF" na pagina `InspectionDetail.tsx` quando o estado for "Concluida".
 
 ---
 
-## Dependencias a Instalar
+## Analise do Estado Actual
 
-```text
-jspdf - Biblioteca base para geracao de PDFs
-jspdf-autotable - Plugin para criar tabelas formatadas automaticamente
-```
+### Servico Existente (pdfGenerator.ts):
+- Ja existe a funcao `generateInspectionReport` com estrutura basica
+- Tem cabecalho, dados gerais, resumo e tabela simples de checklist
+- Fotos limitadas a 8, sem legendas numeradas
+- Falta: objectivo baseado no template, NCs abertas, conclusao, assinatura
 
----
+### Pagina InspectionDetail.tsx:
+- Nao tem botao para gerar PDF
+- Mostra alerta de "read-only" quando estado = COMPLETED
+- Tem acesso ao inspectionId necessario
 
-## Estrutura do Servico
-
-Criar ficheiro `/src/services/pdfGenerator.ts` com:
-
-```text
-pdfGenerator.ts
-├── Configuracao base (A4, margens, fonte)
-├── Funcoes auxiliares
-│   ├── addHeader() - Cabecalho com logo e titulo
-│   ├── addFooter() - Rodape com pagina e data
-│   └── loadImage() - Carregar imagens do Storage
-│
-├── generateInspectionReport(inspectionId)
-│   ├── Dados: inspecao, template, itens, resultados, fotos
-│   ├── Conteudo: cabecalho, info geral, checklist, resumo
-│   └── Retorna: Blob do PDF
-│
-├── generateNCReport(ncId)
-│   ├── Dados: NC, obra, evidencias, historico
-│   ├── Conteudo: cabecalho, detalhes, fotos, timeline
-│   └── Retorna: Blob do PDF
-│
-└── generateMeasurementAuto(siteId, period)
-    ├── Dados: obra, inspecoes do periodo
-    ├── Conteudo: cabecalho, resumo trabalhos, totais
-    └── Retorna: Blob do PDF
-```
+### Dados Disponiveis:
+- **inspections**: id, status, scheduled_at, created_by, site_id, template_id, floor_id, area_id
+- **sites**: id, name, address
+- **inspection_templates**: id, name, category
+- **inspection_items**: id, result, notes, template_item_id
+- **inspection_template_items**: id, title, section, is_required
+- **evidence_links**: id, capture_id, inspection_id, inspection_item_id
+- **captures**: id, file_path
+- **nonconformities**: abertas nesta inspecao
+- **profiles**: full_name do inspector
 
 ---
 
-## Configuracao Base do PDF
+## Estrutura Final do PDF
 
 ```text
-Formato: A4 (210mm x 297mm)
-Margens: 20mm (equivalente a ~2cm)
-Fonte: Helvetica (similar a Arial, disponivel nativamente no jsPDF)
-Cores:
-  - Primaria: #3B82F6 (azul)
-  - Texto: #1F2937 (cinza escuro)
-  - Secundario: #6B7280 (cinza medio)
-```
-
----
-
-## Funcao 1: generateInspectionReport(inspectionId)
-
-### Dados a Buscar:
-
-```text
-1. inspections (id, status, scheduled_at, created_by)
-   └── sites (name, address)
-   └── inspection_templates (name, category)
-   └── floors, areas, capture_points (localizacao)
-
-2. inspection_items (result, notes)
-   └── inspection_template_items (title, is_required)
-
-3. evidence_links + captures (fotos anexadas)
-
-4. profiles (nome do inspector)
-```
-
-### Estrutura do Relatorio:
-
-```text
-┌─────────────────────────────────────────────────────────┐
-│  [LOGO]              RELATORIO DE INSPECAO              │
-│                                                          │
-│  Obra: Edificio Aurora                                  │
-│  Template: Pre-Betonagem Laje                           │
-│  Data: 05 Fevereiro 2026                                │
-│  Inspector: Joao Silva                                  │
-│  Localizacao: Piso 1 > Sala A > P01                    │
-├─────────────────────────────────────────────────────────┤
-│                                                          │
-│  RESUMO                                                  │
-│  ┌──────────────┬──────────────┬──────────────┐         │
-│  │ Conforme: 15 │ NC: 3        │ N/A: 2       │         │
-│  └──────────────┴──────────────┴──────────────┘         │
-│                                                          │
-│  CHECKLIST                                               │
-│  ┌────┬────────────────────┬──────────┬────────────────┐│
-│  │ #  │ Item               │ Resultado│ Observacoes    ││
-│  ├────┼────────────────────┼──────────┼────────────────┤│
-│  │ 1  │ Cofragem limpa     │ OK       │ -              ││
-│  │ 2  │ Armadura conforme  │ NC       │ Falta de rec...││
-│  │ 3  │ ...                │ ...      │ ...            ││
-│  └────┴────────────────────┴──────────┴────────────────┘│
-│                                                          │
-│  FOTOS ANEXADAS (se existirem)                          │
-│  ┌────────┐ ┌────────┐ ┌────────┐                       │
-│  │        │ │        │ │        │                       │
-│  └────────┘ └────────┘ └────────┘                       │
-│                                                          │
-├─────────────────────────────────────────────────────────┤
-│  Pagina 1 de 2                    Gerado em 05/02/2026  │
-└─────────────────────────────────────────────────────────┘
-```
-
----
-
-## Funcao 2: generateNCReport(ncId)
-
-### Dados a Buscar:
-
-```text
-1. nonconformities (todos os campos)
-   └── sites (name, address)
-   └── inspections > inspection_templates (nome do template)
-
-2. nonconformity_evidence (file_path para fotos)
-
-3. nonconformity_status_history (timeline)
-   └── profiles (nome de quem alterou)
-
-4. profiles (nome do criador)
-```
-
-### Estrutura da Ficha NC:
-
-```text
-┌─────────────────────────────────────────────────────────┐
-│  [LOGO]        FICHA DE NAO-CONFORMIDADE                │
-│                                                          │
-│  NC-001                              Estado: EM RESOLUCAO│
-│  Severidade: CRITICO                                     │
-├─────────────────────────────────────────────────────────┤
-│                                                          │
-│  DADOS GERAIS                                            │
-│  Obra: Edificio Aurora                                  │
-│  Inspecao: Pre-Betonagem Laje                           │
-│  Data Criacao: 05/02/2026                               │
-│  Prazo: 15/02/2026                                      │
-│  Responsavel: Pedro Santos                              │
-│  Norma Violada: NP EN 206-1                             │
-│                                                          │
-│  ──────────────────────────────────────────────────────  │
-│                                                          │
-│  DESCRICAO DO PROBLEMA                                   │
-│  ┌─────────────────────────────────────────────────────┐│
-│  │ Fissura detectada na laje do piso 2 com largura    ││
-│  │ aproximada de 2mm, comprometendo a integridade...  ││
-│  └─────────────────────────────────────────────────────┘│
-│                                                          │
-│  ACAO CORRETIVA                                          │
-│  ┌─────────────────────────────────────────────────────┐│
-│  │ Injectar resina epoxy nas fissuras. Aguardar cura  ││
-│  │ de 48 horas antes de proceder a verificacao...     ││
-│  └─────────────────────────────────────────────────────┘│
-│                                                          │
-│  EVIDENCIAS FOTOGRAFICAS                                 │
-│  ┌────────┐ ┌────────┐                                  │
-│  │        │ │        │                                  │
-│  │ Foto 1 │ │ Foto 2 │                                  │
-│  └────────┘ └────────┘                                  │
-│                                                          │
-│  HISTORICO DE ALTERACOES                                 │
-│  ○ 05/02/2026 10:30 - Aberta (Joao Silva)              │
-│  │                                                       │
-│  ○ 07/02/2026 14:15 - Em Resolucao (Pedro Santos)       │
-│    "Iniciada intervencao com resina epoxy"              │
-│                                                          │
-├─────────────────────────────────────────────────────────┤
-│  Pagina 1 de 1                    Gerado em 05/02/2026  │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  [LOGO]              RELATORIO DE INSPECAO              Pag X/Y│
+│                                                                  │
+│  Referencia: INS-2026-001                 Data: 05/02/2026      │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  DADOS GERAIS                                                    │
+│  Obra: Edificio Aurora                                          │
+│  Morada: Rua das Flores, 123, Lisboa                            │
+│  Local: Piso 1 > Sala A > P01                                   │
+│  Inspector: Joao Silva                                          │
+│  Data da Inspecao: 05 de Fevereiro de 2026                      │
+│                                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  OBJECTIVO                                                       │
+│  Esta inspecao teve como objectivo a verificacao das            │
+│  condicoes de [categoria do template] conforme o checklist      │
+│  "[nome do template]".                                          │
+│                                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  TABELA DE VERIFICACOES                                          │
+│  ┌────┬────────────────────────┬──────────┬───────────────────┐ │
+│  │ #  │ Item                   │ Conforme │ Observacoes       │ │
+│  ├────┼────────────────────────┼──────────┼───────────────────┤ │
+│  │ 1  │ Cofragem limpa         │ Sim      │ -                 │ │
+│  │ 2  │ Armadura conforme      │ Nao      │ Falta recobrimen..│ │
+│  │ 3  │ Escoramento estavel    │ Sim      │ -                 │ │
+│  │ 4  │ Verificacao betoneira  │ N/A      │ Nao aplicavel     │ │
+│  └────┴────────────────────────┴──────────┴───────────────────┘ │
+│                                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  REGISTO FOTOGRAFICO                                             │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐                         │
+│  │  Foto 1  │ │  Foto 2  │ │  Foto 3  │                         │
+│  │          │ │          │ │          │                         │
+│  └──────────┘ └──────────┘ └──────────┘                         │
+│   Item #2      Geral         Item #5                            │
+│                                                                  │
+│  (max 6 fotos por pagina, com legenda numerada)                 │
+│                                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  NAO-CONFORMIDADES ABERTAS                                       │
+│  ┌────┬─────────────────────────┬───────────┬─────────────────┐ │
+│  │ NC │ Descricao               │ Severid.  │ Estado          │ │
+│  ├────┼─────────────────────────┼───────────┼─────────────────┤ │
+│  │ 001│ Fissura na laje...      │ Critico   │ Aberta          │ │
+│  │ 002│ Armadura exposta...     │ Importante│ Em Resolucao    │ │
+│  └────┴─────────────────────────┴───────────┴─────────────────┘ │
+│                                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  CONCLUSAO                                                       │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │    ☑ APROVADO     ☐ CONDICIONADO     ☐ REPROVADO           ││
+│  └─────────────────────────────────────────────────────────────┘│
+│                                                                  │
+│  (Logica: Aprovado se 0 NCs, Condicionado se NCs severity !=   │
+│   critical, Reprovado se alguma NC critical)                    │
+│                                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ASSINATURA                                                      │
+│                                                                  │
+│  Inspector: Joao Silva                                          │
+│  Data: 05/02/2026                                               │
+│                                                                  │
+│  _________________________                                       │
+│                                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│  Pagina 1 de 2                    Gerado em 05/02/2026 15:30   │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Funcao 3: generateMeasurementAuto(siteId, period)
+## Ficheiros a Modificar
 
-### Dados a Buscar:
-
-```text
-1. sites (name, address, org_id)
-   └── organizations (name - dono da obra)
-
-2. inspections do periodo
-   └── inspection_templates (nome)
-   └── inspection_items (resumo de resultados)
-
-3. nonconformities do periodo (resumo)
-```
-
-### Estrutura do Auto de Medicao:
-
-```text
-┌─────────────────────────────────────────────────────────┐
-│  [LOGO]              AUTO DE MEDICAO                    │
-│                                                          │
-│  Periodo: 01/01/2026 a 31/01/2026                       │
-├─────────────────────────────────────────────────────────┤
-│                                                          │
-│  IDENTIFICACAO                                           │
-│  Obra: Edificio Aurora                                  │
-│  Morada: Rua das Flores, 123, Lisboa                    │
-│  Dono de Obra: Empresa XYZ, Lda                         │
-│  Fiscalizacao: SitePulse                                │
-│                                                          │
-│  ──────────────────────────────────────────────────────  │
-│                                                          │
-│  RESUMO DO PERIODO                                       │
-│  ┌───────────────────────────────┬─────────────────────┐│
-│  │ Fiscalizacoes Realizadas      │ 12                  ││
-│  │ Itens Verificados             │ 156                 ││
-│  │ Conformes                     │ 142 (91%)           ││
-│  │ Nao Conformes                 │ 8 (5%)              ││
-│  │ Observacoes                   │ 6 (4%)              ││
-│  └───────────────────────────────┴─────────────────────┘│
-│                                                          │
-│  NAO-CONFORMIDADES DO PERIODO                            │
-│  ┌────┬─────────────────┬──────────┬───────────────────┐│
-│  │ NC │ Descricao       │ Severid. │ Estado            ││
-│  ├────┼─────────────────┼──────────┼───────────────────┤│
-│  │ 001│ Fissura laje    │ Critico  │ Em Resolucao     ││
-│  │ 002│ Infiltracao     │ Importante│ Fechada          ││
-│  └────┴─────────────────┴──────────┴───────────────────┘│
-│                                                          │
-│  OBSERVACOES GERAIS                                      │
-│  [Espaco para notas adicionais]                         │
-│                                                          │
-│  ──────────────────────────────────────────────────────  │
-│                                                          │
-│  ASSINATURAS                                             │
-│  Fiscalizacao: ___________________ Data: ___________    │
-│  Dono de Obra: ___________________ Data: ___________    │
-│                                                          │
-├─────────────────────────────────────────────────────────┤
-│  Pagina 1 de 1                    Gerado em 05/02/2026  │
-└─────────────────────────────────────────────────────────┘
-```
+| Ficheiro | Accao |
+|----------|-------|
+| src/services/pdfGenerator.ts | Refactorizar generateInspectionReport |
+| src/pages/app/InspectionDetail.tsx | Adicionar botao "Gerar PDF" |
+| src/i18n/locales/pt.json | Adicionar novas chaves de traducao |
+| src/i18n/locales/en.json | Adicionar novas chaves de traducao |
 
 ---
 
-## Implementacao Tecnica
+## Alteracoes no pdfGenerator.ts
 
-### Estrutura do Ficheiro pdfGenerator.ts:
+### Novos Dados a Buscar:
+1. **nonconformities**: NCs criadas nesta inspecao
+2. Contador sequencial baseado na data de criacao
+
+### Nova Estrutura da Funcao:
 
 ```text
-// Importacoes
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import { supabase } from '@/integrations/supabase/client';
-import { format } from 'date-fns';
-import { pt } from 'date-fns/locale';
-
-// Constantes de configuracao
-const PAGE_WIDTH = 210;  // mm (A4)
-const PAGE_HEIGHT = 297; // mm (A4)
-const MARGIN = 20;       // mm (~2cm)
-const CONTENT_WIDTH = PAGE_WIDTH - (MARGIN * 2);
-
-// Cores
-const COLORS = {
-  primary: [59, 130, 246],    // #3B82F6
-  text: [31, 41, 55],         // #1F2937
-  secondary: [107, 114, 128], // #6B7280
-  success: [34, 197, 94],     // #22C55E
-  danger: [239, 68, 68],      // #EF4444
-  warning: [234, 179, 8],     // #EAB308
-};
-
-// Funcao auxiliar para adicionar cabecalho
-function addHeader(doc: jsPDF, title: string): number
-
-// Funcao auxiliar para adicionar rodape
-function addFooter(doc: jsPDF, pageNum: number, totalPages: number): void
-
-// Funcao para carregar imagem do Storage
-async function loadImageFromStorage(filePath: string): Promise<string | null>
-
-// Funcoes principais exportadas
-export async function generateInspectionReport(inspectionId: string): Promise<Blob>
-export async function generateNCReport(ncId: string): Promise<Blob>
-export async function generateMeasurementAuto(siteId: string, period: { start: Date; end: Date }): Promise<Blob>
+generateInspectionReport(inspectionId):
+  1. Fetch todos os dados necessarios
+  2. Cabecalho (Logo | Titulo | Ref + Data)
+  3. Dados Gerais (Obra, Morada, Local, Inspector, Data)
+  4. Objectivo (texto dinamico baseado no template)
+  5. Tabela de Verificacoes (# | Item | Conforme | Observacoes)
+  6. Registo Fotografico (max 6 por pagina, com legendas)
+  7. NCs Abertas (se existirem)
+  8. Conclusao (Aprovado/Condicionado/Reprovado)
+  9. Assinatura (Nome do inspector + data + linha)
+  10. Footer em todas as paginas
 ```
 
-### Utilizacao nos Componentes:
+### Logica de Conclusao:
+```text
+if (ncs com severity='critical') -> REPROVADO
+else if (ncs.length > 0) -> CONDICIONADO  
+else -> APROVADO
+```
+
+### Legendas das Fotos:
+- Fotos gerais: "Geral"
+- Fotos de itens: "Item #N" (numero do item no checklist)
+
+---
+
+## Alteracoes no InspectionDetail.tsx
+
+### Novo Botao no Header:
+Quando `inspection.status === 'COMPLETED'`:
 
 ```text
-import { generateInspectionReport, generateNCReport } from '@/services/pdfGenerator';
+<Button 
+  variant="outline" 
+  onClick={handleGeneratePDF}
+  disabled={isGeneratingPDF}
+>
+  <FileText className="w-4 h-4 mr-2" />
+  {isGeneratingPDF ? t('reports.generating') : t('reports.downloadPdf')}
+</Button>
+```
 
-// Exemplo de uso
-const handleDownloadReport = async () => {
-  setIsGenerating(true);
+### Posicionamento:
+No header, junto aos badges de status (linha 431-438 do ficheiro actual).
+
+### Handler:
+```text
+const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+
+const handleGeneratePDF = async () => {
+  setIsGeneratingPDF(true);
   try {
-    const blob = await generateInspectionReport(inspectionId);
+    const blob = await generateInspectionReport(inspectionId!);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `relatorio-inspecao-${format(new Date(), 'yyyy-MM-dd')}.pdf`;
+    a.download = `relatorio-inspecao-${inspectionId?.slice(0, 8)}.pdf`;
     a.click();
     URL.revokeObjectURL(url);
+    toast({ title: t('reports.downloadSuccess') });
   } catch (error) {
-    toast({ title: t('common.error'), variant: 'destructive' });
+    toast({ 
+      title: t('common.error'), 
+      description: String(error), 
+      variant: 'destructive' 
+    });
   } finally {
-    setIsGenerating(false);
+    setIsGeneratingPDF(false);
   }
 };
 ```
 
 ---
 
-## Ficheiros a Criar/Modificar
+## Novas Traducoes
 
-| Ficheiro | Accao |
-|----------|-------|
-| package.json | Adicionar jspdf e jspdf-autotable |
-| src/services/pdfGenerator.ts | Criar (servico principal) |
-| src/i18n/locales/pt.json | Adicionar chaves de traducao |
-| src/i18n/locales/en.json | Adicionar chaves de traducao |
-
----
-
-## Traducoes a Adicionar
-
+### Portugues (pt.json):
 ```text
-reports.inspectionReport: "Relatorio de Inspecao"
-reports.ncReport: "Ficha de Nao-Conformidade"
-reports.measurementAuto: "Auto de Medicao"
-reports.generating: "A gerar PDF..."
-reports.downloadPdf: "Descarregar PDF"
-reports.summary: "Resumo"
-reports.compliant: "Conforme"
-reports.nonCompliant: "Nao Conforme"
-reports.observations: "Observacoes"
-reports.notApplicable: "N/A"
-reports.period: "Periodo"
-reports.generalInfo: "Informacao Geral"
-reports.checklist: "Checklist"
-reports.photos: "Fotos"
-reports.history: "Historico"
-reports.signatures: "Assinaturas"
-reports.generatedAt: "Gerado em"
-reports.page: "Pagina"
-reports.of: "de"
+reports.objective: "Objectivo"
+reports.objectiveText: "Esta inspecao teve como objectivo a verificacao das condicoes de {{category}} conforme o checklist \"{{template}}\"."
+reports.verificationsTable: "Tabela de Verificacoes"
+reports.photoRegistry: "Registo Fotografico"
+reports.openNCs: "Nao-Conformidades Abertas"
+reports.conclusion: "Conclusao"
+reports.conclusionApproved: "Aprovado"
+reports.conclusionConditional: "Condicionado"
+reports.conclusionRejected: "Reprovado"
+reports.signature: "Assinatura"
+reports.inspector: "Inspector"
+reports.inspectionDate: "Data da Inspecao"
+reports.reference: "Referencia"
+reports.generalPhoto: "Geral"
+reports.itemPhoto: "Item #{{number}}"
+reports.downloadSuccess: "Relatorio gerado com sucesso"
+reports.generalData: "Dados Gerais"
+reports.conformYes: "Sim"
+reports.conformNo: "Nao"
+reports.conformNA: "N/A"
+reports.conformOBS: "OBS"
 ```
 
----
-
-## Consideracoes Tecnicas
-
-1. **Fonte**: jsPDF nao suporta Arial nativamente. Usar Helvetica (muito similar) que e a fonte padrao.
-
-2. **Imagens**: As fotos do Storage devem ser convertidas para base64 antes de inserir no PDF. Limitar tamanho para performance.
-
-3. **Logo Placeholder**: Usar um retangulo cinza com texto "LOGO" ate ter logo real.
-
-4. **Paginacao**: autoTable ja lida automaticamente com quebras de pagina.
-
-5. **Tamanho do Ficheiro**: Comprimir imagens antes de inserir. Limitar a 10 fotos por relatorio para manter tamanho razoavel.
-
-6. **Caracteres Especiais**: jsPDF suporta UTF-8, mas os acentos portugueses funcionam bem com a fonte padrao.
+### Ingles (en.json):
+```text
+reports.objective: "Objective"
+reports.objectiveText: "This inspection aimed to verify the conditions of {{category}} according to the checklist \"{{template}}\"."
+reports.verificationsTable: "Verification Table"
+reports.photoRegistry: "Photo Registry"
+reports.openNCs: "Open Non-Conformities"
+reports.conclusion: "Conclusion"
+reports.conclusionApproved: "Approved"
+reports.conclusionConditional: "Conditional"
+reports.conclusionRejected: "Rejected"
+reports.signature: "Signature"
+reports.inspector: "Inspector"
+reports.inspectionDate: "Inspection Date"
+reports.reference: "Reference"
+reports.generalPhoto: "General"
+reports.itemPhoto: "Item #{{number}}"
+reports.downloadSuccess: "Report generated successfully"
+reports.generalData: "General Data"
+reports.conformYes: "Yes"
+reports.conformNo: "No"
+reports.conformNA: "N/A"
+reports.conformOBS: "OBS"
+```
 
 ---
 
 ## Resumo das Alteracoes
 
-1. **Instalar dependencias**: jspdf e jspdf-autotable
-2. **Criar servico**: /src/services/pdfGenerator.ts com 3 funcoes principais
-3. **Funcoes auxiliares**: addHeader, addFooter, loadImageFromStorage
-4. **Traducoes**: Novas chaves em PT e EN para labels dos PDFs
+1. **pdfGenerator.ts**: Reescrever `generateInspectionReport` com estrutura completa
+   - Adicionar seccao de Objectivo baseado no template
+   - Melhorar tabela com formatacao Sim/Nao/N/A/OBS
+   - Adicionar fotos numeradas (max 6 por pagina)
+   - Adicionar lista de NCs abertas nesta inspecao
+   - Adicionar seccao de Conclusao (Aprovado/Condicionado/Reprovado)
+   - Adicionar area de Assinatura
+
+2. **InspectionDetail.tsx**: Adicionar botao "Gerar PDF"
+   - Visivel apenas quando status = COMPLETED
+   - Estado de loading durante geracao
+   - Download automatico do ficheiro
+
+3. **Traducoes**: Novas chaves para labels do PDF em PT e EN
+
+---
+
+## Consideracoes Tecnicas
+
+1. **Performance**: Limitar fotos a 6 por pagina para nao sobrecarregar o PDF
+2. **Paginacao**: autoTable gere automaticamente, mas fotos precisam verificacao manual de espaco
+3. **Imagens**: Usar signed URLs para bucket privado (captures)
+4. **Referencia**: Gerar codigo tipo "INS-2026-001" baseado na data + indice
+5. **Categoria**: Traduzir categoria do template (structure -> Estrutura, etc.)
