@@ -26,7 +26,8 @@
     "error": "Erro",
     "success": "Sucesso",
     "warning": "Aviso",
-    "info": "Informação"
+    "info": "Informação",
+    "unknown": "Desconhecido"
   },
   "auth": {
     "login": "Entrar",
@@ -163,7 +164,18 @@
     "notes": "Notas",
     "notesPlaceholder": "Adicionar notas sobre esta captura...",
     "noCaptures": "Ainda não existem capturas",
-    "startCapturing": "Comece a documentar as suas obras"
+    "startCapturing": "Comece a documentar as suas obras",
+    "filterBySite": "Filtrar por obra",
+    "filterByFloor": "Filtrar por piso",
+    "filterByDate": "Filtrar por data",
+    "filterByType": "Filtrar por tipo",
+    "clearFilters": "Limpar filtros",
+    "location": "Localização",
+    "capturedBy": "Capturado por",
+    "capturedAt": "Capturado em",
+    "processing": "A processar",
+    "viewFullscreen": "Ver em ecrã cheio",
+    "download": "Transferir"
   },
   "inspections": {
     "title": "Fiscalizações",
