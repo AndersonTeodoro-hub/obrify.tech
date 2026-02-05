@@ -17,6 +17,7 @@ import { AppLayout } from "./components/layout/AppLayout";
 import Dashboard from "./pages/app/Dashboard";
 import Organizations from "./pages/app/Organizations";
 import Sites from "./pages/app/Sites";
+import SiteDetail from "./pages/app/SiteDetail";
 import Captures from "./pages/app/Captures";
 import Inspections from "./pages/app/Inspections";
 import Reports from "./pages/app/Reports";
@@ -47,6 +48,7 @@ const App = () => (
                 <Route index element={<Dashboard />} />
                 <Route path="organizations" element={<Organizations />} />
                 <Route path="sites" element={<Sites />} />
+                <Route path="sites/:siteId" element={<SiteDetail />} />
                 <Route path="captures" element={<Captures />} />
                 <Route path="inspections" element={<Inspections />} />
                 <Route path="reports" element={<Reports />} />
