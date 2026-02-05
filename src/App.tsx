@@ -23,6 +23,7 @@ import Inspections from "./pages/app/Inspections";
 import Reports from "./pages/app/Reports";
 import Drone from "./pages/app/Drone";
 import Settings from "./pages/app/Settings";
+import InspectionTemplates from "./pages/app/InspectionTemplates";
 
 const queryClient = new QueryClient();
 
@@ -54,6 +55,7 @@ const App = () => (
                 <Route path="reports" element={<Reports />} />
                 <Route path="drone" element={<Drone />} />
                 <Route path="settings" element={<Settings />} />
+                <Route path="settings/templates" element={<InspectionTemplates />} />
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>

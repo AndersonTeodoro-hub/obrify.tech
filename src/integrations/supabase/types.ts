@@ -953,7 +953,10 @@ export type Database = {
         Row: {
           description: string | null
           id: string
+          is_required: boolean | null
           item_code: string
+          item_type: string | null
+          order_index: number | null
           requires_document: boolean
           requires_evidence: boolean
           section: string | null
@@ -964,7 +967,10 @@ export type Database = {
         Insert: {
           description?: string | null
           id?: string
+          is_required?: boolean | null
           item_code: string
+          item_type?: string | null
+          order_index?: number | null
           requires_document?: boolean
           requires_evidence?: boolean
           section?: string | null
@@ -975,7 +981,10 @@ export type Database = {
         Update: {
           description?: string | null
           id?: string
+          is_required?: boolean | null
           item_code?: string
+          item_type?: string | null
+          order_index?: number | null
           requires_document?: boolean
           requires_evidence?: boolean
           section?: string | null
@@ -995,6 +1004,7 @@ export type Database = {
       }
       inspection_templates: {
         Row: {
+          category: string | null
           created_at: string
           id: string
           name: string
@@ -1003,6 +1013,7 @@ export type Database = {
           version: number
         }
         Insert: {
+          category?: string | null
           created_at?: string
           id?: string
           name: string
@@ -1011,6 +1022,7 @@ export type Database = {
           version?: number
         }
         Update: {
+          category?: string | null
           created_at?: string
           id?: string
           name?: string
