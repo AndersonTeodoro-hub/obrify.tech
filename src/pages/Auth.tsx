@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { Activity, Building2, Camera, Shield, ArrowRight, Loader2 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 export default function AuthPage() {
   const [isLoading, setIsLoading] = useState(false);
@@ -164,7 +165,8 @@ export default function AuthPage() {
       {/* Right Panel - Auth Forms */}
       <div className="flex-1 flex items-center justify-center p-6 lg:p-12 bg-background">
         <div className="w-full max-w-md">
-          <div className="flex justify-end mb-6">
+          <div className="flex justify-end gap-1 mb-6">
+            <LanguageSwitcher />
             <ThemeToggle />
           </div>
 
