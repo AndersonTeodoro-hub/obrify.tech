@@ -26,7 +26,8 @@
     "error": "Error",
     "success": "Success",
     "warning": "Warning",
-    "info": "Information"
+    "info": "Information",
+    "unknown": "Unknown"
   },
   "auth": {
     "login": "Sign In",
@@ -163,7 +164,18 @@
     "notes": "Notes",
     "notesPlaceholder": "Add notes about this capture...",
     "noCaptures": "No captures yet",
-    "startCapturing": "Start documenting your sites"
+    "startCapturing": "Start documenting your sites",
+    "filterBySite": "Filter by site",
+    "filterByFloor": "Filter by floor",
+    "filterByDate": "Filter by date",
+    "filterByType": "Filter by type",
+    "clearFilters": "Clear filters",
+    "location": "Location",
+    "capturedBy": "Captured by",
+    "capturedAt": "Captured at",
+    "processing": "Processing",
+    "viewFullscreen": "View fullscreen",
+    "download": "Download"
   },
   "inspections": {
     "title": "Inspections",
