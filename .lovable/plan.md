@@ -1,312 +1,191 @@
- # Plano Completo: Sistema Autonomo de Fiscalizacao com Drone + IA
- 
- ## Estado Actual de Implementacao
- 
- ### ✅ FASE 1: Infraestrutura de Dados - CONCLUÍDA
- - [x] Enums: mission_type, mission_status, ai_detection_type, drone_status, ai_report_type
- - [x] Tabela project_coordinates (coordenadas GPS)
- - [x] Tabela drones (registo de equipamentos)
- - [x] Tabela cameras_360 (camaras 360)
- - [x] Tabela drone_missions (missoes de voo)
- - [x] Tabela capture_sessions (sessoes de captura)
- - [x] Tabela ai_analysis_results (resultados IA)
- - [x] Tabela ai_reports (relatorios gerados)
- - [x] Tabela ai_conversations (conversas com agente)
- - [x] Tabela ai_messages (mensagens do chat)
- - [x] RLS policies para todas as tabelas
- - [x] Indexes para performance
- 
- ### ✅ FASE 2: Agente IA de Fiscalizacao - CONCLUÍDA
- - [x] Edge Function ai-fiscal-agent
- - [x] Streaming de respostas
- - [x] Contexto da obra actual
- - [x] System prompt especializado
- 
- ### ✅ FASE 6.1: Interface de Chat - CONCLUÍDA
- - [x] Componente AIChat com streaming
- - [x] Quick commands
- - [x] Pagina Drone actualizada com dashboard
- 
- ### 🔄 PRÓXIMOS PASSOS
- - [ ] FASE 3: Integracao com Drone (Capacitor + DJI SDK)
- - [ ] FASE 4: Analise por Visao Computacional
- - [ ] FASE 5: Geracao Automatica de Documentos
- - [ ] FASE 6: Interface completa (Missoes, Analises, Relatorios)
- 
- ---
 
-## Visao Geral do Sistema Desejado
+# Plano de Implementacao: Pagina de Capturas
 
-```
-Tecnico Fiscal (comando) 
-        ↓
-   IA Agente Senior (interpreta pedido)
-        ↓
-   Planeia Missao (coordenadas do projeto)
-        ↓
-   Drone Executa (voo automatico)
-        ↓
-   Captura Imagens/Video (cada ponto)
-        ↓
-   Upload Automatico (para plataforma)
-        ↓
-   IA Analisa (visao computacional)
-        ↓
-   Gera Relatorios/Fichas/Mapas (automatico)
-```
+## Resumo
+Implementar a pagina de Capturas completa com grid responsivo, filtros, modal de nova captura e visualizador fullscreen.
 
 ---
 
-## FASE 1: Infraestrutura de Dados (Backend)
+## Componentes a Criar
 
-### 1.1 Novas Tabelas Necessarias
+### 1. CaptureCard.tsx
+Componente para exibir cada captura na grid:
+- Thumbnail com aspect-ratio 4:3
+- Overlay com tipo de captura (foto/video/360)
+- Data da captura formatada
+- Localizacao (piso/area)
+- Avatar e nome de quem capturou
+- Badge de status de processamento
 
-**Tabela `project_coordinates`** - Coordenadas GPS do projeto
-- Pontos de medicao pre-definidos pela IA
-- Ligacao a capture_points existentes
-- Altitude de voo para cada ponto
+### 2. CaptureFilters.tsx
+Barra de filtros no topo:
+- Select de obra (sites)
+- Select de piso (floors) - dependente da obra
+- DatePicker para filtro por data
+- Select de tipo (foto/video/360)
+- Botao para limpar filtros
 
-**Tabela `drones`** - Registo de equipamentos
-- Serial number, modelo, estado
-- Ligacao a organizacao
+### 3. NewCaptureModal.tsx
+Modal para criar nova captura:
+- Selecao hierarquica: Obra > Piso > Area > Ponto
+- Tipo de captura (radio group)
+- Upload de ficheiro com drag-and-drop
+- Preview do ficheiro
+- Campo de notas
+- Botao de submit
 
-**Tabela `drone_missions`** - Missoes de voo
-- Waypoints (lista de coordenadas)
-- Tipo de missao (medicao, inspecao, timelapse)
-- Estado (planeada, em execucao, concluida)
-
-**Tabela `ai_analysis_results`** - Resultados da IA
-- Captura analisada
-- Deteccoes (defeitos, medicoes)
-- Confianca da analise
-
-**Tabela `ai_reports`** - Relatorios gerados
-- Tipo (auto medicao, ficha, mapa)
-- Conteudo estruturado (JSON)
-- PDF gerado
-
-### 1.2 Novos Enums
-- `mission_type`: medicao, inspecao_visual, mapeamento_3d, timelapse
-- `mission_status`: draft, planned, executing, completed, failed
-- `ai_detection_type`: fissura, humidade, desalinhamento, medicao
+### 4. CaptureViewer.tsx
+Visualizador fullscreen:
+- Imagem/video em tela cheia
+- Overlay com informacoes
+- Navegacao entre capturas (setas)
+- Botao de fechar
+- Opcao de download
 
 ---
 
-## FASE 2: Agente IA de Fiscalizacao
+## Estrutura de Dados
 
-### 2.1 Edge Function `ai-fiscal-agent`
-Agente conversacional que:
-- Recebe comandos do tecnico fiscal
-- Interpreta o pedido (ex: "fazer auto de medicao do bloco A")
-- Consulta o projeto para obter coordenadas
-- Cria missao de drone automaticamente
-- Responde com plano de acao
-
-### 2.2 Capacidades do Agente
-```
-Comandos suportados:
-- "Fazer auto de medicao [zona]"
-- "Inspecionar fachada [orientacao]"
-- "Verificar progresso [area]"
-- "Gerar relatorio semanal"
-- "Comparar com captura anterior"
+### Query Principal - Capturas com Joins
+```text
+captures
+  -> capture_points (code, description)
+    -> areas (name)
+      -> floors (name, level)
+        -> sites (name)
+  -> profiles (full_name, avatar_url) via user_id
 ```
 
-### 2.3 Base de Conhecimento
-- Regulamentos de fiscalizacao portugueses
-- Templates de autos de medicao
-- Checklists de inspecao por especialidade
-- Normas tecnicas (betao, estruturas, etc.)
+### Tipos TypeScript
+- CaptureWithDetails: tipo composto com dados relacionados
+- CaptureFiltersState: estado dos filtros
 
 ---
 
-## FASE 3: Integracao com Drone
+## Implementacao Detalhada
 
-### 3.1 App Nativa (Capacitor + DJI SDK)
-- Conexao bluetooth/wifi com drone
-- Envio de missoes waypoint
-- Recepcao de telemetria em tempo real
-- Controlo de camera (foto/video)
-- Upload automatico quando aterra
+### Pagina Captures.tsx
 
-### 3.2 Edge Function `drone-mission-executor`
-- Recebe missao da IA
-- Converte para formato DJI waypoint
-- Envia para app nativa via websocket
-- Monitoriza progresso em tempo real
+**Estado:**
+- captures: lista de capturas
+- filters: estado dos filtros (siteId, floorId, dateRange, type)
+- isLoading: estado de carregamento
+- isCreateOpen: modal de nova captura
+- selectedCapture: captura para visualizador
+- isViewerOpen: estado do visualizador
 
-### 3.3 Edge Function `drone-upload-handler`
-- Recebe ficheiros do drone
-- Valida metadados GPS
-- Associa a pontos de captura
-- Inicia processamento IA
+**Queries React Query:**
+1. useQuery para memberships do user
+2. useQuery para sites das organizacoes
+3. useQuery para floors (dependente de siteId)
+4. useQuery para capturas com filtros aplicados
 
----
+**Funcionalidades:**
+- Grid responsivo: 1 col mobile, 2 tablet, 3 desktop
+- Filtros com debounce
+- Paginacao ou infinite scroll
+- Estado vazio quando sem capturas
 
-## FASE 4: Analise por Visao Computacional
+### Modal Nova Captura
 
-### 4.1 Edge Function `ai-image-analysis`
-Usando Lovable AI (Gemini Vision):
-- Recebe imagem/frame de video
-- Analisa para deteccao de:
-  - Fissuras e defeitos
-  - Medicoes visuais
-  - Estado de execucao
-  - Comparacao temporal
+**Fluxo:**
+1. Selecionar obra
+2. Carregar pisos da obra
+3. Selecionar piso
+4. Carregar areas do piso
+5. Selecionar area
+6. Carregar pontos da area
+7. Selecionar ponto de captura
+8. Escolher tipo (foto/video/360)
+9. Upload do ficheiro
+10. Adicionar notas (opcional)
+11. Submeter
 
-### 4.2 Edge Function `ai-measurement-extraction`
-- Extrai medicoes de imagens calibradas
-- Calcula areas e volumes
-- Compara com projeto original
+**Nota sobre Storage:**
+Como o Storage ainda nao esta configurado, o upload guardara apenas o caminho/referencia. A integracao real com Storage sera feita posteriormente.
 
-### 4.3 Edge Function `ai-defect-detection`
-- Classifica tipo de defeito
-- Avalia gravidade
-- Sugere accao correctiva
+### Visualizador Fullscreen
 
----
-
-## FASE 5: Geracao Automatica de Documentos
-
-### 5.1 Edge Function `generate-auto-medicao`
-- Recebe dados das analises
-- Preenche template de auto de medicao
-- Gera PDF formatado
-- Guarda no storage
-
-### 5.2 Edge Function `generate-inspection-report`
-- Compila todas as nao-conformidades
-- Gera relatorio de fiscalizacao
-- Inclui imagens anotadas
-- Exporta PDF profissional
-
-### 5.3 Edge Function `generate-progress-map`
-- Cria mapa de progresso da obra
-- Overlay de capturas no projeto
-- Indica zonas inspecionadas
-- Marca nao-conformidades
+**Features:**
+- Dialog fullscreen com overlay escuro
+- Imagem centrada com max-width/height
+- Informacoes da captura em overlay
+- Navegacao com teclas (esquerda/direita)
+- Fechar com ESC ou botao
+- Placeholder para imagens ate Storage estar configurado
 
 ---
 
-## FASE 6: Interface do Utilizador
+## Componentes shadcn/ui Utilizados
 
-### 6.1 Chat com Agente IA
-- Interface conversacional na app
-- Comandos por texto ou voz
-- Feedback em tempo real
-- Historico de interaccoes
-
-### 6.2 Dashboard de Missoes
-- Lista de missoes planeadas
-- Mapa com waypoints
-- Estado em tempo real
-- Replay de voos anteriores
-
-### 6.3 Visualizador de Analises
-- Imagens com anotacoes IA
-- Comparacao antes/depois
-- Timeline de evolucao
-- Exportar evidencias
-
-### 6.4 Biblioteca de Relatorios
-- Todos os documentos gerados
-- Pesquisa e filtros
-- Download individual ou em lote
-- Partilha com stakeholders
+- Card, CardContent
+- Button
+- Dialog, DialogContent, DialogHeader, DialogTitle
+- Select, SelectTrigger, SelectContent, SelectItem
+- RadioGroup, RadioGroupItem
+- Input
+- Label
+- Badge
+- Skeleton (loading state)
+- Avatar, AvatarImage, AvatarFallback
+- AspectRatio
 
 ---
 
-## Arquitectura Tecnica
+## Traducoes a Adicionar
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    FRONTEND (React/Capacitor)               │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
-│  │ Chat IA  │  │ Missoes  │  │ Analises │  │Relatorios│    │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘    │
-└───────┼─────────────┼─────────────┼─────────────┼──────────┘
-        │             │             │             │
-        ▼             ▼             ▼             ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    EDGE FUNCTIONS                           │
-│  ┌────────────┐  ┌────────────┐  ┌────────────────────────┐│
-│  │ai-fiscal   │  │drone-      │  │ai-image-analysis      ││
-│  │-agent      │  │mission     │  │ai-measurement         ││
-│  │            │  │-executor   │  │ai-defect-detection    ││
-│  └─────┬──────┘  └─────┬──────┘  └──────────┬─────────────┘│
-│        │               │                    │              │
-│        ▼               ▼                    ▼              │
-│  ┌────────────────────────────────────────────────────────┐│
-│  │              LOVABLE AI GATEWAY                        ││
-│  │         (Gemini Vision / GPT-5)                        ││
-│  └────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    SUPABASE                                 │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
-│  │ Tables   │  │ Storage  │  │ Realtime │  │  Auth    │    │
-│  │(missoes, │  │(imagens, │  │(teleme-  │  │(users)   │    │
-│  │ analises)│  │ videos)  │  │  tria)   │  │          │    │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘    │
-└─────────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌─────────────────────────────────────────────────────────────┐
-│              APP NATIVA (iOS/Android)                       │
-│  ┌──────────────────┐  ┌──────────────────┐                │
-│  │    DJI SDK       │  │   Insta360 SDK   │                │
-│  │ (controlo drone) │  │ (camera 360)     │                │
-│  └──────────────────┘  └──────────────────┘                │
-└─────────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    HARDWARE                                 │
-│  ┌──────────────────┐  ┌──────────────────┐                │
-│  │  DJI Mavic 3     │  │   Insta360 X4    │                │
-│  │  Enterprise      │  │   + Tripe 360    │                │
-│  └──────────────────┘  └──────────────────┘                │
-└─────────────────────────────────────────────────────────────┘
+Novas chaves i18n para en.json e pt.json:
+```text
+captures.filterBySite
+captures.filterByFloor
+captures.filterByDate
+captures.filterByType
+captures.clearFilters
+captures.location
+captures.capturedBy
+captures.capturedAt
+captures.processing
+captures.viewFullscreen
+captures.download
+captures.selectCapturePoint
 ```
 
 ---
 
-## Cronograma Estimado
+## Ficheiros a Modificar/Criar
 
-| Fase | Descricao | Duracao Estimada |
-|------|-----------|------------------|
-| 1 | Infraestrutura de dados | 1-2 semanas |
-| 2 | Agente IA de fiscalizacao | 2-3 semanas |
-| 3 | Integracao drone (SDK nativo) | 3-4 semanas |
-| 4 | Analise por visao computacional | 2-3 semanas |
-| 5 | Geracao automatica de documentos | 2 semanas |
-| 6 | Interface completa | 2-3 semanas |
-| **TOTAL** | | **12-17 semanas** |
-
----
-
-## Proximos Passos Imediatos
-
-### Passo 1: Criar tabelas de coordenadas e missoes
-Adicionar ao backend as estruturas para armazenar coordenadas GPS do projeto e missoes de drone.
-
-### Passo 2: Criar Agente IA basico
-Edge function que interpreta comandos do tecnico e planeia missoes usando Lovable AI.
-
-### Passo 3: Interface de chat com Agente
-Componente de chat na app para interagir com o agente de fiscalizacao.
-
-### Passo 4: Configurar Capacitor
-Preparar a app para compilacao nativa (necessario para integrar SDKs de hardware).
+| Ficheiro | Accao |
+|----------|-------|
+| src/pages/app/Captures.tsx | Reescrever completamente |
+| src/components/captures/CaptureCard.tsx | Criar |
+| src/components/captures/CaptureFilters.tsx | Criar |
+| src/components/captures/NewCaptureModal.tsx | Criar |
+| src/components/captures/CaptureViewer.tsx | Criar |
+| src/i18n/locales/en.json | Adicionar chaves |
+| src/i18n/locales/pt.json | Adicionar chaves |
 
 ---
 
-## Notas Importantes
+## Consideracoes Tecnicas
 
-1. **SDK DJI/Insta360**: Requerem app nativa (iOS/Android) - nao funcionam em browser
-2. **Lovable AI**: Ja disponivel no projeto, suporta Gemini Vision para analise de imagens
-3. **Custos**: Processamento IA tem custo por utilizacao (creditos Lovable)
-4. **Testes**: Recomendo testar primeiro com imagens manuais antes de integrar drone
+1. **RLS Policies**: As queries vao respeitar as policies existentes atraves de `is_org_member` e `can_access_site`
 
+2. **Hierarquia de Dados**: captures > capture_points > areas > floors > sites - requer joins aninhados
+
+3. **Performance**: Usar React Query para caching e evitar re-fetches desnecessarios
+
+4. **Placeholder para Imagens**: Ate o Storage estar configurado, usar imagens placeholder do Unsplash ou SVG local
+
+5. **Tipos de Captura**: Mapear `capture_source` enum para 3 categorias simples:
+   - photo: phone_manual
+   - video: drone_video, timelapse
+   - panorama: phone_360, phone_360_auto
+
+---
+
+## Proximos Passos Apos Implementacao
+
+1. Configurar Supabase Storage para uploads reais
+2. Implementar geracao de thumbnails
+3. Adicionar visualizador 360 para panoramas
+4. Integrar com AI para analise automatica de capturas
