@@ -27,11 +27,15 @@
     "success": "Sucesso",
     "warning": "Aviso",
     "info": "Informação",
-    "unknown": "Desconhecido"
+    "unknown": "Desconhecido",
+    "unnamed": "Sem nome",
+    "tryAgain": "Por favor tente novamente."
   },
   "auth": {
     "login": "Entrar",
     "signup": "Criar Conta",
+    "signIn": "Entrar",
+    "signUp": "Criar Conta",
     "logout": "Sair",
     "welcomeBack": "Bem-vindo de volta",
     "createAccount": "Criar nova conta",
@@ -44,6 +48,8 @@
     "confirmPassword": "Confirmar password",
     "fullName": "Nome completo",
     "fullNamePlaceholder": "O seu nome",
+    "name": "Nome",
+    "namePlaceholder": "O seu nome",
     "loginError": "Erro ao entrar",
     "signupError": "Erro ao criar conta",
     "loginSuccess": "Bem-vindo!",
@@ -54,7 +60,9 @@
     "passwordTooShort": "A password deve ter pelo menos 6 caracteres.",
     "termsText": "Ao continuar, concorda com os nossos",
     "termsOfService": "Termos de Serviço",
-    "privacyPolicy": "Política de Privacidade"
+    "privacyPolicy": "Política de Privacidade",
+    "checkEmail": "Verifique o seu email",
+    "confirmationSent": "Enviámos um email de confirmação para o seu endereço."
   },
   "brand": {
     "name": "SitePulse",
@@ -631,5 +639,76 @@
       "nc_history": "Histórico de NCs",
       "measurement_auto": "Auto de Medição"
     }
+  },
+  "team": {
+    "title": "Equipa",
+    "subtitle": "Gerir membros da organização",
+    "members": "Membros",
+    "pendingInvites": "Convites Pendentes",
+    "inviteMember": "Convidar Membro",
+    "noMembers": "Sem membros",
+    "noInvites": "Sem convites pendentes",
+    "email": "Email",
+    "role": "Função",
+    "joinedAt": "Entrou em",
+    "expiresIn": "Expira em",
+    "days": "dias",
+    "copyLink": "Copiar Link",
+    "cancelInvite": "Cancelar Convite",
+    "resendInvite": "Reenviar",
+    "removeFromOrg": "Remover da Organização",
+    "changeRole": "Alterar Função",
+    "sites": "Obras com Acesso",
+    "allSites": "Todas as obras (deixe vazio)",
+    "selectSites": "obra(s) selecionada(s)",
+    "inviteSent": "Convite enviado!",
+    "inviteLink": "Link de convite",
+    "linkExpires": "O link expira em 7 dias",
+    "inviteExists": "Já existe um convite pendente para este email",
+    "roles": {
+      "admin": "Administrador",
+      "manager": "Gestor",
+      "inspector": "Fiscalizador",
+      "contributor": "Colaborador",
+      "viewer": "Visualizador"
+    },
+    "roleDescriptions": {
+      "admin": "Acesso total, gerir membros e configurações",
+      "manager": "Gerir obras, inspeções e equipas",
+      "inspector": "Realizar inspeções e criar NCs",
+      "contributor": "Adicionar capturas e comentários",
+      "viewer": "Apenas visualizar informações"
+    }
+  },
+  "invite": {
+    "title": "Convite para Organização",
+    "joinOrg": "Foi convidado para juntar-se a {{org}}",
+    "organization": "Organização",
+    "accept": "Aceitar Convite",
+    "accepted": "Convite aceite!",
+    "welcomeToOrg": "Bem-vindo à organização {{org}}",
+    "loggedInAs": "Autenticado como",
+    "useOtherAccount": "Usar outra conta",
+    "invalidTitle": "Convite Inválido",
+    "invalidToken": "Este convite não é válido ou não existe.",
+    "alreadyUsed": "Este convite já foi utilizado.",
+    "expired": "Este convite expirou.",
+    "alreadyMember": "Já é membro",
+    "alreadyMemberDesc": "Já faz parte desta organização."
+  },
+  "settings": {
+    "title": "Definições",
+    "subtitle": "Gerir as suas preferências",
+    "general": "Geral",
+    "profile": "Perfil",
+    "account": "Informações da conta",
+    "appearance": "Aparência",
+    "theme": "Tema",
+    "themeLight": "Claro",
+    "themeDark": "Escuro",
+    "themeSystem": "Sistema",
+    "language": "Idioma",
+    "notifications": "Notificações",
+    "notificationsComingSoon": "Configurações de notificações disponíveis em breve."
   }
 }

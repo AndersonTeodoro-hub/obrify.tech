@@ -1191,6 +1191,56 @@ export type Database = {
           },
         ]
       }
+      invitations: {
+        Row: {
+          accepted_at: string | null
+          created_at: string
+          email: string
+          expires_at: string
+          id: string
+          invited_by: string
+          org_id: string
+          role: string
+          site_ids: string[] | null
+          status: string
+          token: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          created_at?: string
+          email: string
+          expires_at?: string
+          id?: string
+          invited_by: string
+          org_id: string
+          role?: string
+          site_ids?: string[] | null
+          status?: string
+          token?: string
+        }
+        Update: {
+          accepted_at?: string | null
+          created_at?: string
+          email?: string
+          expires_at?: string
+          id?: string
+          invited_by?: string
+          org_id?: string
+          role?: string
+          site_ids?: string[] | null
+          status?: string
+          token?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invitations_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       memberships: {
         Row: {
           created_at: string
@@ -1763,7 +1813,12 @@ export type Database = {
       document_status: "OK" | "MISSING" | "PENDING_REVIEW"
       drone_status: "available" | "in_mission" | "maintenance" | "offline"
       inspection_result: "OK" | "NC" | "OBS" | "NA"
-      membership_role: "admin" | "manager" | "viewer"
+      membership_role:
+        | "admin"
+        | "manager"
+        | "viewer"
+        | "inspector"
+        | "contributor"
       mission_status:
         | "draft"
         | "planned"
@@ -1941,7 +1996,13 @@ export const Constants = {
       document_status: ["OK", "MISSING", "PENDING_REVIEW"],
       drone_status: ["available", "in_mission", "maintenance", "offline"],
       inspection_result: ["OK", "NC", "OBS", "NA"],
-      membership_role: ["admin", "manager", "viewer"],
+      membership_role: [
+        "admin",
+        "manager",
+        "viewer",
+        "inspector",
+        "contributor",
+      ],
       mission_status: [
         "draft",
         "planned",

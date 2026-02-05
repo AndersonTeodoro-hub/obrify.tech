@@ -26,6 +26,7 @@ import Settings from "./pages/app/Settings";
 import InspectionTemplates from "./pages/app/InspectionTemplates";
 import InspectionDetail from "./pages/app/InspectionDetail";
 import NonConformities from "./pages/app/NonConformities";
+import AcceptInvite from "./pages/AcceptInvite";
 
 const queryClient = new QueryClient();
 
@@ -38,8 +39,9 @@ const App = () => (
         <BrowserRouter>
           <AuthProvider>
             <Routes>
-              <Route path="/" element={<Navigate to="/auth" replace />} />
+            <Route path="/" element={<Navigate to="/auth" replace />} />
               <Route path="/auth" element={<AuthPage />} />
+              <Route path="/invite/:token" element={<AcceptInvite />} />
               <Route 
                 path="/app" 
                 element={

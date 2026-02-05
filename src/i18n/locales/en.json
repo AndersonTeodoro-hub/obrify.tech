@@ -27,11 +27,15 @@
     "success": "Success",
     "warning": "Warning",
     "info": "Information",
-    "unknown": "Unknown"
+    "unknown": "Unknown",
+    "unnamed": "Unnamed",
+    "tryAgain": "Please try again."
   },
   "auth": {
     "login": "Sign In",
     "signup": "Sign Up",
+    "signIn": "Sign In",
+    "signUp": "Sign Up",
     "logout": "Sign Out",
     "welcomeBack": "Welcome back",
     "createAccount": "Create new account",
@@ -44,6 +48,8 @@
     "confirmPassword": "Confirm password",
     "fullName": "Full name",
     "fullNamePlaceholder": "Your name",
+    "name": "Name",
+    "namePlaceholder": "Your name",
     "loginError": "Sign in error",
     "signupError": "Sign up error",
     "loginSuccess": "Welcome!",
@@ -54,7 +60,9 @@
     "passwordTooShort": "Password must be at least 6 characters.",
     "termsText": "By continuing, you agree to our",
     "termsOfService": "Terms of Service",
-    "privacyPolicy": "Privacy Policy"
+    "privacyPolicy": "Privacy Policy",
+    "checkEmail": "Check your email",
+    "confirmationSent": "We sent a confirmation email to your address."
   },
   "brand": {
     "name": "SitePulse",
@@ -631,5 +639,76 @@
       "nc_history": "NC History",
       "measurement_auto": "Measurement Report"
     }
+  },
+  "team": {
+    "title": "Team",
+    "subtitle": "Manage organization members",
+    "members": "Members",
+    "pendingInvites": "Pending Invitations",
+    "inviteMember": "Invite Member",
+    "noMembers": "No members",
+    "noInvites": "No pending invitations",
+    "email": "Email",
+    "role": "Role",
+    "joinedAt": "Joined",
+    "expiresIn": "Expires in",
+    "days": "days",
+    "copyLink": "Copy Link",
+    "cancelInvite": "Cancel Invitation",
+    "resendInvite": "Resend",
+    "removeFromOrg": "Remove from Organization",
+    "changeRole": "Change Role",
+    "sites": "Site Access",
+    "allSites": "All sites (leave empty)",
+    "selectSites": "site(s) selected",
+    "inviteSent": "Invitation sent!",
+    "inviteLink": "Invitation link",
+    "linkExpires": "Link expires in 7 days",
+    "inviteExists": "A pending invitation already exists for this email",
+    "roles": {
+      "admin": "Administrator",
+      "manager": "Manager",
+      "inspector": "Inspector",
+      "contributor": "Contributor",
+      "viewer": "Viewer"
+    },
+    "roleDescriptions": {
+      "admin": "Full access, manage members and settings",
+      "manager": "Manage sites, inspections and teams",
+      "inspector": "Perform inspections and create NCs",
+      "contributor": "Add captures and comments",
+      "viewer": "View only"
+    }
+  },
+  "invite": {
+    "title": "Organization Invitation",
+    "joinOrg": "You have been invited to join {{org}}",
+    "organization": "Organization",
+    "accept": "Accept Invitation",
+    "accepted": "Invitation accepted!",
+    "welcomeToOrg": "Welcome to {{org}}",
+    "loggedInAs": "Logged in as",
+    "useOtherAccount": "Use another account",
+    "invalidTitle": "Invalid Invitation",
+    "invalidToken": "This invitation is invalid or does not exist.",
+    "alreadyUsed": "This invitation has already been used.",
+    "expired": "This invitation has expired.",
+    "alreadyMember": "Already a member",
+    "alreadyMemberDesc": "You are already a member of this organization."
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Manage your preferences",
+    "general": "General",
+    "profile": "Profile",
+    "account": "Account information",
+    "appearance": "Appearance",
+    "theme": "Theme",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "themeSystem": "System",
+    "language": "Language",
+    "notifications": "Notifications",
+    "notificationsComingSoon": "Notification settings coming soon."
   }
 }
