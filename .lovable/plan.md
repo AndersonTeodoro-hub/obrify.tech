@@ -1,290 +1,437 @@
 
-# Plano: Implementacao Completa do Relatorio de Inspecao em PDF
+# Plano: Implementacao Completa da Pagina Reports.tsx
 
 ## Resumo
-Refactorizar a funcao `generateInspectionReport` no servico `pdfGenerator.ts` para implementar a estrutura completa do relatorio de inspecao, e adicionar botao "Gerar PDF" na pagina `InspectionDetail.tsx` quando o estado for "Concluida".
+Transformar a pagina placeholder `Reports.tsx` numa central de relatorios completa com tres seccoes: Relatorios de Inspecao, Relatorios de NC, e Autos de Medicao. Inclui geracao e armazenamento de PDFs na tabela `documents`.
 
 ---
 
 ## Analise do Estado Actual
 
-### Servico Existente (pdfGenerator.ts):
-- Ja existe a funcao `generateInspectionReport` com estrutura basica
-- Tem cabecalho, dados gerais, resumo e tabela simples de checklist
-- Fotos limitadas a 8, sem legendas numeradas
-- Falta: objectivo baseado no template, NCs abertas, conclusao, assinatura
+### Pagina Reports.tsx:
+- Actualmente e um placeholder com mensagem "Sem resultados"
+- Nao tem nenhuma funcionalidade implementada
 
-### Pagina InspectionDetail.tsx:
-- Nao tem botao para gerar PDF
-- Mostra alerta de "read-only" quando estado = COMPLETED
-- Tem acesso ao inspectionId necessario
+### Servico pdfGenerator.ts:
+- Ja tem 3 funcoes implementadas:
+  - `generateInspectionReport(inspectionId)` - funcional
+  - `generateNCReport(ncId)` - funcional
+  - `generateMeasurementAuto(siteId, period)` - funcional
 
-### Dados Disponiveis:
-- **inspections**: id, status, scheduled_at, created_by, site_id, template_id, floor_id, area_id
-- **sites**: id, name, address
-- **inspection_templates**: id, name, category
-- **inspection_items**: id, result, notes, template_item_id
-- **inspection_template_items**: id, title, section, is_required
-- **evidence_links**: id, capture_id, inspection_id, inspection_item_id
-- **captures**: id, file_path
-- **nonconformities**: abertas nesta inspecao
-- **profiles**: full_name do inspector
+### Tabela documents:
+- Colunas: id, name, file_path, doc_type, site_id, org_id, created_at
+- Ja usada em SiteDocumentsTab.tsx
+- Pode ser usada para guardar historico de relatorios gerados
+
+### Storage Bucket:
+- Bucket `captures` ja existe (privado)
+- Precisa de novo bucket `documents` para PDFs (ou usar o existente)
 
 ---
 
-## Estrutura Final do PDF
+## Arquitectura da Pagina
+
+```text
+Reports.tsx
+├── Header
+│   └── Titulo + Subtitulo
+│
+├── Tabs ou Seccoes
+│   ├── Relatorios de Inspecao
+│   │   ├── Filtro por Obra
+│   │   ├── Lista de inspecoes COMPLETED
+│   │   └── Botao PDF para cada
+│   │
+│   ├── Relatorios de NC
+│   │   ├── Sub-seccao: NCs Abertas por Obra
+│   │   │   ├── Select de Obra
+│   │   │   └── Botao gerar lista PDF
+│   │   │
+│   │   └── Sub-seccao: Historico de NCs
+│   │       ├── Selectors de periodo
+│   │       └── Botao gerar PDF
+│   │
+│   └── Autos de Medicao
+│       └── Placeholder para fase futura
+│
+└── Historico de Relatorios Gerados
+    └── Tabela com documentos tipo "report"
+```
+
+---
+
+## Estrutura Visual
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
-│  [LOGO]              RELATORIO DE INSPECAO              Pag X/Y│
-│                                                                  │
-│  Referencia: INS-2026-001                 Data: 05/02/2026      │
+│  Relatórios                                                      │
+│  Central de relatórios e documentação                           │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│  DADOS GERAIS                                                    │
-│  Obra: Edificio Aurora                                          │
-│  Morada: Rua das Flores, 123, Lisboa                            │
-│  Local: Piso 1 > Sala A > P01                                   │
-│  Inspector: Joao Silva                                          │
-│  Data da Inspecao: 05 de Fevereiro de 2026                      │
-│                                                                  │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  OBJECTIVO                                                       │
-│  Esta inspecao teve como objectivo a verificacao das            │
-│  condicoes de [categoria do template] conforme o checklist      │
-│  "[nome do template]".                                          │
-│                                                                  │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  TABELA DE VERIFICACOES                                          │
-│  ┌────┬────────────────────────┬──────────┬───────────────────┐ │
-│  │ #  │ Item                   │ Conforme │ Observacoes       │ │
-│  ├────┼────────────────────────┼──────────┼───────────────────┤ │
-│  │ 1  │ Cofragem limpa         │ Sim      │ -                 │ │
-│  │ 2  │ Armadura conforme      │ Nao      │ Falta recobrimen..│ │
-│  │ 3  │ Escoramento estavel    │ Sim      │ -                 │ │
-│  │ 4  │ Verificacao betoneira  │ N/A      │ Nao aplicavel     │ │
-│  └────┴────────────────────────┴──────────┴───────────────────┘ │
-│                                                                  │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  REGISTO FOTOGRAFICO                                             │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐                         │
-│  │  Foto 1  │ │  Foto 2  │ │  Foto 3  │                         │
-│  │          │ │          │ │          │                         │
-│  └──────────┘ └──────────┘ └──────────┘                         │
-│   Item #2      Geral         Item #5                            │
-│                                                                  │
-│  (max 6 fotos por pagina, com legenda numerada)                 │
-│                                                                  │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  NAO-CONFORMIDADES ABERTAS                                       │
-│  ┌────┬─────────────────────────┬───────────┬─────────────────┐ │
-│  │ NC │ Descricao               │ Severid.  │ Estado          │ │
-│  ├────┼─────────────────────────┼───────────┼─────────────────┤ │
-│  │ 001│ Fissura na laje...      │ Critico   │ Aberta          │ │
-│  │ 002│ Armadura exposta...     │ Importante│ Em Resolucao    │ │
-│  └────┴─────────────────────────┴───────────┴─────────────────┘ │
-│                                                                  │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  CONCLUSAO                                                       │
 │  ┌─────────────────────────────────────────────────────────────┐│
-│  │    ☑ APROVADO     ☐ CONDICIONADO     ☐ REPROVADO           ││
+│  │  RELATÓRIOS DE INSPEÇÃO                                     ││
+│  │                                                              ││
+│  │  ┌─────────────┐                                            ││
+│  │  │ Obra ▼      │                                            ││
+│  │  └─────────────┘                                            ││
+│  │                                                              ││
+│  │  ┌────────┬────────────┬────────────┬──────────┬──────────┐││
+│  │  │ Data   │ Obra       │ Template   │ Estado   │ Acões    │││
+│  │  ├────────┼────────────┼────────────┼──────────┼──────────┤││
+│  │  │05 Fev  │ Aurora     │ Pre-Beton  │Concluída │ [📄 PDF] │││
+│  │  │03 Fev  │ Mar        │ Segurança  │Concluída │ [📄 PDF] │││
+│  │  └────────┴────────────┴────────────┴──────────┴──────────┘││
 │  └─────────────────────────────────────────────────────────────┘│
 │                                                                  │
-│  (Logica: Aprovado se 0 NCs, Condicionado se NCs severity !=   │
-│   critical, Reprovado se alguma NC critical)                    │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  RELATÓRIOS DE NÃO-CONFORMIDADES                            ││
+│  │                                                              ││
+│  │  ┌──────────────────────────────┐  ┌──────────────────────┐ ││
+│  │  │  NCs Abertas por Obra        │  │  Histórico de NCs    │ ││
+│  │  │  ┌─────────────┐             │  │  De: [___] Até: [___]│ ││
+│  │  │  │ Obra ▼      │             │  │  ┌─────────────┐     │ ││
+│  │  │  └─────────────┘             │  │  │ Obra ▼      │     │ ││
+│  │  │        [📄 Gerar Lista]      │  │  └─────────────┘     │ ││
+│  │  │                              │  │        [📄 Gerar]    │ ││
+│  │  └──────────────────────────────┘  └──────────────────────┘ ││
+│  └─────────────────────────────────────────────────────────────┘│
 │                                                                  │
-├─────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  AUTOS DE MEDIÇÃO                      [Em desenvolvimento] ││
+│  │                                                              ││
+│  │  Esta funcionalidade estará disponível numa versão futura.  ││
+│  └─────────────────────────────────────────────────────────────┘│
 │                                                                  │
-│  ASSINATURA                                                      │
-│                                                                  │
-│  Inspector: Joao Silva                                          │
-│  Data: 05/02/2026                                               │
-│                                                                  │
-│  _________________________                                       │
-│                                                                  │
-├─────────────────────────────────────────────────────────────────┤
-│  Pagina 1 de 2                    Gerado em 05/02/2026 15:30   │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  HISTÓRICO DE RELATÓRIOS                                    ││
+│  │                                                              ││
+│  │  ┌──────────┬────────────┬────────────┬──────────┬────────┐││
+│  │  │ Tipo     │ Obra       │ Gerado em  │ Por      │ Acões  │││
+│  │  ├──────────┼────────────┼────────────┼──────────┼────────┤││
+│  │  │Inspeção  │ Aurora     │ 05/02 15:30│ João     │ [📥]   │││
+│  │  │NC Lista  │ Mar        │ 04/02 10:15│ Pedro    │ [📥]   │││
+│  │  └──────────┴────────────┴────────────┴──────────┴────────┘││
+│  └─────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Ficheiros a Modificar
+## Ficheiros a Modificar/Criar
 
 | Ficheiro | Accao |
 |----------|-------|
-| src/services/pdfGenerator.ts | Refactorizar generateInspectionReport |
-| src/pages/app/InspectionDetail.tsx | Adicionar botao "Gerar PDF" |
-| src/i18n/locales/pt.json | Adicionar novas chaves de traducao |
-| src/i18n/locales/en.json | Adicionar novas chaves de traducao |
+| src/pages/app/Reports.tsx | Reescrever completamente |
+| src/services/pdfGenerator.ts | Adicionar funcao generateOpenNCsReport |
+| src/i18n/locales/pt.json | Adicionar novas chaves |
+| src/i18n/locales/en.json | Adicionar novas chaves |
+
+### Migracao de Base de Dados
+Criar bucket de storage para documentos (se nao existir):
+
+```sql
+-- Apenas se necessario criar bucket via SQL
+-- Normalmente criado via dashboard/API
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('documents', 'documents', false)
+ON CONFLICT (id) DO NOTHING;
+```
 
 ---
 
-## Alteracoes no pdfGenerator.ts
+## Novas Funcoes no pdfGenerator.ts
 
-### Novos Dados a Buscar:
-1. **nonconformities**: NCs criadas nesta inspecao
-2. Contador sequencial baseado na data de criacao
+### generateOpenNCsReport(siteId)
 
-### Nova Estrutura da Funcao:
+Gera lista de todas as NCs abertas (nao CLOSED) para uma obra especifica:
 
 ```text
-generateInspectionReport(inspectionId):
-  1. Fetch todos os dados necessarios
-  2. Cabecalho (Logo | Titulo | Ref + Data)
-  3. Dados Gerais (Obra, Morada, Local, Inspector, Data)
-  4. Objectivo (texto dinamico baseado no template)
-  5. Tabela de Verificacoes (# | Item | Conforme | Observacoes)
-  6. Registo Fotografico (max 6 por pagina, com legendas)
-  7. NCs Abertas (se existirem)
-  8. Conclusao (Aprovado/Condicionado/Reprovado)
-  9. Assinatura (Nome do inspector + data + linha)
-  10. Footer em todas as paginas
+┌─────────────────────────────────────────────────────────────────┐
+│  [LOGO]       LISTA DE NÃO-CONFORMIDADES ABERTAS                │
+│                                                                  │
+│  Obra: Edifício Aurora                 Data: 05/02/2026         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  RESUMO                                                          │
+│  Total de NCs Abertas: 5                                        │
+│  Críticas: 1 | Importantes: 2 | Menores: 2                      │
+│                                                                  │
+│  LISTA DETALHADA                                                 │
+│  ┌────┬────────────────┬──────────┬───────────┬────────────────┐│
+│  │ NC │ Descrição      │ Sever.   │ Prazo     │ Responsável    ││
+│  ├────┼────────────────┼──────────┼───────────┼────────────────┤│
+│  │001 │ Fissura laje   │ Crítico  │ 15/02     │ Pedro Santos   ││
+│  │002 │ Infiltração    │ Import.  │ 20/02     │ João Silva     ││
+│  └────┴────────────────┴──────────┴───────────┴────────────────┘│
+│                                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│  Página 1 de 1                    Gerado em 05/02/2026 15:30   │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### Logica de Conclusao:
+### generateNCHistoryReport(siteId, period)
+
+Gera historico de NCs fechadas num periodo:
+
 ```text
-if (ncs com severity='critical') -> REPROVADO
-else if (ncs.length > 0) -> CONDICIONADO  
-else -> APROVADO
+┌─────────────────────────────────────────────────────────────────┐
+│  [LOGO]       HISTÓRICO DE NÃO-CONFORMIDADES                    │
+│                                                                  │
+│  Obra: Edifício Aurora                                          │
+│  Período: 01/01/2026 a 31/01/2026                               │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  RESUMO DO PERÍODO                                               │
+│  NCs Abertas: 8 | NCs Fechadas: 6 | Taxa de Resolução: 75%     │
+│                                                                  │
+│  NÃO-CONFORMIDADES FECHADAS                                      │
+│  ┌────┬────────────────┬──────────┬───────────┬────────────────┐│
+│  │ NC │ Descrição      │ Aberta   │ Fechada   │ Dias           ││
+│  ├────┼────────────────┼──────────┼───────────┼────────────────┤│
+│  │001 │ Fissura laje   │ 05/01    │ 15/01     │ 10 dias        ││
+│  │002 │ Infiltração    │ 10/01    │ 22/01     │ 12 dias        ││
+│  └────┴────────────────┴──────────┴───────────┴────────────────┘│
+│                                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│  Página 1 de 1                    Gerado em 05/02/2026 15:30   │
+└─────────────────────────────────────────────────────────────────┘
 ```
-
-### Legendas das Fotos:
-- Fotos gerais: "Geral"
-- Fotos de itens: "Item #N" (numero do item no checklist)
 
 ---
 
-## Alteracoes no InspectionDetail.tsx
+## Componente Reports.tsx
 
-### Novo Botao no Header:
-Quando `inspection.status === 'COMPLETED'`:
+### Estado e Queries:
 
 ```text
-<Button 
-  variant="outline" 
-  onClick={handleGeneratePDF}
-  disabled={isGeneratingPDF}
->
-  <FileText className="w-4 h-4 mr-2" />
-  {isGeneratingPDF ? t('reports.generating') : t('reports.downloadPdf')}
-</Button>
+Estados:
+- siteFilter: string (para inspecoes)
+- ncSiteFilter: string (para NCs abertas)
+- historySiteFilter: string (para historico)
+- historyPeriod: { start: Date, end: Date }
+- generatingReport: Record<string, boolean>
+
+Queries:
+1. sites - lista de obras do utilizador
+2. completedInspections - inspecoes com status COMPLETED
+3. generatedReports - documentos com doc_type contendo 'report'
 ```
 
-### Posicionamento:
-No header, junto aos badges de status (linha 431-438 do ficheiro actual).
+### Funcoes de Geracao:
 
-### Handler:
 ```text
-const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+handleGenerateInspectionPDF(inspectionId, siteName):
+  1. setGeneratingReport({ [inspectionId]: true })
+  2. const blob = await generateInspectionReport(inspectionId)
+  3. Upload blob para Storage bucket 'documents'
+  4. Inserir registo na tabela 'documents'
+  5. Trigger download do ficheiro
+  6. Toast de sucesso
+  7. Refetch generatedReports
 
-const handleGeneratePDF = async () => {
-  setIsGeneratingPDF(true);
-  try {
-    const blob = await generateInspectionReport(inspectionId!);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `relatorio-inspecao-${inspectionId?.slice(0, 8)}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast({ title: t('reports.downloadSuccess') });
-  } catch (error) {
-    toast({ 
-      title: t('common.error'), 
-      description: String(error), 
-      variant: 'destructive' 
-    });
-  } finally {
-    setIsGeneratingPDF(false);
-  }
+handleGenerateOpenNCsPDF(siteId, siteName):
+  1. setGeneratingReport({ openNCs: true })
+  2. const blob = await generateOpenNCsReport(siteId)
+  3. Upload + save + download
+  4. Toast de sucesso
+
+handleGenerateNCHistoryPDF(siteId, period, siteName):
+  1. setGeneratingReport({ ncHistory: true })
+  2. const blob = await generateNCHistoryReport(siteId, period)
+  3. Upload + save + download
+  4. Toast de sucesso
+```
+
+---
+
+## Armazenamento de PDFs
+
+### Upload para Storage:
+
+```text
+const uploadPDF = async (blob: Blob, fileName: string) => {
+  const file = new File([blob], fileName, { type: 'application/pdf' });
+  const filePath = `reports/${siteId}/${fileName}`;
+  
+  const { error } = await supabase.storage
+    .from('documents')
+    .upload(filePath, file);
+    
+  if (error) throw error;
+  return filePath;
 };
 ```
 
+### Registo na tabela documents:
+
+```text
+const saveDocumentRecord = async (
+  name: string,
+  filePath: string,
+  docType: string,
+  siteId: string,
+  orgId: string
+) => {
+  const { error } = await supabase.from('documents').insert({
+    name,
+    file_path: filePath,
+    doc_type: docType,
+    site_id: siteId,
+    org_id: orgId,
+  });
+  
+  if (error) throw error;
+};
+```
+
+### Tipos de documento:
+
+- `inspection_report` - Relatorio de inspecao
+- `nc_open_list` - Lista de NCs abertas
+- `nc_history` - Historico de NCs
+- `measurement_auto` - Auto de medicao (futuro)
+
 ---
 
-## Novas Traducoes
+## Traducoes a Adicionar
 
 ### Portugues (pt.json):
+
 ```text
-reports.objective: "Objectivo"
-reports.objectiveText: "Esta inspecao teve como objectivo a verificacao das condicoes de {{category}} conforme o checklist \"{{template}}\"."
-reports.verificationsTable: "Tabela de Verificacoes"
-reports.photoRegistry: "Registo Fotografico"
-reports.openNCs: "Nao-Conformidades Abertas"
-reports.conclusion: "Conclusao"
-reports.conclusionApproved: "Aprovado"
-reports.conclusionConditional: "Condicionado"
-reports.conclusionRejected: "Reprovado"
-reports.signature: "Assinatura"
-reports.inspector: "Inspector"
-reports.inspectionDate: "Data da Inspecao"
-reports.reference: "Referencia"
-reports.generalPhoto: "Geral"
-reports.itemPhoto: "Item #{{number}}"
-reports.downloadSuccess: "Relatorio gerado com sucesso"
-reports.generalData: "Dados Gerais"
-reports.conformYes: "Sim"
-reports.conformNo: "Nao"
-reports.conformNA: "N/A"
-reports.conformOBS: "OBS"
+"reportsPage": {
+  "title": "Relatórios",
+  "subtitle": "Central de relatórios e documentação",
+  "inspectionReports": "Relatórios de Inspeção",
+  "inspectionReportsDesc": "Gerar relatórios de inspeções concluídas",
+  "ncReports": "Relatórios de Não-Conformidades",
+  "openNCsBysite": "NCs Abertas por Obra",
+  "openNCsBySiteDesc": "Lista de todas as NCs abertas numa obra",
+  "ncHistory": "Histórico de NCs",
+  "ncHistoryDesc": "NCs fechadas num período específico",
+  "measurementAutos": "Autos de Medição",
+  "measurementAutosDesc": "Esta funcionalidade estará disponível numa versão futura",
+  "comingSoon": "Em desenvolvimento",
+  "generatedReports": "Histórico de Relatórios",
+  "generatedReportsDesc": "Relatórios gerados anteriormente",
+  "noCompletedInspections": "Não existem inspeções concluídas",
+  "generateReport": "Gerar Relatório",
+  "generateList": "Gerar Lista",
+  "selectSite": "Selecionar obra",
+  "selectPeriod": "Selecionar período",
+  "from": "De",
+  "to": "Até",
+  "reportType": "Tipo",
+  "generatedAt": "Gerado em",
+  "generatedBy": "Por",
+  "download": "Descarregar",
+  "noReports": "Ainda não foram gerados relatórios",
+  "reportSaved": "Relatório guardado com sucesso",
+  "types": {
+    "inspection_report": "Relatório de Inspeção",
+    "nc_open_list": "Lista NCs Abertas",
+    "nc_history": "Histórico de NCs",
+    "measurement_auto": "Auto de Medição"
+  }
+}
 ```
 
 ### Ingles (en.json):
+
 ```text
-reports.objective: "Objective"
-reports.objectiveText: "This inspection aimed to verify the conditions of {{category}} according to the checklist \"{{template}}\"."
-reports.verificationsTable: "Verification Table"
-reports.photoRegistry: "Photo Registry"
-reports.openNCs: "Open Non-Conformities"
-reports.conclusion: "Conclusion"
-reports.conclusionApproved: "Approved"
-reports.conclusionConditional: "Conditional"
-reports.conclusionRejected: "Rejected"
-reports.signature: "Signature"
-reports.inspector: "Inspector"
-reports.inspectionDate: "Inspection Date"
-reports.reference: "Reference"
-reports.generalPhoto: "General"
-reports.itemPhoto: "Item #{{number}}"
-reports.downloadSuccess: "Report generated successfully"
-reports.generalData: "General Data"
-reports.conformYes: "Yes"
-reports.conformNo: "No"
-reports.conformNA: "N/A"
-reports.conformOBS: "OBS"
+"reportsPage": {
+  "title": "Reports",
+  "subtitle": "Reports and documentation center",
+  "inspectionReports": "Inspection Reports",
+  "inspectionReportsDesc": "Generate reports for completed inspections",
+  "ncReports": "Non-Conformity Reports",
+  "openNCsBysite": "Open NCs by Site",
+  "openNCsBySiteDesc": "List of all open NCs for a site",
+  "ncHistory": "NC History",
+  "ncHistoryDesc": "Closed NCs in a specific period",
+  "measurementAutos": "Measurement Reports",
+  "measurementAutosDesc": "This feature will be available in a future version",
+  "comingSoon": "Coming soon",
+  "generatedReports": "Report History",
+  "generatedReportsDesc": "Previously generated reports",
+  "noCompletedInspections": "No completed inspections",
+  "generateReport": "Generate Report",
+  "generateList": "Generate List",
+  "selectSite": "Select site",
+  "selectPeriod": "Select period",
+  "from": "From",
+  "to": "To",
+  "reportType": "Type",
+  "generatedAt": "Generated at",
+  "generatedBy": "By",
+  "download": "Download",
+  "noReports": "No reports generated yet",
+  "reportSaved": "Report saved successfully",
+  "types": {
+    "inspection_report": "Inspection Report",
+    "nc_open_list": "Open NCs List",
+    "nc_history": "NC History",
+    "measurement_auto": "Measurement Report"
+  }
+}
 ```
+
+---
+
+## Fluxo de Geracao e Download
+
+```text
+1. Utilizador clica "Gerar PDF"
+       │
+       ▼
+2. Mostrar loading no botao
+       │
+       ▼
+3. Chamar funcao do pdfGenerator
+       │
+       ▼
+4. Receber Blob do PDF
+       │
+       ▼
+5. Upload para Storage bucket
+       │
+       ▼
+6. Inserir registo em 'documents'
+       │
+       ▼
+7. Trigger download automatico
+       │
+       ▼
+8. Toast de sucesso
+       │
+       ▼
+9. Actualizar lista de historico
+```
+
+---
+
+## Storage Bucket
+
+Verificar se o bucket `documents` existe, caso contrario criar:
+- Nome: `documents`
+- Publico: Nao (privado)
+- Politica: Usar signed URLs para download
 
 ---
 
 ## Resumo das Alteracoes
 
-1. **pdfGenerator.ts**: Reescrever `generateInspectionReport` com estrutura completa
-   - Adicionar seccao de Objectivo baseado no template
-   - Melhorar tabela com formatacao Sim/Nao/N/A/OBS
-   - Adicionar fotos numeradas (max 6 por pagina)
-   - Adicionar lista de NCs abertas nesta inspecao
-   - Adicionar seccao de Conclusao (Aprovado/Condicionado/Reprovado)
-   - Adicionar area de Assinatura
-
-2. **InspectionDetail.tsx**: Adicionar botao "Gerar PDF"
-   - Visivel apenas quando status = COMPLETED
-   - Estado de loading durante geracao
-   - Download automatico do ficheiro
-
-3. **Traducoes**: Novas chaves para labels do PDF em PT e EN
+1. **Reports.tsx**: Reescrever com 4 seccoes (Inspecoes, NCs, Autos, Historico)
+2. **pdfGenerator.ts**: Adicionar `generateOpenNCsReport` e `generateNCHistoryReport`
+3. **Storage**: Criar bucket `documents` se necessario
+4. **Traducoes**: Novas chaves `reportsPage` em PT e EN
+5. **Integracao**: Upload PDFs + guardar em `documents` table
 
 ---
 
 ## Consideracoes Tecnicas
 
-1. **Performance**: Limitar fotos a 6 por pagina para nao sobrecarregar o PDF
-2. **Paginacao**: autoTable gere automaticamente, mas fotos precisam verificacao manual de espaco
-3. **Imagens**: Usar signed URLs para bucket privado (captures)
-4. **Referencia**: Gerar codigo tipo "INS-2026-001" baseado na data + indice
-5. **Categoria**: Traduzir categoria do template (structure -> Estrutura, etc.)
+1. **Performance**: Limitar historico aos ultimos 50 relatorios
+2. **Storage**: Organizar por `reports/{siteId}/{filename}`
+3. **Nomes de ficheiro**: `tipo_obra_data.pdf` (ex: `inspecao_aurora_2026-02-05.pdf`)
+4. **RLS**: Usar politicas existentes da tabela `documents`
+5. **Bucket**: Pode usar bucket existente ou criar novo `documents`
