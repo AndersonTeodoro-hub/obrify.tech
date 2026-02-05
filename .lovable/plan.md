@@ -1,94 +1,49 @@
 
-# Plano: Sistema de Templates de Checklist para Inspecoes
+# Plano: Pagina de Fiscalizacoes Completa
 
 ## Resumo
-Criar um sistema completo de gestao de templates de checklist para inspeccoes, acessivel atraves das Definicoes, com editor visual, drag-and-drop para reordenar itens, e 3 templates padrao pre-configurados.
+Implementar a pagina Inspections.tsx com lista de fiscalizacoes, filtros avancados e um wizard de 3 passos para criar novas fiscalizacoes. A criacao insere um registo na tabela `inspections` com estado "draft" e redireciona para uma pagina de preenchimento.
 
 ---
 
-## Arquitectura do Sistema
+## Analise do Estado Actual
+
+### Tabela `inspections` (ja existe):
+- `id`, `site_id`, `template_id`, `created_by`
+- `floor_id`, `area_id`, `capture_point_id` (opcional)
+- `status` (text, default 'DRAFT')
+- `scheduled_at`, `assigned_to`, `structure_type`
+- `created_at`, `updated_at`
+
+### O que ja existe:
+- Pagina placeholder em `Inspections.tsx`
+- Componente `SiteInspectionsTab.tsx` com padrao de listagem
+- Sistema de templates funcional
+- Filtros em `CaptureFilters.tsx` como referencia
+
+### O que falta:
+1. Lista de fiscalizacoes com dados completos
+2. Filtros por obra, estado e data
+3. Wizard de 3 passos para criar fiscalizacao
+4. Rota para pagina de preenchimento
+
+---
+
+## Arquitectura da Solucao
 
 ```text
-Settings (links para sub-paginas)
-└── InspectionTemplates.tsx
-    ├── Lista de Templates
-    │   ├── Nome
-    │   ├── Categoria
-    │   ├── Nº de Itens
-    │   └── Ultima Utilizacao
-    │
-    └── Template Editor (Modal/Drawer)
-        ├── Nome do Template
-        ├── Categoria (Select)
-        └── Lista de Itens (Drag-and-drop)
-            ├── Texto da verificacao
-            ├── Tipo (checkbox/texto/numero)
-            └── Obrigatorio (sim/nao)
-```
-
----
-
-## Alteracoes de Base de Dados
-
-### Migracao: Adicionar colunas necessarias
-
-A tabela `inspection_templates` ja existe mas precisa de:
-- `category` (text) - Categoria do template
-
-A tabela `inspection_template_items` ja existe mas precisa de:
-- `item_type` (text) - Tipo de item: checkbox, text, number
-- `is_required` (boolean) - Se o item e obrigatorio
-- `order_index` (integer) - Ordem do item na lista
-
-```sql
--- Adicionar categoria aos templates
-ALTER TABLE inspection_templates 
-ADD COLUMN IF NOT EXISTS category text DEFAULT 'structure';
-
--- Adicionar campos aos itens
-ALTER TABLE inspection_template_items 
-ADD COLUMN IF NOT EXISTS item_type text DEFAULT 'checkbox',
-ADD COLUMN IF NOT EXISTS is_required boolean DEFAULT false,
-ADD COLUMN IF NOT EXISTS order_index integer DEFAULT 0;
-
--- Inserir 3 templates padrao
-INSERT INTO inspection_templates (id, name, org_id, category, version) VALUES
-('00000000-0000-0000-0000-000000000001', 'Pre-Betonagem Laje', 
- (SELECT org_id FROM memberships LIMIT 1), 'structure', 1),
-('00000000-0000-0000-0000-000000000002', 'Pre-Betonagem Pilar',
- (SELECT org_id FROM memberships LIMIT 1), 'structure', 1),
-('00000000-0000-0000-0000-000000000003', 'Rececao de Betao',
- (SELECT org_id FROM memberships LIMIT 1), 'structure', 1);
-
--- Itens para Pre-Betonagem Laje
-INSERT INTO inspection_template_items (template_id, item_code, title, item_type, is_required, order_index) VALUES
-('00000000-0000-0000-0000-000000000001', 'PBL-01', 'Cofragem limpa e isenta de residuos', 'checkbox', true, 0),
-('00000000-0000-0000-0000-000000000001', 'PBL-02', 'Armaduras posicionadas conforme projeto', 'checkbox', true, 1),
-('00000000-0000-0000-0000-000000000001', 'PBL-03', 'Espaçadores colocados', 'checkbox', true, 2),
-('00000000-0000-0000-0000-000000000001', 'PBL-04', 'Negativos marcados', 'checkbox', true, 3),
-('00000000-0000-0000-0000-000000000001', 'PBL-05', 'Instalacoes electricas embebidas', 'checkbox', false, 4),
-('00000000-0000-0000-0000-000000000001', 'PBL-06', 'Instalacoes hidraulicas embebidas', 'checkbox', false, 5),
-('00000000-0000-0000-0000-000000000001', 'PBL-07', 'Observacoes', 'text', false, 6);
-
--- Itens para Pre-Betonagem Pilar
-INSERT INTO inspection_template_items (template_id, item_code, title, item_type, is_required, order_index) VALUES
-('00000000-0000-0000-0000-000000000002', 'PBP-01', 'Cofragem alinhada e aprumada', 'checkbox', true, 0),
-('00000000-0000-0000-0000-000000000002', 'PBP-02', 'Armaduras conforme projeto', 'checkbox', true, 1),
-('00000000-0000-0000-0000-000000000002', 'PBP-03', 'Estribos espaçados corretamente', 'checkbox', true, 2),
-('00000000-0000-0000-0000-000000000002', 'PBP-04', 'Recobrimento verificado', 'checkbox', true, 3),
-('00000000-0000-0000-0000-000000000002', 'PBP-05', 'Arranques para laje/viga preparados', 'checkbox', true, 4),
-('00000000-0000-0000-0000-000000000002', 'PBP-06', 'Observacoes', 'text', false, 5);
-
--- Itens para Rececao de Betao
-INSERT INTO inspection_template_items (template_id, item_code, title, item_type, is_required, order_index) VALUES
-('00000000-0000-0000-0000-000000000003', 'RB-01', 'Guia de remessa conforme', 'checkbox', true, 0),
-('00000000-0000-0000-0000-000000000003', 'RB-02', 'Classe de betao', 'text', true, 1),
-('00000000-0000-0000-0000-000000000003', 'RB-03', 'Slump (mm)', 'number', true, 2),
-('00000000-0000-0000-0000-000000000003', 'RB-04', 'Hora de saida da central', 'text', true, 3),
-('00000000-0000-0000-0000-000000000003', 'RB-05', 'Hora de chegada a obra', 'text', true, 4),
-('00000000-0000-0000-0000-000000000003', 'RB-06', 'Provetes recolhidos', 'checkbox', false, 5),
-('00000000-0000-0000-0000-000000000003', 'RB-07', 'Numero de provetes', 'number', false, 6),
-('00000000-0000-0000-0000-000000000003', 'RB-08', 'Observacoes', 'text', false, 7);
+Inspections.tsx
+├── Header (titulo + botao Nova Fiscalizacao)
+├── InspectionFilters.tsx
+│   ├── Filtro por Obra (Select)
+│   ├── Filtro por Estado (Select)
+│   └── Filtro por Data (DatePicker ou Select com intervalos)
+├── InspectionsList
+│   └── Table com: Data, Obra, Template, Estado, Inspector, Acoes
+└── NewInspectionWizard.tsx (Dialog)
+    ├── Passo 1: Selecionar Obra e Elemento
+    ├── Passo 2: Selecionar Template
+    └── Passo 3: Confirmar e Criar
 ```
 
 ---
@@ -97,12 +52,11 @@ INSERT INTO inspection_template_items (template_id, item_code, title, item_type,
 
 | Ficheiro | Accao |
 |----------|-------|
-| src/pages/app/InspectionTemplates.tsx | Criar |
-| src/components/templates/TemplateEditor.tsx | Criar |
-| src/components/templates/TemplateItemEditor.tsx | Criar |
-| src/components/templates/TemplateCard.tsx | Criar |
-| src/pages/app/Settings.tsx | Modificar (adicionar link) |
-| src/App.tsx | Adicionar rota |
+| src/pages/app/Inspections.tsx | Reescrever completamente |
+| src/components/inspections/InspectionFilters.tsx | Criar |
+| src/components/inspections/NewInspectionWizard.tsx | Criar |
+| src/pages/app/InspectionDetail.tsx | Criar (pagina de preenchimento) |
+| src/App.tsx | Adicionar rota `/app/inspections/:id` |
 | src/i18n/locales/pt.json | Adicionar chaves |
 | src/i18n/locales/en.json | Adicionar chaves |
 
@@ -110,269 +64,282 @@ INSERT INTO inspection_template_items (template_id, item_code, title, item_type,
 
 ## Componentes Detalhados
 
-### 1. InspectionTemplates.tsx (Pagina Principal)
-
-**Layout:**
-```text
-<div className="space-y-6">
-  <Header>
-    <h1>Templates de Inspecao</h1>
-    <Button>+ Novo Template</Button>
-  </Header>
-  
-  <Grid>
-    {templates.map(t => <TemplateCard template={t} />)}
-  </Grid>
-  
-  <TemplateEditor open={...} />
-</div>
-```
-
-**Queries:**
-- Lista de templates da organizacao do utilizador
-- Contagem de itens por template
-- Ultima utilizacao (COUNT inspections WHERE template_id)
-
-### 2. TemplateCard.tsx
-
-**Informacoes exibidas:**
-- Nome do template
-- Badge de categoria (cor diferente por categoria)
-- Numero de itens
-- Ultima utilizacao (data ou "Nunca utilizado")
-
-**Accoes:**
-- Editar (abre editor)
-- Duplicar
-- Eliminar (com confirmacao)
-
-### 3. TemplateEditor.tsx (Sheet/Dialog Grande)
+### 1. Inspections.tsx (Pagina Principal)
 
 **Estrutura:**
 ```text
-<Sheet side="right" className="w-[600px]">
-  <Header>
-    <Input value={name} placeholder="Nome do template" />
-  </Header>
+- Query para listar fiscalizacoes com joins:
+  - site (nome)
+  - template (nome)
+  - created_by (perfil do inspector)
   
-  <Content>
-    <Select value={category}>
-      <Option value="structure">Estrutura</Option>
-      <Option value="finishes">Acabamentos</Option>
-      <Option value="installations">Instalacoes</Option>
-      <Option value="safety">Seguranca</Option>
-    </Select>
-    
-    <Separator />
-    
-    <div className="flex justify-between">
-      <h3>Itens do Checklist</h3>
-      <Button>+ Adicionar Item</Button>
-    </div>
-    
-    <DraggableList>
-      {items.map(item => (
-        <TemplateItemEditor 
-          item={item}
-          onUpdate={...}
-          onRemove={...}
-        />
-      ))}
-    </DraggableList>
-  </Content>
-  
-  <Footer>
-    <Button variant="outline">Cancelar</Button>
-    <Button>Guardar Template</Button>
-  </Footer>
-</Sheet>
+- Estado para filtros:
+  - siteId: string | null
+  - status: 'all' | 'draft' | 'in_progress' | 'completed'
+  - dateFrom: Date | null
+  - dateTo: Date | null
+
+- Tabela com colunas:
+  - Data (scheduled_at ou created_at)
+  - Obra (site.name)
+  - Template (template.name)
+  - Estado (badge colorido)
+  - Inspector (profiles.full_name via created_by)
+  - Acoes (Ver, Editar)
 ```
 
-### 4. TemplateItemEditor.tsx
-
-**Cada item do checklist:**
+**Query SQL equivalente:**
 ```text
-<div className="flex items-center gap-3 p-3 border rounded-lg">
-  <GripVertical className="cursor-grab" /> // Para drag
-  
-  <Input 
-    value={item.title} 
-    placeholder="Texto da verificacao" 
-    className="flex-1"
-  />
-  
-  <Select value={item.item_type}>
-    <Option value="checkbox">Checkbox</Option>
-    <Option value="text">Texto</Option>
-    <Option value="number">Numero</Option>
-  </Select>
-  
-  <Checkbox 
-    checked={item.is_required} 
-    label="Obrigatorio"
-  />
-  
-  <Button variant="ghost" size="icon" onClick={onRemove}>
-    <Trash2 />
-  </Button>
-</div>
+SELECT 
+  i.*,
+  s.name as site_name,
+  t.name as template_name,
+  p.full_name as inspector_name
+FROM inspections i
+JOIN sites s ON s.id = i.site_id
+JOIN inspection_templates t ON t.id = i.template_id
+LEFT JOIN profiles p ON p.user_id = i.created_by
+WHERE [filtros]
+ORDER BY i.created_at DESC
 ```
 
-### 5. Modificar Settings.tsx
+### 2. InspectionFilters.tsx
 
-Adicionar card/link para Templates:
+**Filtros:**
+1. **Obra** - Select com todas as obras do utilizador
+2. **Estado** - Select com opcoes:
+   - Todos
+   - Rascunho (draft)
+   - Em Curso (in_progress)
+   - Concluida (completed)
+3. **Periodo** - Select com intervalos pre-definidos:
+   - Todos
+   - Ultimos 7 dias
+   - Ultimos 30 dias
+   - Este mes
+   - Mes anterior
+
+**Botao Limpar** - Aparece quando ha filtros activos
+
+### 3. NewInspectionWizard.tsx
+
+**Wizard de 3 passos com navegacao:**
+
+#### Passo 1: Selecionar Obra e Elemento
 ```text
-<Card className="cursor-pointer hover:border-primary/50">
-  <CardHeader>
-    <ClipboardList className="text-primary" />
-    <CardTitle>Templates de Inspecao</CardTitle>
-    <CardDescription>Gerir checklists padrao</CardDescription>
-  </CardHeader>
-</Card>
+<Select> Obra * (obrigatorio)
+<Select> Piso (opcional, carrega quando obra selecionada)
+<Select> Area (opcional, carrega quando piso selecionado)
+<Select> Ponto de Captura (opcional, carrega quando area selecionada)
+```
+
+#### Passo 2: Selecionar Template
+```text
+<RadioGroup ou Cards clicaveis>
+  - Mostrar templates da organizacao
+  - Cada card mostra: nome, categoria (badge), numero de itens
+  - Template selecionado destacado
+</RadioGroup>
+```
+
+#### Passo 3: Confirmar e Criar
+```text
+Resumo:
+  - Obra: [nome da obra]
+  - Localizacao: [piso > area > ponto] ou "Geral"
+  - Template: [nome do template]
+  - Inspector: [nome do utilizador actual]
+  
+<Button>Criar Fiscalizacao</Button>
+```
+
+**Mutation:**
+```text
+INSERT INTO inspections (
+  site_id,
+  template_id,
+  created_by,
+  floor_id,      -- opcional
+  area_id,       -- opcional
+  capture_point_id, -- opcional
+  status,
+  scheduled_at
+) VALUES (...)
+RETURNING id
+```
+
+**Apos criar:**
+- Toast de sucesso
+- navigate(`/app/inspections/${newId}`)
+
+### 4. InspectionDetail.tsx (Pagina de Preenchimento)
+
+**Estrutura inicial (placeholder para futuro):**
+```text
+- Cabecalho com info da fiscalizacao
+- Lista de itens do template para preencher
+- Botoes: Guardar Rascunho, Concluir
+```
+
+Para esta fase, criar apenas um placeholder que mostra os dados basicos da fiscalizacao.
+
+---
+
+## Navegacao do Wizard
+
+```text
+Estado: currentStep (1 | 2 | 3)
+
+Passo 1 → Passo 2: Botao "Seguinte" (habilitado se obra selecionada)
+Passo 2 → Passo 3: Botao "Seguinte" (habilitado se template selecionado)
+Passo 3 → Criar: Botao "Criar Fiscalizacao"
+
+Navegacao:
+- Voltar: permite voltar aos passos anteriores
+- Indicador visual de passos (1 - 2 - 3)
 ```
 
 ---
 
-## Drag-and-Drop para Itens
+## Estados e Badges
 
-Reutilizar o padrao ja implementado em SiteStructureTab.tsx:
-
-```text
-const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
-
-const handleDragStart = (e: DragEvent, itemId: string) => {
-  setDraggedItemId(itemId);
-  e.dataTransfer.effectAllowed = 'move';
-};
-
-const handleDrop = (e: DragEvent, targetItemId: string) => {
-  // Reordenar items
-  // Actualizar order_index de todos os itens afectados
-};
-```
+| Estado | Valor BD | Cor |
+|--------|----------|-----|
+| Rascunho | draft | Cinza (muted) |
+| Em Curso | in_progress | Amarelo |
+| Concluida | completed | Verde |
 
 ---
 
 ## Traducoes a Adicionar
 
 ```text
-templates.title: "Templates de Inspecao"
-templates.subtitle: "Gerir checklists padrao para fiscalizacoes"
-templates.new: "Novo Template"
-templates.edit: "Editar Template"
-templates.name: "Nome do Template"
-templates.namePlaceholder: "Ex: Pre-Betonagem Laje"
-templates.category: "Categoria"
-templates.categories.structure: "Estrutura"
-templates.categories.finishes: "Acabamentos"
-templates.categories.installations: "Instalacoes"
-templates.categories.safety: "Seguranca"
-templates.items: "Itens"
-templates.addItem: "Adicionar Item"
-templates.itemText: "Texto da verificacao"
-templates.itemType: "Tipo"
-templates.itemTypes.checkbox: "Checkbox"
-templates.itemTypes.text: "Texto"
-templates.itemTypes.number: "Numero"
-templates.required: "Obrigatorio"
-templates.lastUsed: "Ultima utilizacao"
-templates.neverUsed: "Nunca utilizado"
-templates.noTemplates: "Ainda nao existem templates"
-templates.createFirst: "Crie o seu primeiro template de inspeccao"
-templates.created: "Template criado com sucesso"
-templates.updated: "Template atualizado com sucesso"
-templates.deleted: "Template eliminado com sucesso"
-templates.duplicate: "Duplicar"
-templates.deleteConfirm: "Tem a certeza que deseja eliminar o template \"{{name}}\"?"
-templates.dragToReorder: "Arraste para reordenar os itens"
+inspections.filterBySite: "Filtrar por obra"
+inspections.filterByStatus: "Filtrar por estado"
+inspections.filterByDate: "Filtrar por data"
+inspections.allStatuses: "Todos os estados"
+inspections.last7Days: "Últimos 7 dias"
+inspections.last30Days: "Últimos 30 dias"
+inspections.thisMonth: "Este mês"
+inspections.lastMonth: "Mês anterior"
+inspections.allDates: "Todas as datas"
+inspections.clearFilters: "Limpar filtros"
+inspections.site: "Obra"
+inspections.location: "Localização"
+inspections.inspector: "Inspector"
+inspections.date: "Data"
+inspections.general: "Geral"
+inspections.createdSuccessfully: "Fiscalização criada com sucesso"
+inspections.wizard.title: "Nova Fiscalização"
+inspections.wizard.step1Title: "Selecionar Obra"
+inspections.wizard.step1Desc: "Escolha a obra e o local da fiscalização"
+inspections.wizard.step2Title: "Selecionar Template"
+inspections.wizard.step2Desc: "Escolha o checklist a utilizar"
+inspections.wizard.step3Title: "Confirmar"
+inspections.wizard.step3Desc: "Reveja os dados e crie a fiscalização"
+inspections.wizard.summary: "Resumo"
+inspections.wizard.selectSite: "Selecione uma obra"
+inspections.wizard.selectTemplate: "Selecione um template"
+inspections.wizard.optionalLocation: "Localização (opcional)"
+inspections.view: "Ver"
+inspections.continue: "Continuar"
 ```
 
 ---
 
-## Rota
+## Rota Nova
 
 Adicionar em App.tsx:
 ```text
-<Route path="settings/templates" element={<InspectionTemplates />} />
+<Route path="inspections/:inspectionId" element={<InspectionDetail />} />
 ```
 
 ---
 
 ## Fluxo de Utilizacao
 
+### Listar Fiscalizacoes:
 ```text
-1. User vai a Definicoes
-   ↓
-2. Clica em "Templates de Inspecao"
-   ↓
-3. Ve lista de templates (incluindo os 3 padrao)
-   ↓
-4. Clica em "+ Novo Template" ou edita existente
-   ↓
-5. Editor abre com:
-   - Campo nome
-   - Dropdown categoria
-   - Lista de itens arrastavel
-   ↓
-6. Adiciona/remove/reordena itens
-   ↓
-7. Guarda template
+1. Utilizador acede a /app/inspections
+2. Ve tabela com todas as fiscalizacoes
+3. Usa filtros para refinar busca
+4. Clica em "Ver" para abrir detalhe
 ```
 
----
-
-## Categorias e Cores
-
-| Categoria | Codigo | Cor Badge |
-|-----------|--------|-----------|
-| Estrutura | structure | blue |
-| Acabamentos | finishes | amber |
-| Instalacoes | installations | green |
-| Seguranca | safety | red |
+### Criar Nova Fiscalizacao:
+```text
+1. Clica em "+ Nova Fiscalizacao"
+2. Wizard abre no Passo 1
+3. Seleciona obra (obrigatorio)
+4. Opcionalmente seleciona piso/area/ponto
+5. Clica "Seguinte"
+6. No Passo 2, seleciona template
+7. Clica "Seguinte"
+8. No Passo 3, revisa resumo
+9. Clica "Criar Fiscalizacao"
+10. Registo criado com status "draft"
+11. Redireciona para /app/inspections/:id
+```
 
 ---
 
 ## Consideracoes Tecnicas
 
-1. **RLS**: Templates filtrados por org_id do utilizador (ja existe policy)
+1. **Queries Optimizadas**: Usar joins para evitar N+1 queries
 
-2. **Templates Padrao**: Inseridos via migracao para a primeira organizacao do utilizador. Alternativa: seeding manual ou criar quando nao existem templates.
+2. **Filtros**: Aplicar filtros no lado do cliente inicialmente, migrar para servidor se lista crescer
 
-3. **Validacao**: Nome obrigatorio, pelo menos 1 item
+3. **Wizard State**: Manter estado local no componente, resetar ao fechar
 
-4. **Performance**: Usar React Query com optimistic updates para reordenacao
+4. **RLS**: Fiscalizacoes ja tem policies que verificam `can_access_site()`
 
-5. **Duplicar Template**: Criar copia com nome + " (Copia)" e duplicar todos os itens
+5. **Status Mapping**: 
+   - BD usa maiusculas (DRAFT, IN_PROGRESS, COMPLETED)
+   - Normalizar para minusculas no frontend ou ajustar badges
 
-6. **Ultima Utilizacao**: Query que conta inspeccoes por template_id e retorna MAX(created_at)
+6. **Inspector**: Usar tabela `profiles` para obter nome do utilizador via `created_by`
 
 ---
 
-## Templates Padrao Detalhados
+## Interface Visual do Wizard
 
-### Pre-Betonagem Laje
-- Cofragem limpa e isenta de residuos (checkbox, obrigatorio)
-- Armaduras posicionadas conforme projeto (checkbox, obrigatorio)
-- Espacadores colocados (checkbox, obrigatorio)
-- Negativos marcados (checkbox, obrigatorio)
-- Instalacoes electricas embebidas (checkbox)
-- Instalacoes hidraulicas embebidas (checkbox)
-- Observacoes (texto)
+```text
+┌────────────────────────────────────────────────────────┐
+│  Nova Fiscalização                              [X]   │
+├────────────────────────────────────────────────────────┤
+│                                                        │
+│   ● ───── ○ ───── ○                                   │
+│   1       2       3                                    │
+│  Obra  Template Confirmar                             │
+│                                                        │
+│ ┌────────────────────────────────────────────────┐    │
+│ │                                                │    │
+│ │  Selecionar Obra                               │    │
+│ │  Escolha a obra e o local da fiscalizacao      │    │
+│ │                                                │    │
+│ │  Obra *                                        │    │
+│ │  ┌──────────────────────────────────────────┐ │    │
+│ │  │ Selecione uma obra              ▼        │ │    │
+│ │  └──────────────────────────────────────────┘ │    │
+│ │                                                │    │
+│ │  Piso (opcional)                               │    │
+│ │  ┌──────────────────────────────────────────┐ │    │
+│ │  │ Todos os pisos                 ▼        │ │    │
+│ │  └──────────────────────────────────────────┘ │    │
+│ │                                                │    │
+│ └────────────────────────────────────────────────┘    │
+│                                                        │
+│                              [Cancelar]  [Seguinte →] │
+└────────────────────────────────────────────────────────┘
+```
 
-### Pre-Betonagem Pilar
-- Cofragem alinhada e aprumada (checkbox, obrigatorio)
-- Armaduras conforme projeto (checkbox, obrigatorio)
-- Estribos espacados corretamente (checkbox, obrigatorio)
-- Recobrimento verificado (checkbox, obrigatorio)
-- Arranques para laje/viga preparados (checkbox, obrigatorio)
-- Observacoes (texto)
+---
 
-### Rececao de Betao
-- Guia de remessa conforme (checkbox, obrigatorio)
-- Classe de betao (texto, obrigatorio)
-- Slump em mm (numero, obrigatorio)
-- Hora de saida da central (texto, obrigatorio)
-- Hora de chegada a obra (texto, obrigatorio)
-- Provetes recolhidos (checkbox)
-- Numero de provetes (numero)
-- Observacoes (texto)
+## Resumo das Alteracoes
+
+1. **Inspections.tsx**: Lista completa com tabela e filtros
+2. **InspectionFilters.tsx**: Componente de filtros reutilizavel
+3. **NewInspectionWizard.tsx**: Wizard de 3 passos
+4. **InspectionDetail.tsx**: Pagina placeholder para preenchimento
+5. **App.tsx**: Nova rota para detalhe
+6. **Traducoes**: Novas chaves em PT e EN
