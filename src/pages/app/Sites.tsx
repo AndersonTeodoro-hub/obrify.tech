@@ -6,6 +6,7 @@ import { Plus, HardHat, MapPin, MoreVertical, Pencil, Trash2, ArrowRight } from 
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
+import { usePermissions } from '@/hooks/use-permissions';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,6 +41,7 @@ export default function Sites() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { canCreateSite, canEditSite, canDeleteSite } = usePermissions();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selectedOrgId, setSelectedOrgId] = useState<string>('');
   const [newSiteName, setNewSiteName] = useState('');
@@ -181,14 +183,16 @@ export default function Sites() {
           <h1 className="text-2xl font-bold">{t('sites.title')}</h1>
           <p className="text-muted-foreground">{t('sites.subtitle')}</p>
         </div>
-        <Button
-          onClick={() => setIsCreateOpen(true)}
-          disabled={!hasOrganizations}
-          className="bg-gradient-to-r from-primary to-accent"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          {t('sites.create')}
-        </Button>
+        {canCreateSite && (
+          <Button
+            onClick={() => setIsCreateOpen(true)}
+            disabled={!hasOrganizations}
+            className="bg-gradient-to-r from-primary to-accent"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            {t('sites.create')}
+          </Button>
+        )}
       </div>
 
       {!hasOrganizations ? (
@@ -229,20 +233,24 @@ export default function Sites() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="glass">
-                    <DropdownMenuItem onClick={(e) => e.stopPropagation()}>
-                      <Pencil className="w-4 h-4 mr-2" />
-                      {t('common.edit')}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className="text-destructive"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteSiteMutation.mutate(site.id);
-                      }}
-                    >
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      {t('common.delete')}
-                    </DropdownMenuItem>
+                    {canEditSite && (
+                      <DropdownMenuItem onClick={(e) => e.stopPropagation()}>
+                        <Pencil className="w-4 h-4 mr-2" />
+                        {t('common.edit')}
+                      </DropdownMenuItem>
+                    )}
+                    {canDeleteSite && (
+                      <DropdownMenuItem
+                        className="text-destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteSiteMutation.mutate(site.id);
+                        }}
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        {t('common.delete')}
+                      </DropdownMenuItem>
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </CardHeader>
@@ -272,10 +280,12 @@ export default function Sites() {
             <HardHat className="w-16 h-16 text-muted-foreground/50 mb-4" />
             <h3 className="text-lg font-medium">{t('sites.noSites')}</h3>
             <p className="text-muted-foreground text-center mt-1">{t('sites.createFirst')}</p>
-            <Button onClick={() => setIsCreateOpen(true)} className="mt-4">
-              <Plus className="w-4 h-4 mr-2" />
-              {t('sites.create')}
-            </Button>
+            {canCreateSite && (
+              <Button onClick={() => setIsCreateOpen(true)} className="mt-4">
+                <Plus className="w-4 h-4 mr-2" />
+                {t('sites.create')}
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}
