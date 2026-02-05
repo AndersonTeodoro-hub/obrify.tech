@@ -790,6 +790,272 @@ export async function generateNCReport(ncId: string): Promise<Blob> {
 }
 
 /**
+ * Generate Open NCs Report PDF - List of all open NCs for a site
+ */
+export async function generateOpenNCsReport(siteId: string): Promise<Blob> {
+  // Fetch site data
+  const { data: site, error: siteError } = await supabase
+    .from('sites')
+    .select('id, name, address')
+    .eq('id', siteId)
+    .single();
+
+  if (siteError || !site) {
+    throw new Error('Site not found');
+  }
+
+  // Fetch open NCs (not CLOSED)
+  const { data: ncs, error: ncsError } = await supabase
+    .from('nonconformities')
+    .select('*')
+    .eq('site_id', siteId)
+    .neq('status', 'CLOSED')
+    .order('created_at', { ascending: false });
+
+  if (ncsError) throw ncsError;
+
+  // Initialize PDF
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  let currentY = addHeader(doc, 'LISTA DE NÃO-CONFORMIDADES ABERTAS');
+  currentY += 3;
+
+  // Site and date info
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...COLORS.text);
+  doc.text(`Obra: ${site.name}`, MARGIN, currentY);
+  doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy', { locale: pt })}`, PAGE_WIDTH - MARGIN, currentY, { align: 'right' });
+  currentY += 10;
+
+  // Summary
+  currentY = addSectionTitle(doc, 'RESUMO', currentY);
+  
+  const totalNCs = ncs?.length || 0;
+  const criticalCount = ncs?.filter(nc => nc.severity === 'critical').length || 0;
+  const highCount = ncs?.filter(nc => nc.severity === 'high').length || 0;
+  const mediumCount = ncs?.filter(nc => nc.severity === 'medium').length || 0;
+
+  currentY = addInfoRow(doc, 'Total de NCs Abertas', String(totalNCs), currentY);
+  currentY = addInfoRow(doc, 'Distribuição', `Críticas: ${criticalCount} | Importantes: ${highCount} | Menores: ${mediumCount}`, currentY);
+  currentY += 8;
+
+  // Detailed list
+  if (ncs && ncs.length > 0) {
+    currentY = addSectionTitle(doc, 'LISTA DETALHADA', currentY);
+
+    const ncData = ncs.map((nc, index) => [
+      String(index + 1).padStart(3, '0'),
+      (nc.description || nc.title || '-').slice(0, 45) + ((nc.description || nc.title || '').length > 45 ? '...' : ''),
+      SEVERITY_LABELS[nc.severity] || nc.severity,
+      nc.due_date ? format(new Date(nc.due_date), 'dd/MM', { locale: pt }) : '-',
+      nc.responsible || '-',
+    ]);
+
+    autoTable(doc, {
+      startY: currentY,
+      head: [['NC', 'Descrição', 'Severidade', 'Prazo', 'Responsável']],
+      body: ncData,
+      margin: { left: MARGIN, right: MARGIN },
+      headStyles: {
+        fillColor: COLORS.danger,
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 9,
+      },
+      bodyStyles: {
+        fontSize: 8,
+        textColor: COLORS.text,
+      },
+      columnStyles: {
+        0: { cellWidth: 12 },
+        1: { cellWidth: 'auto' },
+        2: { cellWidth: 22 },
+        3: { cellWidth: 18 },
+        4: { cellWidth: 35 },
+      },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 2) {
+          const value = data.cell.raw as string;
+          if (value === 'Crítico') {
+            data.cell.styles.textColor = COLORS.danger;
+            data.cell.styles.fontStyle = 'bold';
+          } else if (value === 'Importante') {
+            data.cell.styles.textColor = COLORS.warning;
+          }
+        }
+      },
+    });
+  } else {
+    doc.setFontSize(10);
+    doc.setTextColor(...COLORS.secondary);
+    doc.text('Não existem não-conformidades abertas para esta obra.', MARGIN, currentY);
+  }
+
+  // Add footers
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    addFooter(doc, i, totalPages);
+  }
+
+  return doc.output('blob');
+}
+
+/**
+ * Generate NC History Report PDF - Closed NCs in a period
+ */
+export async function generateNCHistoryReport(
+  siteId: string,
+  period: { start: Date; end: Date }
+): Promise<Blob> {
+  // Fetch site data
+  const { data: site, error: siteError } = await supabase
+    .from('sites')
+    .select('id, name, address')
+    .eq('id', siteId)
+    .single();
+
+  if (siteError || !site) {
+    throw new Error('Site not found');
+  }
+
+  // Fetch NCs created in period
+  const { data: allNCs } = await supabase
+    .from('nonconformities')
+    .select('*')
+    .eq('site_id', siteId)
+    .gte('created_at', period.start.toISOString())
+    .lte('created_at', period.end.toISOString())
+    .order('created_at', { ascending: false });
+
+  // Fetch closed NCs in period (via status history)
+  const { data: closedNCs } = await supabase
+    .from('nonconformities')
+    .select('*')
+    .eq('site_id', siteId)
+    .eq('status', 'CLOSED')
+    .gte('updated_at', period.start.toISOString())
+    .lte('updated_at', period.end.toISOString())
+    .order('updated_at', { ascending: false });
+
+  // Initialize PDF
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  let currentY = addHeader(doc, 'HISTÓRICO DE NÃO-CONFORMIDADES');
+  currentY += 3;
+
+  // Site info
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...COLORS.text);
+  doc.text(`Obra: ${site.name}`, MARGIN, currentY);
+  currentY += 5;
+  
+  doc.setTextColor(...COLORS.secondary);
+  const periodStr = `Período: ${format(period.start, 'dd/MM/yyyy')} a ${format(period.end, 'dd/MM/yyyy')}`;
+  doc.text(periodStr, MARGIN, currentY);
+  currentY += 10;
+
+  // Period summary
+  currentY = addSectionTitle(doc, 'RESUMO DO PERÍODO', currentY);
+  
+  const openedCount = allNCs?.length || 0;
+  const closedCount = closedNCs?.length || 0;
+  const resolutionRate = openedCount > 0 ? Math.round((closedCount / openedCount) * 100) : 0;
+
+  const summaryData: string[][] = [
+    ['NCs Abertas no Período', String(openedCount)],
+    ['NCs Fechadas no Período', String(closedCount)],
+    ['Taxa de Resolução', `${resolutionRate}%`],
+  ];
+
+  autoTable(doc, {
+    startY: currentY,
+    body: summaryData,
+    margin: { left: MARGIN, right: MARGIN },
+    theme: 'plain',
+    bodyStyles: {
+      fontSize: 10,
+      textColor: COLORS.text,
+    },
+    columnStyles: {
+      0: { fontStyle: 'bold', cellWidth: 80 },
+      1: { halign: 'right' },
+    },
+    alternateRowStyles: {
+      fillColor: [249, 250, 251],
+    },
+  });
+
+  currentY = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
+
+  // Closed NCs details
+  if (closedNCs && closedNCs.length > 0) {
+    currentY = addSectionTitle(doc, 'NÃO-CONFORMIDADES FECHADAS', currentY);
+
+    const ncData = closedNCs.map((nc, index) => {
+      const createdDate = new Date(nc.created_at);
+      const closedDate = new Date(nc.updated_at);
+      const daysDiff = Math.round((closedDate.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+      
+      return [
+        String(index + 1).padStart(3, '0'),
+        (nc.description || nc.title || '-').slice(0, 40) + ((nc.description || nc.title || '').length > 40 ? '...' : ''),
+        format(createdDate, 'dd/MM', { locale: pt }),
+        format(closedDate, 'dd/MM', { locale: pt }),
+        `${daysDiff} dias`,
+      ];
+    });
+
+    autoTable(doc, {
+      startY: currentY,
+      head: [['NC', 'Descrição', 'Aberta', 'Fechada', 'Tempo']],
+      body: ncData,
+      margin: { left: MARGIN, right: MARGIN },
+      headStyles: {
+        fillColor: COLORS.success,
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 9,
+      },
+      bodyStyles: {
+        fontSize: 8,
+        textColor: COLORS.text,
+      },
+      columnStyles: {
+        0: { cellWidth: 12 },
+        1: { cellWidth: 'auto' },
+        2: { cellWidth: 20 },
+        3: { cellWidth: 20 },
+        4: { cellWidth: 22 },
+      },
+    });
+  } else {
+    doc.setFontSize(10);
+    doc.setTextColor(...COLORS.secondary);
+    doc.text('Não foram fechadas não-conformidades neste período.', MARGIN, currentY);
+  }
+
+  // Add footers
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    addFooter(doc, i, totalPages);
+  }
+
+  return doc.output('blob');
+}
+
+/**
  * Generate Measurement Report (Auto de Medição) PDF
  */
 export async function generateMeasurementAuto(
