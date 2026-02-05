@@ -1,10 +1,11 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Upload, Image, Video, View, X, Loader2 } from 'lucide-react';
+import { Loader2, Image, Video, View } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { toast } from 'sonner';
+import { extractExifData } from '@/lib/exif-parser';
 import {
   Dialog,
   DialogContent,
@@ -14,6 +15,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Progress } from '@/components/ui/progress';
 import {
   Select,
   SelectContent,
@@ -22,7 +24,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import type { CaptureCategory, CaptureSource } from '@/types/captures';
+import { DropZone } from './DropZone';
+import { FilePreviewGrid } from './FilePreviewGrid';
+import type { CaptureCategory, CaptureSource, FileWithPreview } from '@/types/captures';
 
 interface NewCaptureModalProps {
   open: boolean;
@@ -35,19 +39,33 @@ const CATEGORY_TO_SOURCE: Record<CaptureCategory, CaptureSource> = {
   panorama: 'phone_360',
 };
 
+const MAX_FILES = 10;
+
 export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
+  // Selection state
   const [selectedSite, setSelectedSite] = useState<string>('');
   const [selectedFloor, setSelectedFloor] = useState<string>('');
   const [selectedArea, setSelectedArea] = useState<string>('');
   const [selectedPoint, setSelectedPoint] = useState<string>('');
   const [captureType, setCaptureType] = useState<CaptureCategory>('photo');
   const [notes, setNotes] = useState('');
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+
+  // File upload state
+  const [files, setFiles] = useState<FileWithPreview[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [currentUploadIndex, setCurrentUploadIndex] = useState(0);
+  const [overallProgress, setOverallProgress] = useState(0);
+
+  // Cleanup previews on unmount
+  useEffect(() => {
+    return () => {
+      files.forEach((f) => URL.revokeObjectURL(f.preview));
+    };
+  }, []);
 
   // Fetch user's organizations and sites
   const { data: sites = [] } = useQuery({
@@ -66,7 +84,7 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
       
       const { data: sites } = await supabase
         .from('sites')
-        .select('id, name')
+        .select('id, name, org_id')
         .in('org_id', orgIds)
         .order('name');
 
@@ -126,71 +144,221 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
     enabled: !!selectedArea,
   });
 
-  const createCaptureMutation = useMutation({
-    mutationFn: async () => {
-      if (!user || !selectedPoint) throw new Error('Missing required fields');
+  // Handle file selection
+  const handleFilesSelected = useCallback(async (newFiles: File[]) => {
+    const processedFiles: FileWithPreview[] = [];
 
-      // For now, just create a placeholder file path since storage isn't configured yet
-      const filePath = `captures/${selectedPoint}/${Date.now()}_${file?.name || 'capture'}`;
+    for (const file of newFiles) {
+      const id = crypto.randomUUID();
+      const preview = URL.createObjectURL(file);
+      
+      // Extract EXIF data for images
+      let exifData = null;
+      if (file.type.startsWith('image/')) {
+        try {
+          exifData = await extractExifData(file);
+        } catch (e) {
+          console.warn('Failed to extract EXIF:', e);
+        }
+      }
 
-      const { error } = await supabase.from('captures').insert({
-        capture_point_id: selectedPoint,
-        user_id: user.id,
-        file_path: filePath,
-        source_type: CATEGORY_TO_SOURCE[captureType],
-        processing_status: 'PENDING',
-        captured_at: new Date().toISOString(),
+      processedFiles.push({
+        id,
+        file,
+        preview,
+        exifData,
+        status: 'pending',
+        progress: 0,
       });
+    }
 
-      if (error) throw error;
+    setFiles((prev) => [...prev, ...processedFiles].slice(0, MAX_FILES));
+  }, []);
+
+  // Remove file from list
+  const handleRemoveFile = useCallback((id: string) => {
+    setFiles((prev) => {
+      const file = prev.find((f) => f.id === id);
+      if (file) {
+        URL.revokeObjectURL(file.preview);
+      }
+      return prev.filter((f) => f.id !== id);
+    });
+  }, []);
+
+  // Get or create capture point
+  const getOrCreateCapturePoint = async (): Promise<string | null> => {
+    // If a point is selected, use it
+    if (selectedPoint) return selectedPoint;
+
+    // If no points exist, create a default one
+    if (capturePoints.length === 0 && selectedArea) {
+      const { data, error } = await supabase
+        .from('capture_points')
+        .insert({
+          area_id: selectedArea,
+          code: 'DEFAULT',
+          description: t('captures.defaultPoint'),
+        })
+        .select('id')
+        .single();
+
+      if (error) {
+        console.error('Error creating default point:', error);
+        return null;
+      }
+      return data.id;
+    }
+
+    // Use first available point
+    return capturePoints[0]?.id || null;
+  };
+
+  // Upload mutation
+  const uploadMutation = useMutation({
+    mutationFn: async () => {
+      if (!user || files.length === 0) throw new Error('Missing required data');
+
+      const pointId = await getOrCreateCapturePoint();
+      if (!pointId) throw new Error('No capture point available');
+
+      // Get org_id from site
+      const site = sites.find((s) => s.id === selectedSite);
+      if (!site) throw new Error('Site not found');
+
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (let i = 0; i < files.length; i++) {
+        const fileData = files[i];
+        setCurrentUploadIndex(i);
+
+        // Update file status to uploading
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.id === fileData.id ? { ...f, status: 'uploading' as const } : f
+          )
+        );
+
+        try {
+          // Generate unique file path
+          const timestamp = Date.now();
+          const ext = fileData.file.name.split('.').pop() || 'jpg';
+          const safeName = fileData.file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+          const filePath = `${site.org_id}/${selectedSite}/${pointId}/${timestamp}_${fileData.id.slice(0, 8)}_${safeName}`;
+
+          // Upload to Storage
+          const { error: uploadError } = await supabase.storage
+            .from('captures')
+            .upload(filePath, fileData.file, {
+              cacheControl: '3600',
+              upsert: false,
+            });
+
+          if (uploadError) throw uploadError;
+
+          // Update progress
+          setFiles((prev) =>
+            prev.map((f) =>
+              f.id === fileData.id ? { ...f, progress: 50 } : f
+            )
+          );
+
+          // Insert capture record
+          const { error: insertError } = await supabase.from('captures').insert({
+            capture_point_id: pointId,
+            user_id: user.id,
+            file_path: filePath,
+            source_type: CATEGORY_TO_SOURCE[captureType],
+            processing_status: 'PENDING',
+            captured_at: fileData.exifData?.dateTime?.toISOString() || new Date().toISOString(),
+            size_bytes: fileData.file.size,
+            mime_type: fileData.file.type,
+          });
+
+          if (insertError) throw insertError;
+
+          // Mark as success
+          setFiles((prev) =>
+            prev.map((f) =>
+              f.id === fileData.id ? { ...f, status: 'success' as const, progress: 100 } : f
+            )
+          );
+          successCount++;
+        } catch (error: any) {
+          console.error('Upload error:', error);
+          setFiles((prev) =>
+            prev.map((f) =>
+              f.id === fileData.id
+                ? { ...f, status: 'error' as const, error: error.message }
+                : f
+            )
+          );
+          errorCount++;
+        }
+
+        // Update overall progress
+        setOverallProgress(Math.round(((i + 1) / files.length) * 100));
+      }
+
+      return { successCount, errorCount };
     },
-    onSuccess: () => {
-      toast.success(t('captures.uploadSuccess'));
+    onSuccess: ({ successCount, errorCount }) => {
+      if (successCount > 0) {
+        toast.success(t('captures.uploadComplete'), {
+          description: t('captures.uploadSuccessMultiple', { count: successCount }),
+        });
+      }
+      if (errorCount > 0) {
+        toast.error(t('captures.uploadError', { count: errorCount }));
+      }
       queryClient.invalidateQueries({ queryKey: ['captures'] });
-      handleClose();
+      
+      // Close after short delay to show final state
+      setTimeout(() => {
+        if (errorCount === 0) {
+          handleClose();
+        }
+      }, 1500);
     },
     onError: (error) => {
       toast.error(t('common.error'), {
         description: error.message,
       });
     },
+    onSettled: () => {
+      setIsUploading(false);
+    },
   });
 
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      setFile(selectedFile);
-      
-      // Create preview for images and videos
-      if (selectedFile.type.startsWith('image/') || selectedFile.type.startsWith('video/')) {
-        const url = URL.createObjectURL(selectedFile);
-        setPreview(url);
-      }
-    }
-  }, []);
-
   const handleClose = () => {
+    // Cleanup
+    files.forEach((f) => URL.revokeObjectURL(f.preview));
+    setFiles([]);
     setSelectedSite('');
     setSelectedFloor('');
     setSelectedArea('');
     setSelectedPoint('');
     setCaptureType('photo');
     setNotes('');
-    setFile(null);
-    if (preview) URL.revokeObjectURL(preview);
-    setPreview(null);
+    setIsUploading(false);
+    setCurrentUploadIndex(0);
+    setOverallProgress(0);
     onOpenChange(false);
   };
 
   const handleSubmit = () => {
-    createCaptureMutation.mutate();
+    setIsUploading(true);
+    uploadMutation.mutate();
   };
 
-  const isValid = selectedPoint && file;
+  const isValid = selectedArea && files.length > 0;
+  const pendingFiles = files.filter((f) => f.status === 'pending').length;
+  const successFiles = files.filter((f) => f.status === 'success').length;
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{t('captures.new')}</DialogTitle>
         </DialogHeader>
@@ -198,13 +366,17 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
         <div className="space-y-4 py-4">
           {/* Site selection */}
           <div className="space-y-2">
-            <Label>{t('captures.selectSite')}</Label>
-            <Select value={selectedSite} onValueChange={(v) => {
-              setSelectedSite(v);
-              setSelectedFloor('');
-              setSelectedArea('');
-              setSelectedPoint('');
-            }}>
+            <Label>{t('captures.selectSite')} *</Label>
+            <Select
+              value={selectedSite}
+              onValueChange={(v) => {
+                setSelectedSite(v);
+                setSelectedFloor('');
+                setSelectedArea('');
+                setSelectedPoint('');
+              }}
+              disabled={isUploading}
+            >
               <SelectTrigger>
                 <SelectValue placeholder={t('captures.selectSite')} />
               </SelectTrigger>
@@ -221,15 +393,15 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
           {/* Floor selection */}
           {selectedSite && (
             <div className="space-y-2">
-              <Label>{t('captures.selectFloor')}</Label>
-              <Select 
-                value={selectedFloor} 
+              <Label>{t('captures.selectFloor')} *</Label>
+              <Select
+                value={selectedFloor}
                 onValueChange={(v) => {
                   setSelectedFloor(v);
                   setSelectedArea('');
                   setSelectedPoint('');
                 }}
-                disabled={isLoadingFloors}
+                disabled={isLoadingFloors || isUploading}
               >
                 <SelectTrigger>
                   <SelectValue placeholder={t('captures.selectFloor')} />
@@ -248,14 +420,14 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
           {/* Area selection */}
           {selectedFloor && (
             <div className="space-y-2">
-              <Label>{t('captures.selectArea')}</Label>
-              <Select 
-                value={selectedArea} 
+              <Label>{t('captures.selectArea')} *</Label>
+              <Select
+                value={selectedArea}
                 onValueChange={(v) => {
                   setSelectedArea(v);
                   setSelectedPoint('');
                 }}
-                disabled={isLoadingAreas}
+                disabled={isLoadingAreas || isUploading}
               >
                 <SelectTrigger>
                   <SelectValue placeholder={t('captures.selectArea')} />
@@ -271,11 +443,15 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             </div>
           )}
 
-          {/* Capture point selection */}
-          {selectedArea && (
+          {/* Capture point selection (optional) */}
+          {selectedArea && capturePoints.length > 0 && (
             <div className="space-y-2">
               <Label>{t('captures.selectPoint')}</Label>
-              <Select value={selectedPoint} onValueChange={setSelectedPoint} disabled={isLoadingPoints}>
+              <Select
+                value={selectedPoint}
+                onValueChange={setSelectedPoint}
+                disabled={isLoadingPoints || isUploading}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder={t('captures.selectPoint')} />
                 </SelectTrigger>
@@ -290,6 +466,13 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             </div>
           )}
 
+          {/* No points warning */}
+          {selectedArea && capturePoints.length === 0 && !isLoadingPoints && (
+            <p className="text-sm text-muted-foreground">
+              {t('captures.noPointsCreateDefault')}
+            </p>
+          )}
+
           {/* Capture type */}
           <div className="space-y-2">
             <Label>{t('captures.captureType')}</Label>
@@ -297,6 +480,7 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
               value={captureType}
               onValueChange={(v) => setCaptureType(v as CaptureCategory)}
               className="flex gap-4"
+              disabled={isUploading}
             >
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="photo" id="photo" />
@@ -322,44 +506,34 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             </RadioGroup>
           </div>
 
-          {/* File upload */}
+          {/* Drop zone */}
           <div className="space-y-2">
-            <Label>{t('captures.upload')}</Label>
-            <div className="relative">
-              {preview ? (
-                <div className="relative rounded-lg overflow-hidden border border-border">
-                  {file?.type.startsWith('video/') ? (
-                    <video src={preview} className="w-full h-48 object-cover" />
-                  ) : (
-                    <img src={preview} alt="Preview" className="w-full h-48 object-cover" />
-                  )}
-                  <Button
-                    variant="destructive"
-                    size="icon"
-                    className="absolute top-2 right-2"
-                    onClick={() => {
-                      setFile(null);
-                      URL.revokeObjectURL(preview);
-                      setPreview(null);
-                    }}
-                  >
-                    <X className="w-4 h-4" />
-                  </Button>
-                </div>
-              ) : (
-                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 transition-colors bg-muted/30">
-                  <Upload className="w-8 h-8 text-muted-foreground mb-2" />
-                  <span className="text-sm text-muted-foreground">{t('captures.upload')}</span>
-                  <input
-                    type="file"
-                    className="hidden"
-                    accept="image/*,video/*"
-                    onChange={handleFileChange}
-                  />
-                </label>
-              )}
-            </div>
+            <Label>{t('captures.upload')} *</Label>
+            <DropZone
+              onFilesSelected={handleFilesSelected}
+              maxFiles={MAX_FILES}
+              currentFileCount={files.length}
+              disabled={isUploading}
+            />
           </div>
+
+          {/* File previews */}
+          <FilePreviewGrid
+            files={files}
+            onRemove={handleRemoveFile}
+            disabled={isUploading}
+          />
+
+          {/* Overall progress */}
+          {isUploading && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span>{t('captures.uploadProgress', { current: currentUploadIndex + 1, total: files.length })}</span>
+                <span>{overallProgress}%</span>
+              </div>
+              <Progress value={overallProgress} className="h-2" />
+            </div>
+          )}
 
           {/* Notes */}
           <div className="space-y-2">
@@ -368,26 +542,41 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder={t('captures.notesPlaceholder')}
-              rows={3}
+              rows={2}
+              disabled={isUploading}
             />
           </div>
         </div>
 
         {/* Actions */}
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={handleClose}>
-            {t('common.cancel')}
-          </Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={!isValid || createCaptureMutation.isPending}
-            className="bg-gradient-to-r from-primary to-accent"
-          >
-            {createCaptureMutation.isPending && (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+        <div className="flex justify-between items-center gap-2">
+          <div className="text-sm text-muted-foreground">
+            {files.length > 0 && (
+              <span>
+                {pendingFiles} {t('captures.remaining')}
+                {successFiles > 0 && ` • ${successFiles} ✓`}
+              </span>
             )}
-            {t('common.create')}
-          </Button>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={handleClose} disabled={isUploading}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={!isValid || isUploading}
+              className="bg-gradient-to-r from-primary to-accent"
+            >
+              {isUploading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  {t('captures.uploading')}
+                </>
+              ) : (
+                t('common.create')
+              )}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
