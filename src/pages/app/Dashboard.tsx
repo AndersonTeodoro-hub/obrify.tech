@@ -15,6 +15,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { SitesWithNCs } from '@/components/dashboard/SitesWithNCs';
+import { cn } from '@/lib/utils';
 
 export default function Dashboard() {
   const { t } = useTranslation();
@@ -88,8 +89,8 @@ export default function Dashboard() {
   if (!hasOrganizations) {
     return (
       <div className="flex flex-col items-center justify-center h-full max-w-md mx-auto text-center space-y-6">
-        <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
-          <Activity className="w-10 h-10 text-primary" />
+        <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary-100 to-accent-100 dark:from-primary-900/30 dark:to-accent-900/30 flex items-center justify-center">
+          <Activity className="w-10 h-10 text-primary-600 dark:text-primary-400" />
         </div>
         
         <div className="space-y-2">
@@ -100,8 +101,8 @@ export default function Dashboard() {
 
         <Button
           size="lg"
+          variant="accent"
           onClick={() => navigate('/app/organizations')}
-          className="bg-gradient-to-r from-primary to-accent hover:opacity-90"
         >
           <Plus className="w-5 h-5 mr-2" />
           {t('dashboard.createFirstOrg')}
@@ -110,12 +111,36 @@ export default function Dashboard() {
     );
   }
 
-  // Dashboard with data
+  // Dashboard with data - Stat cards configuration
   const statCards = [
-    { title: t('dashboard.totalSites'), value: stats?.sites || 0, icon: HardHat, color: 'text-blue-500' },
-    { title: t('dashboard.pendingCaptures'), value: stats?.captures || 0, icon: Camera, color: 'text-green-500' },
-    { title: t('dashboard.inspections'), value: stats?.inspections || 0, icon: ClipboardCheck, color: 'text-purple-500' },
-    { title: t('dashboard.nonConformities'), value: stats?.nonconformities || 0, icon: AlertTriangle, color: 'text-orange-500' },
+    { 
+      title: t('dashboard.totalSites'), 
+      value: stats?.sites || 0, 
+      icon: HardHat, 
+      iconBg: 'bg-primary-100 dark:bg-primary-900/30',
+      iconColor: 'text-primary-600 dark:text-primary-400'
+    },
+    { 
+      title: t('dashboard.pendingCaptures'), 
+      value: stats?.captures || 0, 
+      icon: Camera, 
+      iconBg: 'bg-green-100 dark:bg-green-900/30',
+      iconColor: 'text-green-600 dark:text-green-400'
+    },
+    { 
+      title: t('dashboard.inspections'), 
+      value: stats?.inspections || 0, 
+      icon: ClipboardCheck, 
+      iconBg: 'bg-accent-100 dark:bg-accent-900/30',
+      iconColor: 'text-accent-600 dark:text-accent-400'
+    },
+    { 
+      title: t('dashboard.nonConformities'), 
+      value: stats?.nonconformities || 0, 
+      icon: AlertTriangle, 
+      iconBg: 'bg-amber-100 dark:bg-amber-900/30',
+      iconColor: 'text-amber-600 dark:text-amber-400'
+    },
   ];
 
   return (
@@ -125,18 +150,25 @@ export default function Dashboard() {
         <p className="text-muted-foreground">{t('dashboard.welcomeDesc')}</p>
       </div>
 
-      {/* Stats Grid */}
+      {/* Stats Grid - Premium Design */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map((stat) => (
-          <Card key={stat.title} className="glass border-border/50">
+          <Card key={stat.title} className="group hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700 hover:-translate-y-1">
             <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">{stat.title}</p>
-                  <p className="text-3xl font-bold mt-1">{stat.value}</p>
+              <div className="flex items-start justify-between">
+                <div className="space-y-2">
+                  <p className="text-xs uppercase tracking-wider font-medium text-slate-500 dark:text-slate-400">
+                    {stat.title}
+                  </p>
+                  <p className="text-4xl font-light tracking-tight text-foreground">
+                    {stat.value}
+                  </p>
                 </div>
-                <div className={`w-12 h-12 rounded-xl bg-muted/50 flex items-center justify-center ${stat.color}`}>
-                  <stat.icon className="w-6 h-6" />
+                <div className={cn(
+                  "w-12 h-12 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110",
+                  stat.iconBg
+                )}>
+                  <stat.icon className={cn("w-6 h-6", stat.iconColor)} />
                 </div>
               </div>
             </CardContent>
@@ -146,7 +178,7 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Recent Sites */}
-        <Card className="lg:col-span-2 glass border-border/50">
+        <Card className="lg:col-span-2">
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
               <CardTitle>{t('dashboard.recentSites')}</CardTitle>
@@ -163,12 +195,12 @@ export default function Dashboard() {
                 {recentSites.map((site) => (
                   <div
                     key={site.id}
-                    className="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+                    className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer"
                     onClick={() => navigate(`/app/sites/${site.id}`)}
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                        <HardHat className="w-5 h-5 text-primary" />
+                      <div className="w-10 h-10 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
+                        <HardHat className="w-5 h-5 text-primary-600 dark:text-primary-400" />
                       </div>
                       <div>
                         <p className="font-medium">{site.name}</p>
@@ -189,7 +221,7 @@ export default function Dashboard() {
         </Card>
 
         {/* Quick Actions */}
-        <Card className="glass border-border/50">
+        <Card>
           <CardHeader>
             <CardTitle>{t('dashboard.quickActions')}</CardTitle>
           </CardHeader>
@@ -199,7 +231,7 @@ export default function Dashboard() {
               className="w-full justify-start gap-3 h-12"
               onClick={() => navigate('/app/captures')}
             >
-              <Camera className="w-5 h-5 text-green-500" />
+              <Camera className="w-5 h-5 text-green-600 dark:text-green-400" />
               {t('dashboard.newCapture')}
             </Button>
             <Button
@@ -207,7 +239,7 @@ export default function Dashboard() {
               className="w-full justify-start gap-3 h-12"
               onClick={() => navigate('/app/inspections')}
             >
-              <ClipboardCheck className="w-5 h-5 text-purple-500" />
+              <ClipboardCheck className="w-5 h-5 text-accent-600 dark:text-accent-400" />
               {t('dashboard.newInspection')}
             </Button>
             <Button
@@ -215,7 +247,7 @@ export default function Dashboard() {
               className="w-full justify-start gap-3 h-12"
               onClick={() => navigate('/app/sites')}
             >
-              <HardHat className="w-5 h-5 text-blue-500" />
+              <HardHat className="w-5 h-5 text-primary-600 dark:text-primary-400" />
               {t('sites.create')}
             </Button>
           </CardContent>
