@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ClipboardCheck, Calendar, MapPin, User, BarChart3, CheckCircle2, AlertCircle } from 'lucide-react';
+import { ArrowLeft, ClipboardCheck, Calendar, MapPin, User, BarChart3, CheckCircle2, AlertCircle, FileText, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { pt } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,7 @@ import { ChecklistItem } from '@/components/inspections/ChecklistItem';
 import { CreateNCFromItem } from '@/components/inspections/CreateNCFromItem';
 import { InspectionPhotos } from '@/components/inspections/InspectionPhotos';
 import { PhotoUploadModal } from '@/components/inspections/PhotoUploadModal';
+import { generateInspectionReport } from '@/services/pdfGenerator';
 import type { Database } from '@/integrations/supabase/types';
 
 type InspectionResult = Database['public']['Enums']['inspection_result'];
@@ -41,6 +42,37 @@ export default function InspectionDetail() {
   const [photoItemId, setPhotoItemId] = useState<string | null>(null);
   const [photoInspectionItemId, setPhotoInspectionItemId] = useState<string | null>(null);
   const [photoItemTitle, setPhotoItemTitle] = useState('');
+  
+  // PDF generation state
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+
+  // Handle PDF generation
+  const handleGeneratePDF = async () => {
+    if (!inspectionId) return;
+    
+    setIsGeneratingPDF(true);
+    try {
+      const blob = await generateInspectionReport(inspectionId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `relatorio-inspecao-${inspectionId.slice(0, 8)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast({ title: t('reports.downloadSuccess') });
+    } catch (error) {
+      console.error('PDF generation error:', error);
+      toast({ 
+        title: t('common.error'), 
+        description: String(error), 
+        variant: 'destructive' 
+      });
+    } finally {
+      setIsGeneratingPDF(false);
+    }
+  };
 
   // Fetch inspection with related data
   const { data: inspection, isLoading } = useQuery({
@@ -435,6 +467,22 @@ export default function InspectionDetail() {
           </div>
           <p className="text-muted-foreground">{inspection.sites?.name}</p>
         </div>
+        
+        {/* PDF Button - only show when completed */}
+        {isReadOnly && (
+          <Button 
+            variant="outline" 
+            onClick={handleGeneratePDF}
+            disabled={isGeneratingPDF}
+          >
+            {isGeneratingPDF ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <FileText className="w-4 h-4 mr-2" />
+            )}
+            {isGeneratingPDF ? t('reports.generating') : t('reports.downloadPdf')}
+          </Button>
+        )}
       </div>
 
       {/* Read-only Alert */}
