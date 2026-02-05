@@ -8,9 +8,8 @@ import {
   Trash2, 
   AlertTriangle,
   Info,
-  ZoomIn,
-  ZoomOut,
-  Loader2
+  Loader2,
+  Sparkles
 } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -24,13 +23,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { toast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { ImageViewerWithZoom } from './ImageViewerWithZoom';
 import { PanoramaViewer } from './PanoramaViewer';
 import { CaptureInfoPanel } from './CaptureInfoPanel';
-import { CreateNCModal } from './CreateNCModal';
-import type { CaptureWithDetails, CaptureCategory } from '@/types/captures';
+import { CreateNCModal, type NCPrefillData } from './CreateNCModal';
+import { AIAnalysisPanel } from './AIAnalysisPanel';
+import type { CaptureWithDetails, AIAnalysisResult, AIDetection } from '@/types/captures';
 import { SOURCE_TO_CATEGORY } from '@/types/captures';
 import { cn } from '@/lib/utils';
 
@@ -59,6 +65,14 @@ export function CaptureViewer({
   const [isDownloading, setIsDownloading] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [isLoadingUrl, setIsLoadingUrl] = useState(false);
+  
+  // AI Analysis states
+  const [showAIPanel, setShowAIPanel] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [aiResults, setAiResults] = useState<AIAnalysisResult | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [ncPrefillData, setNcPrefillData] = useState<NCPrefillData | null>(null);
+  const [lastAnalysisType, setLastAnalysisType] = useState<'defects' | 'rebar' | 'general'>('defects');
 
   const currentIndex = capture ? captures.findIndex((c) => c.id === capture.id) : -1;
   const hasPrev = currentIndex > 0;
@@ -216,11 +230,93 @@ export function CaptureViewer({
     }
   };
 
+  // AI Analysis handler
+  const handleAIAnalysis = async (analysisType: 'defects' | 'rebar' | 'general') => {
+    if (!capture) return;
+    
+    setIsAnalyzing(true);
+    setAiError(null);
+    setShowAIPanel(true);
+    setShowInfoPanel(false);
+    setLastAnalysisType(analysisType);
+    
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-image-analysis`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({
+            capture_id: capture.id,
+            analysis_type: analysisType,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Analysis failed');
+      }
+
+      const results = await response.json();
+      setAiResults(results);
+      
+      // Mark capture as analyzed
+      await supabase
+        .from('captures')
+        .update({ 
+          ai_analyzed: true, 
+          ai_analyzed_at: new Date().toISOString() 
+        })
+        .eq('id', capture.id);
+
+      toast({
+        title: t('captures.ai.analysisComplete'),
+        description: `${results.detections.length} ${t('captures.ai.detections').toLowerCase()}`,
+      });
+        
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      setAiError(errorMessage);
+      toast({
+        title: t('captures.ai.analysisError'),
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleCreateNCFromDetection = (detection: AIDetection) => {
+    const severityMap: Record<string, string> = {
+      critical: 'critical',
+      major: 'high',
+      minor: 'medium',
+      observation: 'low',
+    };
+    
+    setNcPrefillData({
+      title: `${detection.type}: ${detection.description.slice(0, 50)}`,
+      description: `${detection.description}\n\n${t('captures.ai.location')}: ${detection.location}\n${t('captures.ai.confidence')}: ${Math.round(detection.confidence * 100)}%`,
+      severity: severityMap[detection.severity] || 'medium',
+    });
+    setShowNCModal(true);
+  };
+
+  const handleRetryAnalysis = () => {
+    handleAIAnalysis(lastAnalysisType);
+  };
+
   if (!capture) return null;
 
   const category = SOURCE_TO_CATEGORY[capture.source_type];
   const isPanorama = category === 'panorama';
   const isVideo = category === 'video';
+  const canAnalyze = !isPanorama && !isVideo && imageUrl;
 
   return (
     <>
@@ -235,11 +331,46 @@ export function CaptureViewer({
 
             {/* Right: Actions */}
             <div className="flex items-center gap-2">
+              {/* AI Analysis Dropdown */}
+              {canAnalyze && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-white hover:bg-white/20"
+                      disabled={isAnalyzing}
+                      title={t('captures.ai.analyzeWithAI')}
+                    >
+                      {isAnalyzing ? (
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      ) : (
+                        <Sparkles className="w-5 h-5" />
+                      )}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => handleAIAnalysis('defects')}>
+                      {t('captures.ai.detectDefects')}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleAIAnalysis('rebar')}>
+                      {t('captures.ai.verifyRebar')}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleAIAnalysis('general')}>
+                      {t('captures.ai.generalAnalysis')}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+
               <Button
                 variant="ghost"
                 size="icon"
                 className="text-white hover:bg-white/20"
-                onClick={() => setShowInfoPanel((prev) => !prev)}
+                onClick={() => {
+                  setShowInfoPanel((prev) => !prev);
+                  setShowAIPanel(false);
+                }}
                 title={showInfoPanel ? t('captures.viewer.hideInfo') : t('captures.viewer.showInfo')}
               >
                 <Info className="w-5 h-5" />
@@ -264,7 +395,10 @@ export function CaptureViewer({
                 variant="ghost"
                 size="icon"
                 className="text-white hover:bg-white/20"
-                onClick={() => setShowNCModal(true)}
+                onClick={() => {
+                  setNcPrefillData(null);
+                  setShowNCModal(true);
+                }}
                 title={t('captures.viewer.createNC')}
               >
                 <AlertTriangle className="w-5 h-5" />
@@ -273,7 +407,7 @@ export function CaptureViewer({
               <Button
                 variant="ghost"
                 size="icon"
-                className="text-red-400 hover:bg-red-500/20 hover:text-red-300"
+                className="text-destructive hover:bg-destructive/20"
                 onClick={() => setShowDeleteDialog(true)}
                 title={t('captures.viewer.deleteCapture')}
               >
@@ -308,7 +442,7 @@ export function CaptureViewer({
               size="icon"
               className="absolute right-4 top-1/2 -translate-y-1/2 z-40 text-white hover:bg-white/20 h-14 w-14"
               onClick={goToNext}
-              style={{ right: showInfoPanel ? '336px' : '16px' }}
+              style={{ right: (showInfoPanel || showAIPanel) ? '336px' : '16px' }}
             >
               <ChevronRight className="w-10 h-10" />
             </Button>
@@ -318,7 +452,7 @@ export function CaptureViewer({
           <div 
             className={cn(
               "flex h-full transition-all duration-300",
-              showInfoPanel ? "mr-80" : ""
+              (showInfoPanel || showAIPanel) ? "mr-80" : ""
             )}
           >
             <div className="flex-1 flex items-center justify-center p-16 pt-20 pb-8">
@@ -352,17 +486,30 @@ export function CaptureViewer({
             </div>
 
             {/* Info Panel */}
-            {showInfoPanel && (
+            {showInfoPanel && !showAIPanel && (
               <CaptureInfoPanel
                 capture={capture}
                 onClose={() => setShowInfoPanel(false)}
                 className="absolute right-0 top-0 bottom-0"
               />
             )}
+
+            {/* AI Analysis Panel */}
+            {showAIPanel && (
+              <AIAnalysisPanel
+                isLoading={isAnalyzing}
+                results={aiResults}
+                error={aiError}
+                onClose={() => setShowAIPanel(false)}
+                onCreateNC={handleCreateNCFromDetection}
+                onRetry={handleRetryAnalysis}
+                className="absolute right-0 top-0 bottom-0"
+              />
+            )}
           </div>
 
-          {/* Bottom info bar - only when info panel is hidden */}
-          {!showInfoPanel && (
+          {/* Bottom info bar - only when panels are hidden */}
+          {!showInfoPanel && !showAIPanel && (
             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 pt-12">
               <div className="max-w-2xl mx-auto text-center text-white">
                 <h3 className="font-semibold">{capture.capture_point.code}</h3>
@@ -405,7 +552,11 @@ export function CaptureViewer({
         <CreateNCModal
           capture={capture}
           open={showNCModal}
-          onOpenChange={setShowNCModal}
+          onOpenChange={(open) => {
+            setShowNCModal(open);
+            if (!open) setNcPrefillData(null);
+          }}
+          prefillData={ncPrefillData}
         />
       )}
     </>

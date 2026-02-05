@@ -73,3 +73,27 @@ export const CATEGORY_SOURCES: Record<CaptureCategory, CaptureSource[]> = {
   video: ['drone_video', 'timelapse'],
   panorama: ['phone_360', 'phone_360_auto'],
 };
+
+// AI Analysis types
+export interface AIDetection {
+  type: string;
+  description: string;
+  severity: 'critical' | 'major' | 'minor' | 'observation';
+  location: string;
+  confidence: number;
+  measurements?: {
+    estimated_width_mm?: number;
+    estimated_length_cm?: number;
+    estimated_spacing_cm?: number;
+  };
+}
+
+export interface AIAnalysisResult {
+  success: boolean;
+  capture_id: string;
+  analysis_type: 'defects' | 'rebar' | 'general';
+  detections: AIDetection[];
+  overall_assessment: string;
+  recommendations: string[];
+  results_saved: number;
+}

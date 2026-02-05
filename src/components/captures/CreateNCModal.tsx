@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -41,25 +41,49 @@ const ncSchema = z.object({
 
 type NCFormData = z.infer<typeof ncSchema>;
 
+export interface NCPrefillData {
+  title: string;
+  description: string;
+  severity: string;
+}
+
 interface CreateNCModalProps {
   capture: CaptureWithDetails;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess?: () => void;
+  prefillData?: NCPrefillData | null;
 }
 
-export function CreateNCModal({ capture, open, onOpenChange, onSuccess }: CreateNCModalProps) {
+export function CreateNCModal({ capture, open, onOpenChange, onSuccess, prefillData }: CreateNCModalProps) {
   const { t } = useTranslation();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const form = useForm<NCFormData>({
     resolver: zodResolver(ncSchema),
     defaultValues: {
-      title: '',
-      description: '',
-      severity: 'medium',
+      title: prefillData?.title || '',
+      description: prefillData?.description || '',
+      severity: (prefillData?.severity as NCFormData['severity']) || 'medium',
     },
   });
+
+  // Reset form when prefillData changes
+  useEffect(() => {
+    if (prefillData) {
+      form.reset({
+        title: prefillData.title,
+        description: prefillData.description,
+        severity: (prefillData.severity as NCFormData['severity']) || 'medium',
+      });
+    } else if (open) {
+      form.reset({
+        title: '',
+        description: '',
+        severity: 'medium',
+      });
+    }
+  }, [prefillData, open, form]);
 
   const onSubmit = async (data: NCFormData) => {
     setIsSubmitting(true);
