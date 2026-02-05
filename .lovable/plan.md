@@ -1,199 +1,94 @@
 
-# Plano: Gestao Completa de Pisos, Areas e Pontos
+# Plano: Sistema de Templates de Checklist para Inspecoes
 
 ## Resumo
-Implementar gestao completa da estrutura hierarquica na tab Estrutura do SiteDetail, incluindo modais de edicao, confirmacao de eliminacao, campos adicionais (tipo de area, coordenadas de ponto) e drag-and-drop para reordenar pisos.
+Criar um sistema completo de gestao de templates de checklist para inspeccoes, acessivel atraves das Definicoes, com editor visual, drag-and-drop para reordenar itens, e 3 templates padrao pre-configurados.
 
 ---
 
-## Analise do Estado Actual
+## Arquitectura do Sistema
 
-### O que ja existe:
-- Arvore expansivel com Accordion (Pisos > Areas > Pontos)
-- Modais basicos para adicionar Piso, Area e Ponto
-- Mutations para eliminar (sem confirmacao)
-- Botoes de editar que nao fazem nada
-
-### O que falta implementar:
-1. Campo **Descricao** no modal de Piso
-2. Campo **Tipo** (dropdown) no modal de Area
-3. Campos **Coordenadas X/Y** no modal de Ponto
-4. Modais de **edicao** para os tres niveis
-5. **Confirmacao** antes de eliminar
-6. **Drag-and-drop** para reordenar pisos
+```text
+Settings (links para sub-paginas)
+└── InspectionTemplates.tsx
+    ├── Lista de Templates
+    │   ├── Nome
+    │   ├── Categoria
+    │   ├── Nº de Itens
+    │   └── Ultima Utilizacao
+    │
+    └── Template Editor (Modal/Drawer)
+        ├── Nome do Template
+        ├── Categoria (Select)
+        └── Lista de Itens (Drag-and-drop)
+            ├── Texto da verificacao
+            ├── Tipo (checkbox/texto/numero)
+            └── Obrigatorio (sim/nao)
+```
 
 ---
 
 ## Alteracoes de Base de Dados
 
-### Migracao 1: Adicionar coluna `description` a tabela floors
+### Migracao: Adicionar colunas necessarias
+
+A tabela `inspection_templates` ja existe mas precisa de:
+- `category` (text) - Categoria do template
+
+A tabela `inspection_template_items` ja existe mas precisa de:
+- `item_type` (text) - Tipo de item: checkbox, text, number
+- `is_required` (boolean) - Se o item e obrigatorio
+- `order_index` (integer) - Ordem do item na lista
+
 ```sql
-ALTER TABLE floors ADD COLUMN description text;
-```
+-- Adicionar categoria aos templates
+ALTER TABLE inspection_templates 
+ADD COLUMN IF NOT EXISTS category text DEFAULT 'structure';
 
-### Migracao 2: Adicionar coluna `type` a tabela areas
-```sql
-ALTER TABLE areas ADD COLUMN type text DEFAULT 'other';
-```
+-- Adicionar campos aos itens
+ALTER TABLE inspection_template_items 
+ADD COLUMN IF NOT EXISTS item_type text DEFAULT 'checkbox',
+ADD COLUMN IF NOT EXISTS is_required boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS order_index integer DEFAULT 0;
 
-Tipos disponiveis (validacao no frontend):
-- `room` (Sala)
-- `corridor` (Corredor)
-- `bathroom` (WC)
-- `kitchen` (Cozinha)
-- `balcony` (Varanda)
-- `other` (Outro)
+-- Inserir 3 templates padrao
+INSERT INTO inspection_templates (id, name, org_id, category, version) VALUES
+('00000000-0000-0000-0000-000000000001', 'Pre-Betonagem Laje', 
+ (SELECT org_id FROM memberships LIMIT 1), 'structure', 1),
+('00000000-0000-0000-0000-000000000002', 'Pre-Betonagem Pilar',
+ (SELECT org_id FROM memberships LIMIT 1), 'structure', 1),
+('00000000-0000-0000-0000-000000000003', 'Rececao de Betao',
+ (SELECT org_id FROM memberships LIMIT 1), 'structure', 1);
 
----
+-- Itens para Pre-Betonagem Laje
+INSERT INTO inspection_template_items (template_id, item_code, title, item_type, is_required, order_index) VALUES
+('00000000-0000-0000-0000-000000000001', 'PBL-01', 'Cofragem limpa e isenta de residuos', 'checkbox', true, 0),
+('00000000-0000-0000-0000-000000000001', 'PBL-02', 'Armaduras posicionadas conforme projeto', 'checkbox', true, 1),
+('00000000-0000-0000-0000-000000000001', 'PBL-03', 'Espaçadores colocados', 'checkbox', true, 2),
+('00000000-0000-0000-0000-000000000001', 'PBL-04', 'Negativos marcados', 'checkbox', true, 3),
+('00000000-0000-0000-0000-000000000001', 'PBL-05', 'Instalacoes electricas embebidas', 'checkbox', false, 4),
+('00000000-0000-0000-0000-000000000001', 'PBL-06', 'Instalacoes hidraulicas embebidas', 'checkbox', false, 5),
+('00000000-0000-0000-0000-000000000001', 'PBL-07', 'Observacoes', 'text', false, 6);
 
-## Componentes a Modificar/Criar
+-- Itens para Pre-Betonagem Pilar
+INSERT INTO inspection_template_items (template_id, item_code, title, item_type, is_required, order_index) VALUES
+('00000000-0000-0000-0000-000000000002', 'PBP-01', 'Cofragem alinhada e aprumada', 'checkbox', true, 0),
+('00000000-0000-0000-0000-000000000002', 'PBP-02', 'Armaduras conforme projeto', 'checkbox', true, 1),
+('00000000-0000-0000-0000-000000000002', 'PBP-03', 'Estribos espaçados corretamente', 'checkbox', true, 2),
+('00000000-0000-0000-0000-000000000002', 'PBP-04', 'Recobrimento verificado', 'checkbox', true, 3),
+('00000000-0000-0000-0000-000000000002', 'PBP-05', 'Arranques para laje/viga preparados', 'checkbox', true, 4),
+('00000000-0000-0000-0000-000000000002', 'PBP-06', 'Observacoes', 'text', false, 5);
 
-### 1. Modificar `AddFloorModal.tsx`
-Adicionar campo Descricao (textarea opcional)
-
-**Campos:**
-- Nome (obrigatorio)
-- Nivel/Ordem (numero)
-- Descricao (opcional)
-
-### 2. Modificar `AddAreaModal.tsx`
-Adicionar dropdown de Tipo
-
-**Campos:**
-- Nome (obrigatorio)
-- Tipo (select com opcoes traduzidas)
-
-### 3. Modificar `AddPointModal.tsx`
-Adicionar campos de coordenadas
-
-**Campos:**
-- Codigo (obrigatorio)
-- Descricao (opcional)
-- Posicao X (numero, opcional)
-- Posicao Y (numero, opcional)
-
-### 4. Criar `EditFloorModal.tsx`
-Modal para editar piso existente
-
-**Props:**
-- floor: Floor object
-- open, onOpenChange, onSuccess
-
-**Logica:**
-- Pre-preencher campos com dados actuais
-- Mutation de UPDATE
-
-### 5. Criar `EditAreaModal.tsx`
-Modal para editar area existente
-
-### 6. Criar `EditPointModal.tsx`
-Modal para editar ponto existente
-
-### 7. Criar `DeleteConfirmDialog.tsx`
-Componente reutilizavel para confirmacao de eliminacao
-
-**Props:**
-- open, onOpenChange
-- title, description
-- onConfirm
-- isPending (loading state)
-
-### 8. Modificar `SiteStructureTab.tsx`
-
-**Novas funcionalidades:**
-1. Estado para modais de edicao
-2. Estado para dialogo de confirmacao
-3. Integracao com drag-and-drop (dnd-kit ou nativo HTML5)
-4. Handler para reordenar pisos (actualizar campo `level`)
-
-**Drag-and-drop:**
-- Usar biblioteca `@dnd-kit/core` (ja pode instalar)
-- Ou implementar com HTML5 Drag and Drop API (zero deps)
-- Ao soltar, actualizar o campo `level` de todos os pisos afectados
-
----
-
-## Estrutura do Drag-and-Drop
-
-```text
-Implementacao com HTML5 Drag API:
-- onDragStart: guardar ID do piso a mover
-- onDragOver: permitir drop, highlight visual
-- onDragEnd: calcular nova ordem, batch update levels
-```
-
-**Mutation de reordenacao:**
-```text
-UPDATE floors SET level = X WHERE id = 'floor1';
-UPDATE floors SET level = Y WHERE id = 'floor2';
-...
-```
-
----
-
-## Traducoes a Adicionar
-
-```text
-siteDetail.floorDescription: "Descricao"
-siteDetail.floorDescriptionPlaceholder: "Descricao opcional do piso"
-siteDetail.floorUpdated: "Piso atualizado com sucesso"
-siteDetail.editFloor: "Editar Piso"
-
-siteDetail.areaType: "Tipo de Area"
-siteDetail.areaTypes.room: "Sala"
-siteDetail.areaTypes.corridor: "Corredor"
-siteDetail.areaTypes.bathroom: "WC"
-siteDetail.areaTypes.kitchen: "Cozinha"
-siteDetail.areaTypes.balcony: "Varanda"
-siteDetail.areaTypes.other: "Outro"
-siteDetail.areaUpdated: "Area atualizada com sucesso"
-siteDetail.editArea: "Editar Area"
-
-siteDetail.pointPosX: "Posicao X"
-siteDetail.pointPosY: "Posicao Y"
-siteDetail.pointPosHint: "Coordenadas na planta baixa"
-siteDetail.pointUpdated: "Ponto atualizado com sucesso"
-siteDetail.editPoint: "Editar Ponto"
-
-siteDetail.deleteConfirmTitle: "Confirmar Eliminacao"
-siteDetail.deleteFloorConfirm: "Tem a certeza que deseja eliminar o piso \"{{name}}\"? Todas as areas e pontos serao eliminados."
-siteDetail.deleteAreaConfirm: "Tem a certeza que deseja eliminar a area \"{{name}}\"? Todos os pontos serao eliminados."
-siteDetail.deletePointConfirm: "Tem a certeza que deseja eliminar o ponto \"{{code}}\"?"
-siteDetail.dragToReorder: "Arraste para reordenar"
-```
-
----
-
-## Fluxo de Utilizacao
-
-### Adicionar Estrutura:
-```text
-1. Clicar "+ Piso" → Modal com nome, nivel, descricao
-2. Expandir piso → Clicar "+ Area" → Modal com nome, tipo
-3. Expandir area → Clicar "+ Ponto" → Modal com codigo, descricao, coords
-```
-
-### Editar:
-```text
-1. Menu (tres pontos) em qualquer item
-2. Selecionar "Editar"
-3. Modal pre-preenchido abre
-4. Guardar alteracoes
-```
-
-### Eliminar:
-```text
-1. Menu (tres pontos) em qualquer item
-2. Selecionar "Eliminar"
-3. Dialog de confirmacao aparece
-4. Confirmar → Item eliminado com toast
-```
-
-### Reordenar Pisos:
-```text
-1. Arrastar icone de grip no inicio do piso
-2. Soltar na nova posicao
-3. Niveis actualizados automaticamente
+-- Itens para Rececao de Betao
+INSERT INTO inspection_template_items (template_id, item_code, title, item_type, is_required, order_index) VALUES
+('00000000-0000-0000-0000-000000000003', 'RB-01', 'Guia de remessa conforme', 'checkbox', true, 0),
+('00000000-0000-0000-0000-000000000003', 'RB-02', 'Classe de betao', 'text', true, 1),
+('00000000-0000-0000-0000-000000000003', 'RB-03', 'Slump (mm)', 'number', true, 2),
+('00000000-0000-0000-0000-000000000003', 'RB-04', 'Hora de saida da central', 'text', true, 3),
+('00000000-0000-0000-0000-000000000003', 'RB-05', 'Hora de chegada a obra', 'text', true, 4),
+('00000000-0000-0000-0000-000000000003', 'RB-06', 'Provetes recolhidos', 'checkbox', false, 5),
+('00000000-0000-0000-0000-000000000003', 'RB-07', 'Numero de provetes', 'number', false, 6),
+('00000000-0000-0000-0000-000000000003', 'RB-08', 'Observacoes', 'text', false, 7);
 ```
 
 ---
@@ -202,27 +97,282 @@ siteDetail.dragToReorder: "Arraste para reordenar"
 
 | Ficheiro | Accao |
 |----------|-------|
-| src/components/sites/AddFloorModal.tsx | Modificar (adicionar descricao) |
-| src/components/sites/AddAreaModal.tsx | Modificar (adicionar tipo) |
-| src/components/sites/AddPointModal.tsx | Modificar (adicionar coords) |
-| src/components/sites/EditFloorModal.tsx | Criar |
-| src/components/sites/EditAreaModal.tsx | Criar |
-| src/components/sites/EditPointModal.tsx | Criar |
-| src/components/sites/DeleteConfirmDialog.tsx | Criar |
-| src/components/sites/SiteStructureTab.tsx | Modificar (integracao) |
+| src/pages/app/InspectionTemplates.tsx | Criar |
+| src/components/templates/TemplateEditor.tsx | Criar |
+| src/components/templates/TemplateItemEditor.tsx | Criar |
+| src/components/templates/TemplateCard.tsx | Criar |
+| src/pages/app/Settings.tsx | Modificar (adicionar link) |
+| src/App.tsx | Adicionar rota |
 | src/i18n/locales/pt.json | Adicionar chaves |
 | src/i18n/locales/en.json | Adicionar chaves |
 
 ---
 
+## Componentes Detalhados
+
+### 1. InspectionTemplates.tsx (Pagina Principal)
+
+**Layout:**
+```text
+<div className="space-y-6">
+  <Header>
+    <h1>Templates de Inspecao</h1>
+    <Button>+ Novo Template</Button>
+  </Header>
+  
+  <Grid>
+    {templates.map(t => <TemplateCard template={t} />)}
+  </Grid>
+  
+  <TemplateEditor open={...} />
+</div>
+```
+
+**Queries:**
+- Lista de templates da organizacao do utilizador
+- Contagem de itens por template
+- Ultima utilizacao (COUNT inspections WHERE template_id)
+
+### 2. TemplateCard.tsx
+
+**Informacoes exibidas:**
+- Nome do template
+- Badge de categoria (cor diferente por categoria)
+- Numero de itens
+- Ultima utilizacao (data ou "Nunca utilizado")
+
+**Accoes:**
+- Editar (abre editor)
+- Duplicar
+- Eliminar (com confirmacao)
+
+### 3. TemplateEditor.tsx (Sheet/Dialog Grande)
+
+**Estrutura:**
+```text
+<Sheet side="right" className="w-[600px]">
+  <Header>
+    <Input value={name} placeholder="Nome do template" />
+  </Header>
+  
+  <Content>
+    <Select value={category}>
+      <Option value="structure">Estrutura</Option>
+      <Option value="finishes">Acabamentos</Option>
+      <Option value="installations">Instalacoes</Option>
+      <Option value="safety">Seguranca</Option>
+    </Select>
+    
+    <Separator />
+    
+    <div className="flex justify-between">
+      <h3>Itens do Checklist</h3>
+      <Button>+ Adicionar Item</Button>
+    </div>
+    
+    <DraggableList>
+      {items.map(item => (
+        <TemplateItemEditor 
+          item={item}
+          onUpdate={...}
+          onRemove={...}
+        />
+      ))}
+    </DraggableList>
+  </Content>
+  
+  <Footer>
+    <Button variant="outline">Cancelar</Button>
+    <Button>Guardar Template</Button>
+  </Footer>
+</Sheet>
+```
+
+### 4. TemplateItemEditor.tsx
+
+**Cada item do checklist:**
+```text
+<div className="flex items-center gap-3 p-3 border rounded-lg">
+  <GripVertical className="cursor-grab" /> // Para drag
+  
+  <Input 
+    value={item.title} 
+    placeholder="Texto da verificacao" 
+    className="flex-1"
+  />
+  
+  <Select value={item.item_type}>
+    <Option value="checkbox">Checkbox</Option>
+    <Option value="text">Texto</Option>
+    <Option value="number">Numero</Option>
+  </Select>
+  
+  <Checkbox 
+    checked={item.is_required} 
+    label="Obrigatorio"
+  />
+  
+  <Button variant="ghost" size="icon" onClick={onRemove}>
+    <Trash2 />
+  </Button>
+</div>
+```
+
+### 5. Modificar Settings.tsx
+
+Adicionar card/link para Templates:
+```text
+<Card className="cursor-pointer hover:border-primary/50">
+  <CardHeader>
+    <ClipboardList className="text-primary" />
+    <CardTitle>Templates de Inspecao</CardTitle>
+    <CardDescription>Gerir checklists padrao</CardDescription>
+  </CardHeader>
+</Card>
+```
+
+---
+
+## Drag-and-Drop para Itens
+
+Reutilizar o padrao ja implementado em SiteStructureTab.tsx:
+
+```text
+const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+
+const handleDragStart = (e: DragEvent, itemId: string) => {
+  setDraggedItemId(itemId);
+  e.dataTransfer.effectAllowed = 'move';
+};
+
+const handleDrop = (e: DragEvent, targetItemId: string) => {
+  // Reordenar items
+  // Actualizar order_index de todos os itens afectados
+};
+```
+
+---
+
+## Traducoes a Adicionar
+
+```text
+templates.title: "Templates de Inspecao"
+templates.subtitle: "Gerir checklists padrao para fiscalizacoes"
+templates.new: "Novo Template"
+templates.edit: "Editar Template"
+templates.name: "Nome do Template"
+templates.namePlaceholder: "Ex: Pre-Betonagem Laje"
+templates.category: "Categoria"
+templates.categories.structure: "Estrutura"
+templates.categories.finishes: "Acabamentos"
+templates.categories.installations: "Instalacoes"
+templates.categories.safety: "Seguranca"
+templates.items: "Itens"
+templates.addItem: "Adicionar Item"
+templates.itemText: "Texto da verificacao"
+templates.itemType: "Tipo"
+templates.itemTypes.checkbox: "Checkbox"
+templates.itemTypes.text: "Texto"
+templates.itemTypes.number: "Numero"
+templates.required: "Obrigatorio"
+templates.lastUsed: "Ultima utilizacao"
+templates.neverUsed: "Nunca utilizado"
+templates.noTemplates: "Ainda nao existem templates"
+templates.createFirst: "Crie o seu primeiro template de inspeccao"
+templates.created: "Template criado com sucesso"
+templates.updated: "Template atualizado com sucesso"
+templates.deleted: "Template eliminado com sucesso"
+templates.duplicate: "Duplicar"
+templates.deleteConfirm: "Tem a certeza que deseja eliminar o template \"{{name}}\"?"
+templates.dragToReorder: "Arraste para reordenar os itens"
+```
+
+---
+
+## Rota
+
+Adicionar em App.tsx:
+```text
+<Route path="settings/templates" element={<InspectionTemplates />} />
+```
+
+---
+
+## Fluxo de Utilizacao
+
+```text
+1. User vai a Definicoes
+   ↓
+2. Clica em "Templates de Inspecao"
+   ↓
+3. Ve lista de templates (incluindo os 3 padrao)
+   ↓
+4. Clica em "+ Novo Template" ou edita existente
+   ↓
+5. Editor abre com:
+   - Campo nome
+   - Dropdown categoria
+   - Lista de itens arrastavel
+   ↓
+6. Adiciona/remove/reordena itens
+   ↓
+7. Guarda template
+```
+
+---
+
+## Categorias e Cores
+
+| Categoria | Codigo | Cor Badge |
+|-----------|--------|-----------|
+| Estrutura | structure | blue |
+| Acabamentos | finishes | amber |
+| Instalacoes | installations | green |
+| Seguranca | safety | red |
+
+---
+
 ## Consideracoes Tecnicas
 
-1. **Migracoes**: Adicionar `description` a floors e `type` a areas nao quebra nada existente (nullable)
+1. **RLS**: Templates filtrados por org_id do utilizador (ja existe policy)
 
-2. **Cascading Delete**: A BD ja deve ter ON DELETE CASCADE configurado. Confirmar antes de implementar UI.
+2. **Templates Padrao**: Inseridos via migracao para a primeira organizacao do utilizador. Alternativa: seeding manual ou criar quando nao existem templates.
 
-3. **Drag-and-drop**: Usar HTML5 nativo para evitar dependencias extra. Alternativa: @dnd-kit se precisar de features avancadas.
+3. **Validacao**: Nome obrigatorio, pelo menos 1 item
 
-4. **Performance**: Reordenacao faz multiple UPDATEs - considerar transaccao ou batch na Edge Function futuramente.
+4. **Performance**: Usar React Query com optimistic updates para reordenacao
 
-5. **Validacao**: Tipo de area validado no frontend (lista fixa de opcoes).
+5. **Duplicar Template**: Criar copia com nome + " (Copia)" e duplicar todos os itens
+
+6. **Ultima Utilizacao**: Query que conta inspeccoes por template_id e retorna MAX(created_at)
+
+---
+
+## Templates Padrao Detalhados
+
+### Pre-Betonagem Laje
+- Cofragem limpa e isenta de residuos (checkbox, obrigatorio)
+- Armaduras posicionadas conforme projeto (checkbox, obrigatorio)
+- Espacadores colocados (checkbox, obrigatorio)
+- Negativos marcados (checkbox, obrigatorio)
+- Instalacoes electricas embebidas (checkbox)
+- Instalacoes hidraulicas embebidas (checkbox)
+- Observacoes (texto)
+
+### Pre-Betonagem Pilar
+- Cofragem alinhada e aprumada (checkbox, obrigatorio)
+- Armaduras conforme projeto (checkbox, obrigatorio)
+- Estribos espacados corretamente (checkbox, obrigatorio)
+- Recobrimento verificado (checkbox, obrigatorio)
+- Arranques para laje/viga preparados (checkbox, obrigatorio)
+- Observacoes (texto)
+
+### Rececao de Betao
+- Guia de remessa conforme (checkbox, obrigatorio)
+- Classe de betao (texto, obrigatorio)
+- Slump em mm (numero, obrigatorio)
+- Hora de saida da central (texto, obrigatorio)
+- Hora de chegada a obra (texto, obrigatorio)
+- Provetes recolhidos (checkbox)
+- Numero de provetes (numero)
+- Observacoes (texto)
