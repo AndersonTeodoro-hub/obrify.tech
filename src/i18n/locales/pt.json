@@ -331,6 +331,42 @@
     "themeSystem": "Sistema",
     "save": "Guardar Alterações"
   },
+  "templates": {
+    "title": "Templates de Inspeção",
+    "subtitle": "Gerir checklists padrão para fiscalizações",
+    "new": "Novo Template",
+    "edit": "Editar Template",
+    "name": "Nome do Template",
+    "namePlaceholder": "Ex: Pré-Betonagem Laje",
+    "category": "Categoria",
+    "categories": {
+      "structure": "Estrutura",
+      "finishes": "Acabamentos",
+      "installations": "Instalações",
+      "safety": "Segurança"
+    },
+    "items": "itens",
+    "addItem": "Adicionar Item",
+    "itemText": "Texto da verificação",
+    "itemType": "Tipo",
+    "itemTypes": {
+      "checkbox": "Checkbox",
+      "text": "Texto",
+      "number": "Número"
+    },
+    "required": "Obrigatório",
+    "lastUsed": "Última utilização",
+    "neverUsed": "Nunca utilizado",
+    "noTemplates": "Ainda não existem templates",
+    "noItems": "Adicione itens ao checklist",
+    "createFirst": "Crie o seu primeiro template de inspeção",
+    "created": "Template criado com sucesso",
+    "updated": "Template atualizado com sucesso",
+    "deleted": "Template eliminado com sucesso",
+    "duplicate": "Duplicar",
+    "deleteConfirm": "Tem a certeza que deseja eliminar o template \"{{name}}\"?",
+    "dragToReorder": "Arraste para reordenar os itens"
+  },
   "languages": {
     "pt": "Português",
     "en": "English",

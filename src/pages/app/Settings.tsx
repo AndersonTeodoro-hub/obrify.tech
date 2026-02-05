@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/hooks/use-auth';
-import { Settings as SettingsIcon, User, Bell, Palette, Globe, Moon, Sun, Monitor } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Settings as SettingsIcon, User, Bell, Palette, Globe, Moon, Sun, Monitor, ClipboardList } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -25,6 +26,7 @@ export default function Settings() {
   const { t, i18n } = useTranslation();
   const { user } = useAuth();
   const { theme, setTheme } = useTheme();
+  const navigate = useNavigate();
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -32,6 +34,24 @@ export default function Settings() {
         <h1 className="text-2xl font-bold">{t('settings.title')}</h1>
         <p className="text-muted-foreground">{t('settings.subtitle')}</p>
       </div>
+
+      {/* Inspection Templates Section */}
+      <Card 
+        className="glass border-border/50 cursor-pointer hover:border-primary/50 transition-colors"
+        onClick={() => navigate('/app/settings/templates')}
+      >
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+              <ClipboardList className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <CardTitle className="text-lg">{t('templates.title')}</CardTitle>
+              <CardDescription>{t('templates.subtitle')}</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
 
       {/* Profile Section */}
       <Card className="glass border-border/50">

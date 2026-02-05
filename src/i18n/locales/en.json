@@ -331,6 +331,42 @@
     "themeSystem": "System",
     "save": "Save Changes"
   },
+  "templates": {
+    "title": "Inspection Templates",
+    "subtitle": "Manage standard checklists for inspections",
+    "new": "New Template",
+    "edit": "Edit Template",
+    "name": "Template Name",
+    "namePlaceholder": "E.g., Pre-Concreting Slab",
+    "category": "Category",
+    "categories": {
+      "structure": "Structure",
+      "finishes": "Finishes",
+      "installations": "Installations",
+      "safety": "Safety"
+    },
+    "items": "items",
+    "addItem": "Add Item",
+    "itemText": "Verification text",
+    "itemType": "Type",
+    "itemTypes": {
+      "checkbox": "Checkbox",
+      "text": "Text",
+      "number": "Number"
+    },
+    "required": "Required",
+    "lastUsed": "Last used",
+    "neverUsed": "Never used",
+    "noTemplates": "No templates yet",
+    "noItems": "Add items to the checklist",
+    "createFirst": "Create your first inspection template",
+    "created": "Template created successfully",
+    "updated": "Template updated successfully",
+    "deleted": "Template deleted successfully",
+    "duplicate": "Duplicate",
+    "deleteConfirm": "Are you sure you want to delete the template \"{{name}}\"?",
+    "dragToReorder": "Drag to reorder items"
+  },
   "languages": {
     "pt": "Português",
     "en": "English",
