@@ -583,6 +583,7 @@ export default function InspectionDetail() {
           onOpenChange={setNcModalOpen}
           inspectionId={inspectionId!}
           inspectionItemId={ncInspectionItemId}
+          siteId={inspection.site_id}
           itemTitle={ncItemTitle}
           onSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['nonconformities', inspectionId] });

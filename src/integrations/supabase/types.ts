@@ -1173,6 +1173,7 @@ export type Database = {
         Row: {
           corrective_action: string | null
           created_at: string
+          created_by: string | null
           description: string | null
           due_date: string | null
           id: string
@@ -1180,6 +1181,8 @@ export type Database = {
           inspection_item_id: string
           responsible: string | null
           severity: string
+          site_id: string | null
+          standard_violated: string | null
           status: Database["public"]["Enums"]["nonconformity_status"]
           title: string
           updated_at: string
@@ -1187,6 +1190,7 @@ export type Database = {
         Insert: {
           corrective_action?: string | null
           created_at?: string
+          created_by?: string | null
           description?: string | null
           due_date?: string | null
           id?: string
@@ -1194,6 +1198,8 @@ export type Database = {
           inspection_item_id: string
           responsible?: string | null
           severity?: string
+          site_id?: string | null
+          standard_violated?: string | null
           status?: Database["public"]["Enums"]["nonconformity_status"]
           title: string
           updated_at?: string
@@ -1201,6 +1207,7 @@ export type Database = {
         Update: {
           corrective_action?: string | null
           created_at?: string
+          created_by?: string | null
           description?: string | null
           due_date?: string | null
           id?: string
@@ -1208,6 +1215,8 @@ export type Database = {
           inspection_item_id?: string
           responsible?: string | null
           severity?: string
+          site_id?: string | null
+          standard_violated?: string | null
           status?: Database["public"]["Enums"]["nonconformity_status"]
           title?: string
           updated_at?: string
@@ -1225,6 +1234,42 @@ export type Database = {
             columns: ["inspection_item_id"]
             isOneToOne: false
             referencedRelation: "inspection_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nonconformities_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      nonconformity_evidence: {
+        Row: {
+          created_at: string | null
+          file_path: string
+          id: string
+          nonconformity_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          file_path: string
+          id?: string
+          nonconformity_id: string
+        }
+        Update: {
+          created_at?: string | null
+          file_path?: string
+          id?: string
+          nonconformity_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nonconformity_evidence_nonconformity_id_fkey"
+            columns: ["nonconformity_id"]
+            isOneToOne: false
+            referencedRelation: "nonconformities"
             referencedColumns: ["id"]
           },
         ]
