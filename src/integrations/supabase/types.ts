@@ -300,6 +300,7 @@ export type Database = {
           floor_id: string
           id: string
           name: string
+          type: string | null
           updated_at: string
         }
         Insert: {
@@ -307,6 +308,7 @@ export type Database = {
           floor_id: string
           id?: string
           name: string
+          type?: string | null
           updated_at?: string
         }
         Update: {
@@ -314,6 +316,7 @@ export type Database = {
           floor_id?: string
           id?: string
           name?: string
+          type?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -821,6 +824,7 @@ export type Database = {
       floors: {
         Row: {
           created_at: string
+          description: string | null
           id: string
           level: number | null
           name: string
@@ -829,6 +833,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          description?: string | null
           id?: string
           level?: number | null
           name: string
@@ -837,6 +842,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          description?: string | null
           id?: string
           level?: number | null
           name?: string

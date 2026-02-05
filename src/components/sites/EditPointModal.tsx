@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -15,42 +15,55 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 
-interface AddPointModalProps {
-  areaId: string | null;
+interface CapturePoint {
+  id: string;
+  code: string;
+  description: string | null;
+  pos_x?: number | null;
+  pos_y?: number | null;
+}
+
+interface EditPointModalProps {
+  point: CapturePoint | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
 }
 
-export function AddPointModal({ areaId, open, onOpenChange, onSuccess }: AddPointModalProps) {
+export function EditPointModal({ point, open, onOpenChange, onSuccess }: EditPointModalProps) {
   const { t } = useTranslation();
   const [code, setCode] = useState('');
   const [description, setDescription] = useState('');
   const [posX, setPosX] = useState('');
   const [posY, setPosY] = useState('');
 
-  const createMutation = useMutation({
+  useEffect(() => {
+    if (point) {
+      setCode(point.code);
+      setDescription(point.description || '');
+      setPosX(point.pos_x?.toString() || '');
+      setPosY(point.pos_y?.toString() || '');
+    }
+  }, [point]);
+
+  const updateMutation = useMutation({
     mutationFn: async () => {
-      if (!areaId) throw new Error('No area selected');
+      if (!point) throw new Error('No point to update');
       
       const { error } = await supabase
         .from('capture_points')
-        .insert({
-          area_id: areaId,
+        .update({
           code,
           description: description || null,
           pos_x: posX ? parseFloat(posX) : null,
           pos_y: posY ? parseFloat(posY) : null,
-        });
+        })
+        .eq('id', point.id);
 
       if (error) throw error;
     },
     onSuccess: () => {
-      toast.success(t('siteDetail.pointCreated'));
-      setCode('');
-      setDescription('');
-      setPosX('');
-      setPosY('');
+      toast.success(t('siteDetail.pointUpdated'));
       onSuccess();
     },
     onError: () => {
@@ -60,22 +73,22 @@ export function AddPointModal({ areaId, open, onOpenChange, onSuccess }: AddPoin
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!code.trim() || !areaId) return;
-    createMutation.mutate();
+    if (!code.trim()) return;
+    updateMutation.mutate();
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>{t('siteDetail.addPoint')}</DialogTitle>
+          <DialogTitle>{t('siteDetail.editPoint')}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="pointCode">{t('siteDetail.pointCode')}</Label>
+              <Label htmlFor="editPointCode">{t('siteDetail.pointCode')}</Label>
               <Input
-                id="pointCode"
+                id="editPointCode"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 placeholder="P-001"
@@ -84,9 +97,9 @@ export function AddPointModal({ areaId, open, onOpenChange, onSuccess }: AddPoin
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="pointDescription">{t('siteDetail.pointDescription')}</Label>
+              <Label htmlFor="editPointDescription">{t('siteDetail.pointDescription')}</Label>
               <Textarea
-                id="pointDescription"
+                id="editPointDescription"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder={t('siteDetail.pointDescriptionPlaceholder')}
@@ -96,9 +109,9 @@ export function AddPointModal({ areaId, open, onOpenChange, onSuccess }: AddPoin
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="pointPosX">{t('siteDetail.pointPosX')}</Label>
+                <Label htmlFor="editPointPosX">{t('siteDetail.pointPosX')}</Label>
                 <Input
-                  id="pointPosX"
+                  id="editPointPosX"
                   type="number"
                   step="0.01"
                   value={posX}
@@ -108,9 +121,9 @@ export function AddPointModal({ areaId, open, onOpenChange, onSuccess }: AddPoin
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="pointPosY">{t('siteDetail.pointPosY')}</Label>
+                <Label htmlFor="editPointPosY">{t('siteDetail.pointPosY')}</Label>
                 <Input
-                  id="pointPosY"
+                  id="editPointPosY"
                   type="number"
                   step="0.01"
                   value={posY}
@@ -130,8 +143,8 @@ export function AddPointModal({ areaId, open, onOpenChange, onSuccess }: AddPoin
             >
               {t('common.cancel')}
             </Button>
-            <Button type="submit" disabled={createMutation.isPending}>
-              {createMutation.isPending ? t('common.loading') : t('common.create')}
+            <Button type="submit" disabled={updateMutation.isPending}>
+              {updateMutation.isPending ? t('common.loading') : t('common.save')}
             </Button>
           </DialogFooter>
         </form>

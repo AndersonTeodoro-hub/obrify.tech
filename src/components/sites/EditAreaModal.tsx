@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -24,36 +24,47 @@ import { toast } from 'sonner';
 const AREA_TYPES = ['room', 'corridor', 'bathroom', 'kitchen', 'balcony', 'other'] as const;
 type AreaType = typeof AREA_TYPES[number];
 
-interface AddAreaModalProps {
-  floorId: string | null;
+interface Area {
+  id: string;
+  name: string;
+  type?: string | null;
+}
+
+interface EditAreaModalProps {
+  area: Area | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
 }
 
-export function AddAreaModal({ floorId, open, onOpenChange, onSuccess }: AddAreaModalProps) {
+export function EditAreaModal({ area, open, onOpenChange, onSuccess }: EditAreaModalProps) {
   const { t } = useTranslation();
   const [name, setName] = useState('');
   const [type, setType] = useState<AreaType>('other');
 
-  const createMutation = useMutation({
+  useEffect(() => {
+    if (area) {
+      setName(area.name);
+      setType((area.type as AreaType) || 'other');
+    }
+  }, [area]);
+
+  const updateMutation = useMutation({
     mutationFn: async () => {
-      if (!floorId) throw new Error('No floor selected');
+      if (!area) throw new Error('No area to update');
       
       const { error } = await supabase
         .from('areas')
-        .insert({
-          floor_id: floorId,
+        .update({
           name,
           type,
-        });
+        })
+        .eq('id', area.id);
 
       if (error) throw error;
     },
     onSuccess: () => {
-      toast.success(t('siteDetail.areaCreated'));
-      setName('');
-      setType('other');
+      toast.success(t('siteDetail.areaUpdated'));
       onSuccess();
     },
     onError: () => {
@@ -63,22 +74,22 @@ export function AddAreaModal({ floorId, open, onOpenChange, onSuccess }: AddArea
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !floorId) return;
-    createMutation.mutate();
+    if (!name.trim()) return;
+    updateMutation.mutate();
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>{t('siteDetail.addArea')}</DialogTitle>
+          <DialogTitle>{t('siteDetail.editArea')}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="areaName">{t('siteDetail.areaName')}</Label>
+              <Label htmlFor="editAreaName">{t('siteDetail.areaName')}</Label>
               <Input
-                id="areaName"
+                id="editAreaName"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={t('siteDetail.areaNamePlaceholder')}
@@ -87,7 +98,7 @@ export function AddAreaModal({ floorId, open, onOpenChange, onSuccess }: AddArea
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="areaType">{t('siteDetail.areaType')}</Label>
+              <Label htmlFor="editAreaType">{t('siteDetail.areaType')}</Label>
               <Select value={type} onValueChange={(value: AreaType) => setType(value)}>
                 <SelectTrigger>
                   <SelectValue />
@@ -111,8 +122,8 @@ export function AddAreaModal({ floorId, open, onOpenChange, onSuccess }: AddArea
             >
               {t('common.cancel')}
             </Button>
-            <Button type="submit" disabled={createMutation.isPending}>
-              {createMutation.isPending ? t('common.loading') : t('common.create')}
+            <Button type="submit" disabled={updateMutation.isPending}>
+              {updateMutation.isPending ? t('common.loading') : t('common.save')}
             </Button>
           </DialogFooter>
         </form>
