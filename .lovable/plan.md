@@ -1,437 +1,405 @@
 
-# Plano: Implementacao Completa da Pagina Reports.tsx
+
+# Plano: Edge Function 'ai-image-analysis'
 
 ## Resumo
-Transformar a pagina placeholder `Reports.tsx` numa central de relatorios completa com tres seccoes: Relatorios de Inspecao, Relatorios de NC, e Autos de Medicao. Inclui geracao e armazenamento de PDFs na tabela `documents`.
+Criar uma nova Edge Function que recebe um `capture_id` e um `analysis_type`, busca a imagem do bucket de Storage, envia para Gemini Vision com prompts especificos para construcao civil, e guarda os resultados na tabela `ai_analysis_results`.
 
 ---
 
 ## Analise do Estado Actual
 
-### Pagina Reports.tsx:
-- Actualmente e um placeholder com mensagem "Sem resultados"
-- Nao tem nenhuma funcionalidade implementada
+### Tabela ai_analysis_results (ja existe):
+```
+- id: uuid
+- capture_id: string (FK -> captures)
+- site_id: string (FK -> sites)
+- detection_type: enum (fissura, humidade, desalinhamento, medicao, defeito_estrutural, corrosao, infiltracao)
+- description: string
+- severity: string
+- confidence: number
+- bounding_box: json
+- measurements: json
+- raw_response: json
+- ai_model: string
+- is_false_positive: boolean
+- verified_at: timestamp
+- verified_by: uuid
+- created_at: timestamp
+```
 
-### Servico pdfGenerator.ts:
-- Ja tem 3 funcoes implementadas:
-  - `generateInspectionReport(inspectionId)` - funcional
-  - `generateNCReport(ncId)` - funcional
-  - `generateMeasurementAuto(siteId, period)` - funcional
+### Tabela captures:
+```
+- id: uuid
+- file_path: string (caminho no Storage)
+- capture_point_id: string (FK -> capture_points -> areas -> floors -> sites)
+- source_type: enum
+- processing_status: enum
+```
 
-### Tabela documents:
-- Colunas: id, name, file_path, doc_type, site_id, org_id, created_at
-- Ja usada em SiteDocumentsTab.tsx
-- Pode ser usada para guardar historico de relatorios gerados
+### Bucket de Storage:
+- Nome: `captures` (privado)
+- Ficheiros armazenados com file_path relativo
 
-### Storage Bucket:
-- Bucket `captures` ja existe (privado)
-- Precisa de novo bucket `documents` para PDFs (ou usar o existente)
+### Edge Function existente:
+- `ai-fiscal-agent` usa Lovable AI Gateway com Gemini
+- Pattern de CORS, error handling, streaming
 
 ---
 
-## Arquitectura da Pagina
+## Arquitectura da Edge Function
 
 ```text
-Reports.tsx
-├── Header
-│   └── Titulo + Subtitulo
+ai-image-analysis/index.ts
 │
-├── Tabs ou Seccoes
-│   ├── Relatorios de Inspecao
-│   │   ├── Filtro por Obra
-│   │   ├── Lista de inspecoes COMPLETED
-│   │   └── Botao PDF para cada
-│   │
-│   ├── Relatorios de NC
-│   │   ├── Sub-seccao: NCs Abertas por Obra
-│   │   │   ├── Select de Obra
-│   │   │   └── Botao gerar lista PDF
-│   │   │
-│   │   └── Sub-seccao: Historico de NCs
-│   │       ├── Selectors de periodo
-│   │       └── Botao gerar PDF
-│   │
-│   └── Autos de Medicao
-│       └── Placeholder para fase futura
+├── 1. Validar request (capture_id, analysis_type)
 │
-└── Historico de Relatorios Gerados
-    └── Tabela com documentos tipo "report"
+├── 2. Buscar capture da base de dados
+│   └── Obter file_path e site_id (via joins)
+│
+├── 3. Gerar signed URL do Storage
+│   └── Usar supabase.storage.createSignedUrl()
+│
+├── 4. Construir prompt baseado no analysis_type
+│   ├── 'defects' → detectar fissuras, manchas, segregacao
+│   ├── 'rebar' → verificar espacamentos, recobrimentos
+│   └── 'general' → avaliacao geral de conformidade
+│
+├── 5. Chamar Gemini Vision via Lovable AI Gateway
+│   └── Usar modelo google/gemini-2.5-flash com imagem
+│
+├── 6. Parsear resposta JSON estruturada
+│   ├── detections: array de deteccoes
+│   ├── overall_assessment: texto resumo
+│   └── recommendations: array de sugestoes
+│
+├── 7. Inserir resultados em ai_analysis_results
+│   └── Um registo por deteccao encontrada
+│
+└── 8. Retornar resultado ao cliente
 ```
 
 ---
 
-## Estrutura Visual
+## Prompts por Tipo de Analise
+
+### defects (Deteccao de Defeitos)
 
 ```text
-┌─────────────────────────────────────────────────────────────────┐
-│  Relatórios                                                      │
-│  Central de relatórios e documentação                           │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │  RELATÓRIOS DE INSPEÇÃO                                     ││
-│  │                                                              ││
-│  │  ┌─────────────┐                                            ││
-│  │  │ Obra ▼      │                                            ││
-│  │  └─────────────┘                                            ││
-│  │                                                              ││
-│  │  ┌────────┬────────────┬────────────┬──────────┬──────────┐││
-│  │  │ Data   │ Obra       │ Template   │ Estado   │ Acões    │││
-│  │  ├────────┼────────────┼────────────┼──────────┼──────────┤││
-│  │  │05 Fev  │ Aurora     │ Pre-Beton  │Concluída │ [📄 PDF] │││
-│  │  │03 Fev  │ Mar        │ Segurança  │Concluída │ [📄 PDF] │││
-│  │  └────────┴────────────┴────────────┴──────────┴──────────┘││
-│  └─────────────────────────────────────────────────────────────┘│
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │  RELATÓRIOS DE NÃO-CONFORMIDADES                            ││
-│  │                                                              ││
-│  │  ┌──────────────────────────────┐  ┌──────────────────────┐ ││
-│  │  │  NCs Abertas por Obra        │  │  Histórico de NCs    │ ││
-│  │  │  ┌─────────────┐             │  │  De: [___] Até: [___]│ ││
-│  │  │  │ Obra ▼      │             │  │  ┌─────────────┐     │ ││
-│  │  │  └─────────────┘             │  │  │ Obra ▼      │     │ ││
-│  │  │        [📄 Gerar Lista]      │  │  └─────────────┘     │ ││
-│  │  │                              │  │        [📄 Gerar]    │ ││
-│  │  └──────────────────────────────┘  └──────────────────────┘ ││
-│  └─────────────────────────────────────────────────────────────┘│
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │  AUTOS DE MEDIÇÃO                      [Em desenvolvimento] ││
-│  │                                                              ││
-│  │  Esta funcionalidade estará disponível numa versão futura.  ││
-│  └─────────────────────────────────────────────────────────────┘│
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │  HISTÓRICO DE RELATÓRIOS                                    ││
-│  │                                                              ││
-│  │  ┌──────────┬────────────┬────────────┬──────────┬────────┐││
-│  │  │ Tipo     │ Obra       │ Gerado em  │ Por      │ Acões  │││
-│  │  ├──────────┼────────────┼────────────┼──────────┼────────┤││
-│  │  │Inspeção  │ Aurora     │ 05/02 15:30│ João     │ [📥]   │││
-│  │  │NC Lista  │ Mar        │ 04/02 10:15│ Pedro    │ [📥]   │││
-│  │  └──────────┴────────────┴────────────┴──────────┴────────┘││
-│  └─────────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────────┘
+Es um especialista em fiscalizacao de obras de construcao civil em Portugal.
+Analisa esta imagem e detecta todos os defeitos visiveis.
+
+Procura especificamente por:
+- Fissuras (orientacao, largura estimada, padrao)
+- Manchas de humidade ou infiltracao
+- Segregacao do betao (ninhos de brita)
+- Desagregacao superficial
+- Eflorescencias (manchas brancas de sais)
+- Corrosao de armaduras expostas
+- Desalinhamentos ou deformacoes
+
+Para cada defeito encontrado, classifica a severidade:
+- critical: Compromete seguranca estrutural
+- major: Requer intervencao urgente
+- minor: Manutencao preventiva recomendada
+- observation: Apenas monitorizar
+
+Responde APENAS com JSON valido no formato especificado.
+```
+
+### rebar (Verificacao de Armaduras)
+
+```text
+Es um especialista em fiscalizacao de armaduras de betao armado.
+Analisa esta imagem de armaduras e verifica:
+
+- Espacamento entre varoes (se visivel)
+- Recobrimento aparente
+- Posicionamento dos estribos
+- Amarracoes e sobreposicoes
+- Calcadores/espacadores presentes
+- Estado geral da armadura (oxidacao, sujidade)
+
+Para cada observacao, indica:
+- Se esta conforme ou nao conforme
+- Medicoes estimadas (se possivel)
+- Localizacao na imagem
+
+Responde APENAS com JSON valido no formato especificado.
+```
+
+### general (Avaliacao Geral)
+
+```text
+Es um engenheiro fiscal de obras de construcao civil.
+Faz uma avaliacao geral do estado de conformidade visivel nesta imagem.
+
+Considera:
+- Qualidade geral da execucao
+- Organizacao e limpeza da obra
+- Seguranca visivel (EPI, proteccoes)
+- Estado dos materiais
+- Progresso aparente dos trabalhos
+
+Identifica qualquer situacao que justifique atencao ou registo.
+
+Responde APENAS com JSON valido no formato especificado.
 ```
 
 ---
 
-## Ficheiros a Modificar/Criar
+## Estrutura da Resposta JSON (Tool Calling)
+
+```json
+{
+  "detections": [
+    {
+      "type": "fissura",
+      "description": "Fissura diagonal no canto superior direito",
+      "severity": "major",
+      "location": "canto superior direito, aproximadamente 15cm do bordo",
+      "confidence": 0.85,
+      "measurements": {
+        "estimated_width_mm": 2,
+        "estimated_length_cm": 30
+      }
+    }
+  ],
+  "overall_assessment": "A laje apresenta sinais de assentamento diferencial...",
+  "recommendations": [
+    "Monitorizar evolucao da fissura com testemunhos",
+    "Realizar ensaio de carbonatacao na zona afectada"
+  ]
+}
+```
+
+---
+
+## Mapeamento detection_type
+
+Os tipos do enum existente serao mapeados assim:
+
+| Tipo detectado | Enum ai_detection_type |
+|----------------|----------------------|
+| fissura, crack | fissura |
+| humidade, moisture | humidade |
+| desalinhamento, misalignment | desalinhamento |
+| medicao, measurement | medicao |
+| defeito_estrutural, structural | defeito_estrutural |
+| corrosao, corrosion, rust | corrosao |
+| infiltracao, infiltration, leak | infiltracao |
+
+---
+
+## Ficheiros a Criar/Modificar
 
 | Ficheiro | Accao |
 |----------|-------|
-| src/pages/app/Reports.tsx | Reescrever completamente |
-| src/services/pdfGenerator.ts | Adicionar funcao generateOpenNCsReport |
-| src/i18n/locales/pt.json | Adicionar novas chaves |
-| src/i18n/locales/en.json | Adicionar novas chaves |
-
-### Migracao de Base de Dados
-Criar bucket de storage para documentos (se nao existir):
-
-```sql
--- Apenas se necessario criar bucket via SQL
--- Normalmente criado via dashboard/API
-INSERT INTO storage.buckets (id, name, public)
-VALUES ('documents', 'documents', false)
-ON CONFLICT (id) DO NOTHING;
-```
+| supabase/functions/ai-image-analysis/index.ts | Criar |
+| supabase/config.toml | Adicionar entrada para nova funcao |
 
 ---
 
-## Novas Funcoes no pdfGenerator.ts
+## Codigo da Edge Function
 
-### generateOpenNCsReport(siteId)
-
-Gera lista de todas as NCs abertas (nao CLOSED) para uma obra especifica:
+### Estrutura Principal:
 
 ```text
-┌─────────────────────────────────────────────────────────────────┐
-│  [LOGO]       LISTA DE NÃO-CONFORMIDADES ABERTAS                │
-│                                                                  │
-│  Obra: Edifício Aurora                 Data: 05/02/2026         │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  RESUMO                                                          │
-│  Total de NCs Abertas: 5                                        │
-│  Críticas: 1 | Importantes: 2 | Menores: 2                      │
-│                                                                  │
-│  LISTA DETALHADA                                                 │
-│  ┌────┬────────────────┬──────────┬───────────┬────────────────┐│
-│  │ NC │ Descrição      │ Sever.   │ Prazo     │ Responsável    ││
-│  ├────┼────────────────┼──────────┼───────────┼────────────────┤│
-│  │001 │ Fissura laje   │ Crítico  │ 15/02     │ Pedro Santos   ││
-│  │002 │ Infiltração    │ Import.  │ 20/02     │ João Silva     ││
-│  └────┴────────────────┴──────────┴───────────┴────────────────┘│
-│                                                                  │
-├─────────────────────────────────────────────────────────────────┤
-│  Página 1 de 1                    Gerado em 05/02/2026 15:30   │
-└─────────────────────────────────────────────────────────────────┘
+1. Imports (serve, createClient)
+2. CORS headers
+3. Prompts por tipo de analise
+4. Tool definition para JSON estruturado
+5. Handler principal:
+   - Validar input
+   - Buscar capture com site_id
+   - Gerar signed URL da imagem
+   - Chamar Gemini Vision
+   - Parsear resultado
+   - Inserir em ai_analysis_results
+   - Retornar resposta
 ```
 
-### generateNCHistoryReport(siteId, period)
-
-Gera historico de NCs fechadas num periodo:
+### Chamada ao Gemini Vision:
 
 ```text
-┌─────────────────────────────────────────────────────────────────┐
-│  [LOGO]       HISTÓRICO DE NÃO-CONFORMIDADES                    │
-│                                                                  │
-│  Obra: Edifício Aurora                                          │
-│  Período: 01/01/2026 a 31/01/2026                               │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  RESUMO DO PERÍODO                                               │
-│  NCs Abertas: 8 | NCs Fechadas: 6 | Taxa de Resolução: 75%     │
-│                                                                  │
-│  NÃO-CONFORMIDADES FECHADAS                                      │
-│  ┌────┬────────────────┬──────────┬───────────┬────────────────┐│
-│  │ NC │ Descrição      │ Aberta   │ Fechada   │ Dias           ││
-│  ├────┼────────────────┼──────────┼───────────┼────────────────┤│
-│  │001 │ Fissura laje   │ 05/01    │ 15/01     │ 10 dias        ││
-│  │002 │ Infiltração    │ 10/01    │ 22/01     │ 12 dias        ││
-│  └────┴────────────────┴──────────┴───────────┴────────────────┘│
-│                                                                  │
-├─────────────────────────────────────────────────────────────────┤
-│  Página 1 de 1                    Gerado em 05/02/2026 15:30   │
-└─────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Componente Reports.tsx
-
-### Estado e Queries:
-
-```text
-Estados:
-- siteFilter: string (para inspecoes)
-- ncSiteFilter: string (para NCs abertas)
-- historySiteFilter: string (para historico)
-- historyPeriod: { start: Date, end: Date }
-- generatingReport: Record<string, boolean>
-
-Queries:
-1. sites - lista de obras do utilizador
-2. completedInspections - inspecoes com status COMPLETED
-3. generatedReports - documentos com doc_type contendo 'report'
-```
-
-### Funcoes de Geracao:
-
-```text
-handleGenerateInspectionPDF(inspectionId, siteName):
-  1. setGeneratingReport({ [inspectionId]: true })
-  2. const blob = await generateInspectionReport(inspectionId)
-  3. Upload blob para Storage bucket 'documents'
-  4. Inserir registo na tabela 'documents'
-  5. Trigger download do ficheiro
-  6. Toast de sucesso
-  7. Refetch generatedReports
-
-handleGenerateOpenNCsPDF(siteId, siteName):
-  1. setGeneratingReport({ openNCs: true })
-  2. const blob = await generateOpenNCsReport(siteId)
-  3. Upload + save + download
-  4. Toast de sucesso
-
-handleGenerateNCHistoryPDF(siteId, period, siteName):
-  1. setGeneratingReport({ ncHistory: true })
-  2. const blob = await generateNCHistoryReport(siteId, period)
-  3. Upload + save + download
-  4. Toast de sucesso
-```
-
----
-
-## Armazenamento de PDFs
-
-### Upload para Storage:
-
-```text
-const uploadPDF = async (blob: Blob, fileName: string) => {
-  const file = new File([blob], fileName, { type: 'application/pdf' });
-  const filePath = `reports/${siteId}/${fileName}`;
-  
-  const { error } = await supabase.storage
-    .from('documents')
-    .upload(filePath, file);
-    
-  if (error) throw error;
-  return filePath;
-};
-```
-
-### Registo na tabela documents:
-
-```text
-const saveDocumentRecord = async (
-  name: string,
-  filePath: string,
-  docType: string,
-  siteId: string,
-  orgId: string
-) => {
-  const { error } = await supabase.from('documents').insert({
-    name,
-    file_path: filePath,
-    doc_type: docType,
-    site_id: siteId,
-    org_id: orgId,
-  });
-  
-  if (error) throw error;
-};
-```
-
-### Tipos de documento:
-
-- `inspection_report` - Relatorio de inspecao
-- `nc_open_list` - Lista de NCs abertas
-- `nc_history` - Historico de NCs
-- `measurement_auto` - Auto de medicao (futuro)
-
----
-
-## Traducoes a Adicionar
-
-### Portugues (pt.json):
-
-```text
-"reportsPage": {
-  "title": "Relatórios",
-  "subtitle": "Central de relatórios e documentação",
-  "inspectionReports": "Relatórios de Inspeção",
-  "inspectionReportsDesc": "Gerar relatórios de inspeções concluídas",
-  "ncReports": "Relatórios de Não-Conformidades",
-  "openNCsBysite": "NCs Abertas por Obra",
-  "openNCsBySiteDesc": "Lista de todas as NCs abertas numa obra",
-  "ncHistory": "Histórico de NCs",
-  "ncHistoryDesc": "NCs fechadas num período específico",
-  "measurementAutos": "Autos de Medição",
-  "measurementAutosDesc": "Esta funcionalidade estará disponível numa versão futura",
-  "comingSoon": "Em desenvolvimento",
-  "generatedReports": "Histórico de Relatórios",
-  "generatedReportsDesc": "Relatórios gerados anteriormente",
-  "noCompletedInspections": "Não existem inspeções concluídas",
-  "generateReport": "Gerar Relatório",
-  "generateList": "Gerar Lista",
-  "selectSite": "Selecionar obra",
-  "selectPeriod": "Selecionar período",
-  "from": "De",
-  "to": "Até",
-  "reportType": "Tipo",
-  "generatedAt": "Gerado em",
-  "generatedBy": "Por",
-  "download": "Descarregar",
-  "noReports": "Ainda não foram gerados relatórios",
-  "reportSaved": "Relatório guardado com sucesso",
-  "types": {
-    "inspection_report": "Relatório de Inspeção",
-    "nc_open_list": "Lista NCs Abertas",
-    "nc_history": "Histórico de NCs",
-    "measurement_auto": "Auto de Medição"
-  }
+body: {
+  model: "google/gemini-2.5-flash",
+  messages: [
+    { role: "system", content: systemPrompt },
+    { 
+      role: "user", 
+      content: [
+        { type: "text", text: "Analisa esta imagem." },
+        { type: "image_url", image_url: { url: signedUrl } }
+      ]
+    }
+  ],
+  tools: [analysisToolDefinition],
+  tool_choice: { type: "function", function: { name: "submit_analysis" } }
 }
 ```
 
-### Ingles (en.json):
+---
+
+## Tool Definition (Structured Output)
 
 ```text
-"reportsPage": {
-  "title": "Reports",
-  "subtitle": "Reports and documentation center",
-  "inspectionReports": "Inspection Reports",
-  "inspectionReportsDesc": "Generate reports for completed inspections",
-  "ncReports": "Non-Conformity Reports",
-  "openNCsBysite": "Open NCs by Site",
-  "openNCsBySiteDesc": "List of all open NCs for a site",
-  "ncHistory": "NC History",
-  "ncHistoryDesc": "Closed NCs in a specific period",
-  "measurementAutos": "Measurement Reports",
-  "measurementAutosDesc": "This feature will be available in a future version",
-  "comingSoon": "Coming soon",
-  "generatedReports": "Report History",
-  "generatedReportsDesc": "Previously generated reports",
-  "noCompletedInspections": "No completed inspections",
-  "generateReport": "Generate Report",
-  "generateList": "Generate List",
-  "selectSite": "Select site",
-  "selectPeriod": "Select period",
-  "from": "From",
-  "to": "To",
-  "reportType": "Type",
-  "generatedAt": "Generated at",
-  "generatedBy": "By",
-  "download": "Download",
-  "noReports": "No reports generated yet",
-  "reportSaved": "Report saved successfully",
-  "types": {
-    "inspection_report": "Inspection Report",
-    "nc_open_list": "Open NCs List",
-    "nc_history": "NC History",
-    "measurement_auto": "Measurement Report"
+{
+  type: "function",
+  function: {
+    name: "submit_analysis",
+    description: "Submete os resultados da analise de imagem",
+    parameters: {
+      type: "object",
+      properties: {
+        detections: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              type: { type: "string" },
+              description: { type: "string" },
+              severity: { 
+                type: "string", 
+                enum: ["critical", "major", "minor", "observation"] 
+              },
+              location: { type: "string" },
+              confidence: { type: "number" },
+              measurements: { type: "object" }
+            },
+            required: ["type", "description", "severity", "location", "confidence"]
+          }
+        },
+        overall_assessment: { type: "string" },
+        recommendations: { 
+          type: "array", 
+          items: { type: "string" } 
+        }
+      },
+      required: ["detections", "overall_assessment", "recommendations"]
+    }
   }
 }
 ```
 
 ---
 
-## Fluxo de Geracao e Download
+## Insercao na Base de Dados
+
+Para cada deteccao, inserir um registo:
 
 ```text
-1. Utilizador clica "Gerar PDF"
-       │
-       ▼
-2. Mostrar loading no botao
-       │
-       ▼
-3. Chamar funcao do pdfGenerator
-       │
-       ▼
-4. Receber Blob do PDF
-       │
-       ▼
-5. Upload para Storage bucket
-       │
-       ▼
-6. Inserir registo em 'documents'
-       │
-       ▼
-7. Trigger download automatico
-       │
-       ▼
-8. Toast de sucesso
-       │
-       ▼
-9. Actualizar lista de historico
+await supabase.from('ai_analysis_results').insert({
+  capture_id: captureId,
+  site_id: siteId,
+  detection_type: mapDetectionType(detection.type),
+  description: detection.description,
+  severity: detection.severity,
+  confidence: detection.confidence,
+  measurements: detection.measurements || null,
+  bounding_box: null, // Gemini nao retorna bounding boxes
+  raw_response: fullResponse,
+  ai_model: 'google/gemini-2.5-flash'
+});
 ```
 
 ---
 
-## Storage Bucket
+## Resposta ao Cliente
 
-Verificar se o bucket `documents` existe, caso contrario criar:
-- Nome: `documents`
-- Publico: Nao (privado)
-- Politica: Usar signed URLs para download
+```json
+{
+  "success": true,
+  "capture_id": "uuid",
+  "analysis_type": "defects",
+  "detections": [...],
+  "overall_assessment": "...",
+  "recommendations": [...],
+  "results_saved": 3
+}
+```
+
+---
+
+## Error Handling
+
+| Erro | Resposta |
+|------|----------|
+| capture_id em falta | 400: "capture_id is required" |
+| analysis_type invalido | 400: "analysis_type must be defects, rebar, or general" |
+| Capture nao encontrada | 404: "Capture not found" |
+| Imagem nao encontrada no Storage | 404: "Image file not found" |
+| Erro na API Gemini | 500: "AI analysis failed" |
+| Rate limit (429) | 429: "Rate limit exceeded" |
+| Sem creditos (402) | 402: "Insufficient credits" |
+
+---
+
+## Config.toml
+
+Adicionar a nova funcao:
+
+```toml
+[functions.ai-image-analysis]
+verify_jwt = false
+```
+
+---
+
+## Fluxo de Utilizacao
+
+```text
+Cliente                     Edge Function              Supabase          Gemini Vision
+   │                              │                        │                   │
+   │  POST { capture_id,          │                        │                   │
+   │        analysis_type }       │                        │                   │
+   │─────────────────────────────>│                        │                   │
+   │                              │                        │                   │
+   │                              │  SELECT capture        │                   │
+   │                              │  + site_id            │                   │
+   │                              │───────────────────────>│                   │
+   │                              │<───────────────────────│                   │
+   │                              │                        │                   │
+   │                              │  createSignedUrl()     │                   │
+   │                              │───────────────────────>│                   │
+   │                              │<───────────────────────│                   │
+   │                              │                        │                   │
+   │                              │  POST image + prompt  │                   │
+   │                              │──────────────────────────────────────────>│
+   │                              │<──────────────────────────────────────────│
+   │                              │                        │                   │
+   │                              │  INSERT results        │                   │
+   │                              │───────────────────────>│                   │
+   │                              │<───────────────────────│                   │
+   │                              │                        │                   │
+   │  { detections, assessment,   │                        │                   │
+   │    recommendations }         │                        │                   │
+   │<─────────────────────────────│                        │                   │
+```
 
 ---
 
 ## Resumo das Alteracoes
 
-1. **Reports.tsx**: Reescrever com 4 seccoes (Inspecoes, NCs, Autos, Historico)
-2. **pdfGenerator.ts**: Adicionar `generateOpenNCsReport` e `generateNCHistoryReport`
-3. **Storage**: Criar bucket `documents` se necessario
-4. **Traducoes**: Novas chaves `reportsPage` em PT e EN
-5. **Integracao**: Upload PDFs + guardar em `documents` table
+1. **Criar Edge Function**: `supabase/functions/ai-image-analysis/index.ts`
+   - Validar input (capture_id, analysis_type)
+   - Buscar capture e site_id via joins
+   - Gerar signed URL do Storage
+   - Construir prompt especifico por tipo de analise
+   - Usar tool calling para obter JSON estruturado
+   - Inserir cada deteccao em `ai_analysis_results`
+   - Retornar resultado completo ao cliente
+
+2. **Actualizar config.toml**: Adicionar entrada `[functions.ai-image-analysis]`
 
 ---
 
 ## Consideracoes Tecnicas
 
-1. **Performance**: Limitar historico aos ultimos 50 relatorios
-2. **Storage**: Organizar por `reports/{siteId}/{filename}`
-3. **Nomes de ficheiro**: `tipo_obra_data.pdf` (ex: `inspecao_aurora_2026-02-05.pdf`)
-4. **RLS**: Usar politicas existentes da tabela `documents`
-5. **Bucket**: Pode usar bucket existente ou criar novo `documents`
+1. **Modelo**: Usar `google/gemini-2.5-flash` que suporta imagens e e mais rapido
+2. **Signed URLs**: Validade de 60 segundos (suficiente para o pedido)
+3. **Tool Calling**: Garante resposta JSON estruturada e valida
+4. **Mapeamento de tipos**: Converter tipos detectados para o enum existente
+5. **Raw Response**: Guardar resposta completa para debug/auditoria
+6. **Tamanho de imagem**: Gemini aceita URLs directos, nao precisa base64
+
