@@ -788,6 +788,7 @@ export type Database = {
           created_at: string
           id: string
           inspection_id: string
+          inspection_item_id: string | null
           kind: string | null
         }
         Insert: {
@@ -795,6 +796,7 @@ export type Database = {
           created_at?: string
           id?: string
           inspection_id: string
+          inspection_item_id?: string | null
           kind?: string | null
         }
         Update: {
@@ -802,6 +804,7 @@ export type Database = {
           created_at?: string
           id?: string
           inspection_id?: string
+          inspection_item_id?: string | null
           kind?: string | null
         }
         Relationships: [
@@ -817,6 +820,13 @@ export type Database = {
             columns: ["inspection_id"]
             isOneToOne: false
             referencedRelation: "inspections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "evidence_links_inspection_item_id_fkey"
+            columns: ["inspection_item_id"]
+            isOneToOne: false
+            referencedRelation: "inspection_items"
             referencedColumns: ["id"]
           },
         ]
