@@ -516,5 +516,26 @@
     "en": "English",
     "es": "Español",
     "fr": "Français"
+  },
+  "reports": {
+    "inspectionReport": "Inspection Report",
+    "ncReport": "Non-Conformity Report",
+    "measurementAuto": "Measurement Report",
+    "generating": "Generating PDF...",
+    "downloadPdf": "Download PDF",
+    "summary": "Summary",
+    "compliant": "Compliant",
+    "nonCompliant": "Non-Compliant",
+    "observations": "Observations",
+    "notApplicable": "N/A",
+    "period": "Period",
+    "generalInfo": "General Information",
+    "checklist": "Checklist",
+    "photos": "Photos",
+    "history": "History",
+    "signatures": "Signatures",
+    "generatedAt": "Generated at",
+    "page": "Page",
+    "of": "of"
   }
 }
