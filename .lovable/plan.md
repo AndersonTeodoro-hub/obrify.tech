@@ -1,258 +1,27 @@
 
-# Plano: CaptureViewer Avancado com Zoom e Visualizador 360
+# Plano: Pagina SiteDetail.tsx
 
 ## Resumo
-Reescrever o componente CaptureViewer com funcionalidades avancadas: zoom com scroll/gestos touch, painel lateral de informacoes, accoes (download, eliminar, criar NC), visualizador panoramico para imagens 360 e navegacao por teclado.
+Criar uma pagina de detalhe de obra com header informativo, sistema de tabs completo, gestao hierarquica da estrutura (Pisos > Areas > Pontos de Captura) e integracao com capturas, inspeccoes e documentos.
 
 ---
 
-## Estado Actual
-
-### O que existe:
-- Componente `CaptureViewer.tsx` basico com:
-  - Dialog fullscreen com overlay escuro
-  - Navegacao com setas (botoes e teclado)
-  - Imagem estatica (placeholder Unsplash)
-  - Info overlay no fundo com data, localizacao, autor
-  - Botao de download (sem funcao)
-  - Contador de posicao
-
-### Limitacoes actuais:
-- Sem zoom (scroll ou gestos)
-- Sem painel lateral estruturado
-- Sem accoes funcionais (download, eliminar, criar NC)
-- Sem suporte para 360
-- Usa imagens placeholder em vez de Storage
-
----
-
-## Arquitectura do Novo Componente
+## Arquitectura da Pagina
 
 ```text
-CaptureViewer (container principal)
-├── Toolbar (topo)
-│   ├── Botao Fechar (X)
-│   ├── Contador (1 de N)
-│   └── Accoes (Download, Eliminar, Criar NC)
+SiteDetail.tsx
+├── Header
+│   ├── Breadcrumb (Dashboard > Obras > [Nome])
+│   ├── Nome da obra + Badge de estado
+│   ├── Morada
+│   └── Botao Editar
 │
-├── Content Area (centro)
-│   ├── Navegacao Esquerda (seta)
-│   ├── Media Viewer
-│   │   ├── ImageViewer (fotos com zoom)
-│   │   ├── VideoPlayer (videos)
-│   │   └── PanoramaViewer (360)
-│   └── Navegacao Direita (seta)
-│
-└── Info Panel (lateral direita, colapsavel)
-    ├── Thumbnail
-    ├── Metadados (data, tipo, tamanho)
-    ├── Localizacao (obra/piso/area/ponto)
-    ├── Autor (avatar, nome)
-    └── Notas
-```
-
----
-
-## Componentes a Criar
-
-### 1. Componente Principal: `CaptureViewer.tsx` (reescrever)
-
-**Props:**
-```text
-capture: CaptureWithDetails | null
-captures: CaptureWithDetails[]
-open: boolean
-onOpenChange: (open: boolean) => void
-onNavigate: (capture: CaptureWithDetails) => void
-onDelete?: (capture: CaptureWithDetails) => void
-onCreateNC?: (capture: CaptureWithDetails) => void
-```
-
-**Estado:**
-```text
-zoom: number (1 = 100%)
-position: { x: number, y: number }
-isPanning: boolean
-showInfoPanel: boolean
-isDeleting: boolean
-```
-
-**Funcionalidades:**
-- Layout com painel lateral toggleable
-- Toolbar no topo com accoes
-- Area central para media
-- Gestao de zoom e pan
-
-### 2. Subcomponente: `ImageViewerWithZoom.tsx`
-
-Visualizador de imagens com zoom:
-- Zoom com scroll do rato (wheel event)
-- Zoom com pinch gesture (touch events)
-- Pan/arrastar quando em zoom
-- Double-click para reset zoom
-- Limites de zoom: 0.5x a 5x
-
-**Implementacao:**
-```text
-- CSS transform: scale() translate()
-- onWheel para zoom
-- onTouchStart/Move/End para gestos
-- onMouseDown/Move/Up para pan
-- Cursor: grab/grabbing
-```
-
-### 3. Subcomponente: `PanoramaViewer.tsx`
-
-Visualizador 360 com biblioteca leve:
-
-**Opcao escolhida: Photo Sphere Viewer (leve, React-friendly)**
-- Biblioteca: @photo-sphere-viewer/core
-- Licenca: MIT
-- Tamanho: ~50KB gzipped
-- Suporte: touch, VR, hotspots
-
-**Funcionalidades:**
-- Navegacao com drag do rato
-- Navegacao touch
-- Zoom in/out
-- Autorotacao opcional
-- Fullscreen dentro do viewer
-
-### 4. Subcomponente: `CaptureInfoPanel.tsx`
-
-Painel lateral com informacoes detalhadas:
-- Toggle button para mostrar/esconder
-- Scroll interno para conteudo longo
-- Seccoes colapsaveis
-
-**Conteudo:**
-```text
-- Tipo de captura (icone + label)
-- Data de captura
-- Tamanho do ficheiro
-- Dimensoes (se imagem)
-- Localizacao completa
-- Autor com avatar
-- Notas (se existirem)
-- Coordenadas GPS (se disponiveis)
-```
-
----
-
-## Accoes a Implementar
-
-### 1. Download
-- Obter signed URL do Storage
-- Criar link temporario e trigger download
-- Feedback com toast
-
-### 2. Eliminar
-- Confirmacao com AlertDialog
-- Eliminar do Storage
-- Eliminar registo da BD
-- Fechar viewer e refrescar lista
-- Feedback com toast
-
-### 3. Criar Nao-Conformidade (NC)
-- Abrir modal/sheet com formulario
-- Campos: titulo, descricao, severidade
-- Associar capture como evidencia
-- Guardar em tabela nonconformities
-- Requer inspection_id - pode ser opcional ou criar "avulsa"
-
----
-
-## Gestao de Zoom
-
-### Zoom com Scroll (Desktop)
-```text
-onWheel(e):
-  - e.preventDefault()
-  - deltaY < 0 → zoom in
-  - deltaY > 0 → zoom out
-  - Calcular novo zoom com limites
-  - Actualizar posicao para zoom centrado no cursor
-```
-
-### Zoom com Pinch (Touch)
-```text
-onTouchStart:
-  - Se 2 dedos, guardar distancia inicial
-
-onTouchMove:
-  - Se 2 dedos, calcular nova distancia
-  - Ratio = novaDistancia / distanciaInicial
-  - Aplicar ao zoom
-
-onTouchEnd:
-  - Reset estado de pinch
-```
-
-### Pan/Arrastar
-```text
-onMouseDown / onTouchStart (1 dedo):
-  - isPanning = true
-  - Guardar posicao inicial
-
-onMouseMove / onTouchMove:
-  - Se isPanning, calcular delta
-  - Actualizar position { x, y }
-
-onMouseUp / onTouchEnd:
-  - isPanning = false
-```
-
----
-
-## Keyboard Shortcuts
-
-```text
-ESC        → Fechar viewer
-ArrowLeft  → Captura anterior
-ArrowRight → Proxima captura
-+/=        → Zoom in
--          → Zoom out
-0          → Reset zoom
-I          → Toggle info panel
-D          → Download (se implementado)
-Delete     → Eliminar (com confirmacao)
-```
-
----
-
-## Dependencia Externa
-
-**Photo Sphere Viewer** para visualizacao 360:
-```text
-npm install @photo-sphere-viewer/core
-```
-
-Alternativa sem dependencias:
-- Usar CSS 3D transforms
-- Mais limitado mas zero deps
-
-Recomendacao: Usar Photo Sphere Viewer pela qualidade e features.
-
----
-
-## Traducoes a Adicionar
-
-```text
-captures.viewer.zoomIn: "Ampliar"
-captures.viewer.zoomOut: "Reduzir"
-captures.viewer.resetZoom: "Repor zoom"
-captures.viewer.showInfo: "Mostrar informacoes"
-captures.viewer.hideInfo: "Esconder informacoes"
-captures.viewer.deleteCapture: "Eliminar captura"
-captures.viewer.deleteConfirm: "Tem a certeza que deseja eliminar esta captura?"
-captures.viewer.deleteSuccess: "Captura eliminada com sucesso"
-captures.viewer.createNC: "Criar Nao-Conformidade"
-captures.viewer.downloadStarted: "Download iniciado"
-captures.viewer.fileSize: "Tamanho"
-captures.viewer.dimensions: "Dimensoes"
-captures.viewer.gpsCoordinates: "Coordenadas GPS"
-captures.viewer.captureNotes: "Notas"
-captures.viewer.noNotes: "Sem notas"
+├── Tabs
+│   ├── Visao Geral (estatisticas e resumo)
+│   ├── Estrutura (arvore hierarquica)
+│   ├── Capturas (grid filtrado por esta obra)
+│   ├── Inspeccoes (lista de fiscalizacoes)
+│   └── Documentos (lista de documentos)
 ```
 
 ---
@@ -261,69 +30,303 @@ captures.viewer.noNotes: "Sem notas"
 
 | Ficheiro | Accao |
 |----------|-------|
-| src/components/captures/CaptureViewer.tsx | Reescrever completamente |
-| src/components/captures/ImageViewerWithZoom.tsx | Criar |
-| src/components/captures/PanoramaViewer.tsx | Criar |
-| src/components/captures/CaptureInfoPanel.tsx | Criar |
-| src/components/captures/CreateNCModal.tsx | Criar |
-| src/types/captures.ts | Adicionar tipos para zoom |
-| src/i18n/locales/en.json | Adicionar chaves viewer |
-| src/i18n/locales/pt.json | Adicionar chaves viewer |
-| package.json | Adicionar @photo-sphere-viewer/core |
+| src/pages/app/SiteDetail.tsx | Criar |
+| src/components/sites/SiteHeader.tsx | Criar |
+| src/components/sites/SiteOverviewTab.tsx | Criar |
+| src/components/sites/SiteStructureTab.tsx | Criar |
+| src/components/sites/SiteCapturesTab.tsx | Criar |
+| src/components/sites/SiteInspectionsTab.tsx | Criar |
+| src/components/sites/SiteDocumentsTab.tsx | Criar |
+| src/components/sites/EditSiteModal.tsx | Criar |
+| src/components/sites/AddFloorModal.tsx | Criar |
+| src/components/sites/AddAreaModal.tsx | Criar |
+| src/components/sites/AddPointModal.tsx | Criar |
+| src/App.tsx | Adicionar rota /sites/:siteId |
+| src/components/layout/AppHeader.tsx | Actualizar breadcrumb para mostrar nome da obra |
+| src/i18n/locales/en.json | Adicionar chaves |
+| src/i18n/locales/pt.json | Adicionar chaves |
 
 ---
 
-## Consideracoes Tecnicas
+## Componentes Detalhados
 
-1. **Storage URLs**: O bucket "captures" e privado. Precisamos gerar signed URLs para exibir e download. Ate estar implementado, usar placeholder.
+### 1. SiteDetail.tsx (Pagina Principal)
 
-2. **Performance**: Carregar imagens grandes pode ser lento. Considerar:
-   - Loading state com skeleton
-   - Progressive loading se possivel
+**Props via useParams:**
+- siteId: string
 
-3. **Touch Events**: Prevenir scroll da pagina durante pinch/pan no mobile.
+**Estado:**
+- activeTab: string ('overview' | 'structure' | 'captures' | 'inspections' | 'documents')
+- isEditOpen: boolean
 
-4. **Accessibility**: 
-   - Focus trap dentro do dialog
-   - aria-labels nos botoes
-   - Keyboard navigation
+**Queries React Query:**
+1. Site com dados da organizacao
+2. Floors com contagem de areas
+3. Areas com contagem de pontos
+4. Capture points
+5. Estatisticas (total capturas, NCs abertas, ultima inspeccao)
 
-5. **Memoria**: Limpar event listeners no cleanup do useEffect.
+**Layout:**
+```text
+<div className="space-y-6">
+  <SiteHeader site={site} onEdit={() => setIsEditOpen(true)} />
+  
+  <Tabs value={activeTab} onValueChange={setActiveTab}>
+    <TabsList>
+      <TabsTrigger value="overview">Visao Geral</TabsTrigger>
+      <TabsTrigger value="structure">Estrutura</TabsTrigger>
+      <TabsTrigger value="captures">Capturas</TabsTrigger>
+      <TabsTrigger value="inspections">Inspeccoes</TabsTrigger>
+      <TabsTrigger value="documents">Documentos</TabsTrigger>
+    </TabsList>
+    
+    <TabsContent value="overview">
+      <SiteOverviewTab siteId={siteId} />
+    </TabsContent>
+    ...
+  </Tabs>
+  
+  <EditSiteModal open={isEditOpen} ... />
+</div>
+```
 
-6. **NC sem Inspection**: A tabela nonconformities requer inspection_id. Opcoes:
-   - Criar modal que pede para selecionar inspection
-   - Ou criar inspection "avulsa" automaticamente
-   - Ou tornar optional no futuro (alteracao BD)
+### 2. SiteHeader.tsx
+
+**Props:**
+- site: Site (com organizacao)
+- onEdit: () => void
+
+**Conteudo:**
+- Nome da obra em h1
+- Badge colorido com estado (Ativa/Pausada/Concluida)
+- Morada com icone MapPin
+- Nome da organizacao
+- Botao "Editar" no canto direito
+
+**Badge de Estado:**
+```text
+- active: bg-green-500 (Ativa)
+- paused: bg-yellow-500 (Pausada)
+- completed: bg-blue-500 (Concluida)
+```
+
+### 3. SiteOverviewTab.tsx
+
+**Cards de Estatisticas:**
+1. Total de Capturas (icone Camera)
+2. NCs Abertas (icone AlertTriangle, vermelho se > 0)
+3. Inspeccoes Realizadas (icone ClipboardCheck)
+4. Ultima Inspeccao (icone Calendar)
+
+**Cards Adicionais:**
+- Resumo da Estrutura: X Pisos, Y Areas, Z Pontos
+- Actividade Recente: ultimas 5 capturas/inspeccoes
+
+**Queries:**
+```text
+- COUNT captures via capture_points > areas > floors > site
+- COUNT nonconformities WHERE status = 'OPEN' via inspections > site
+- COUNT inspections WHERE site_id = :siteId
+- MAX(scheduled_at) FROM inspections WHERE site_id = :siteId
+```
+
+### 4. SiteStructureTab.tsx
+
+**Arvore Hierarquica usando Accordion:**
+```text
+Piso -1 (Garagem)
+  ├── Zona A
+  │   ├── Ponto P-001
+  │   └── Ponto P-002
+  └── Zona B
+      └── Ponto P-003
+
+Piso 0 (Rez-do-chao)
+  └── Entrada
+      └── Ponto P-004
+```
+
+**Componentes utilizados:**
+- Accordion para pisos (nivel 1)
+- Accordion aninhado para areas (nivel 2)
+- Lista simples para pontos (nivel 3)
+
+**Accoes por nivel:**
+- Piso: Editar, Eliminar, Adicionar Area
+- Area: Editar, Eliminar, Adicionar Ponto
+- Ponto: Editar, Eliminar
+
+**Botoes no topo:**
+- "Adicionar Piso"
+
+**Estado vazio:**
+- Mensagem "Ainda nao tem pisos configurados"
+- Botao "Adicionar Primeiro Piso"
+
+### 5. SiteCapturesTab.tsx
+
+**Reutilizar logica de Captures.tsx:**
+- Filtrar automaticamente pelo siteId
+- Grid de CaptureCard
+- Abrir CaptureViewer ao clicar
+- Botao "Nova Captura" que abre modal pre-preenchido com site
+
+### 6. SiteInspectionsTab.tsx
+
+**Lista de Inspeccoes:**
+- Tabela ou cards com:
+  - Nome do template
+  - Data agendada
+  - Estado (badge)
+  - Responsavel
+  - Accoes (ver, editar)
+
+**Estado vazio:**
+- "Ainda nao existem inspeccoes para esta obra"
+- Botao "Criar Inspeccao"
+
+### 7. SiteDocumentsTab.tsx
+
+**Lista de Documentos:**
+- Tabela com:
+  - Nome do documento
+  - Tipo
+  - Data de upload
+  - Accoes (download, eliminar)
+
+**Estado vazio:**
+- "Ainda nao existem documentos"
+- Botao "Carregar Documento"
+
+### 8. EditSiteModal.tsx
+
+**Campos editaveis:**
+- Nome (obrigatorio)
+- Morada
+- Descricao
+- Estado (select: active, paused, completed)
+
+**Nota:** O campo 'status' nao existe actualmente na tabela sites. Sera necessario adicionar via migracao ou simular com logica de negocio.
+
+---
+
+## Alteracao na Rota (App.tsx)
+
+Adicionar nova rota dentro do bloco /app:
+
+```text
+<Route path="sites/:siteId" element={<SiteDetail />} />
+```
+
+---
+
+## Alteracao no AppHeader.tsx
+
+Actualizar a logica de breadcrumbs para:
+1. Detectar quando estamos em /app/sites/:siteId
+2. Buscar o nome da obra via query ou context
+3. Mostrar: Dashboard > Obras > [Nome da Obra]
+
+**Alternativa mais simples:**
+- Passar o nome da obra via state do router
+- Ou usar um context de "current site"
+
+---
+
+## Migracao de Base de Dados
+
+A tabela `sites` nao tem campo `status`. Opcoes:
+
+**Opcao 1:** Adicionar coluna status
+```text
+ALTER TABLE sites 
+ADD COLUMN status text NOT NULL DEFAULT 'active'
+CHECK (status IN ('active', 'paused', 'completed'));
+```
+
+**Opcao 2:** Inferir estado de outras tabelas (ex: se tem inspeccao concluida recente = activa)
+
+**Recomendacao:** Opcao 1 para flexibilidade total.
+
+---
+
+## Traducoes a Adicionar
+
+```text
+siteDetail.overview: "Visao Geral"
+siteDetail.structure: "Estrutura"
+siteDetail.captures: "Capturas"
+siteDetail.inspections: "Inspeccoes"
+siteDetail.documents: "Documentos"
+siteDetail.editSite: "Editar Obra"
+siteDetail.totalCaptures: "Total de Capturas"
+siteDetail.openNCs: "NCs Abertas"
+siteDetail.inspectionsCount: "Inspeccoes"
+siteDetail.lastInspection: "Ultima Inspeccao"
+siteDetail.noInspections: "Sem inspeccoes"
+siteDetail.structureSummary: "Resumo da Estrutura"
+siteDetail.floors: "Pisos"
+siteDetail.areas: "Areas"
+siteDetail.points: "Pontos"
+siteDetail.addFloor: "Adicionar Piso"
+siteDetail.addArea: "Adicionar Area"
+siteDetail.addPoint: "Adicionar Ponto"
+siteDetail.floorName: "Nome do Piso"
+siteDetail.floorLevel: "Nivel"
+siteDetail.areaName: "Nome da Area"
+siteDetail.pointCode: "Codigo do Ponto"
+siteDetail.pointDescription: "Descricao"
+siteDetail.noFloors: "Ainda nao tem pisos configurados"
+siteDetail.createFirstFloor: "Adicionar Primeiro Piso"
+siteDetail.noDocuments: "Ainda nao existem documentos"
+siteDetail.uploadDocument: "Carregar Documento"
+siteDetail.recentActivity: "Actividade Recente"
+```
 
 ---
 
 ## Fluxo de Utilizacao
 
 ```text
-1. User clica numa captura na grid
+1. User clica numa obra na pagina Sites ou Dashboard
    ↓
-2. CaptureViewer abre em fullscreen
+2. Navega para /app/sites/:siteId
    ↓
-3. User pode:
-   a. Navegar entre capturas (setas/teclado)
-   b. Zoom in/out (scroll/pinch/botoes)
-   c. Pan para ver detalhes (arrastar)
-   d. Ver painel de info (toggle)
-   e. Download do ficheiro
-   f. Eliminar captura
-   g. Criar NC a partir da captura
+3. SiteDetail carrega dados da obra
    ↓
-4. Se 360, viewer panoramico permite rotacao livre
+4. User ve header com info basica
    ↓
-5. ESC ou X fecha o viewer
+5. Tab Visao Geral mostra estatisticas
+   ↓
+6. User pode:
+   a. Editar info da obra (botao header)
+   b. Ver/gerir estrutura (tab Estrutura)
+   c. Ver capturas filtradas (tab Capturas)
+   d. Ver inspeccoes (tab Inspeccoes)
+   e. Ver documentos (tab Documentos)
 ```
+
+---
+
+## Consideracoes Tecnicas
+
+1. **RLS Policies**: Todas as queries respeitam as policies existentes via `can_access_site` e `is_org_member`
+
+2. **Performance**: Usar React Query com staleTime apropriado para evitar re-fetches excessivos
+
+3. **Estado 404**: Se siteId nao existe ou user nao tem acesso, mostrar pagina de erro
+
+4. **Navegacao**: Usar useNavigate para voltar a lista de obras
+
+5. **Breadcrumb Dinamico**: Pode requerer pequena refactorizacao do AppHeader ou uso de React Context
 
 ---
 
 ## Proximos Passos Apos Implementacao
 
-1. Criar Edge Function para signed URLs do Storage
-2. Implementar integracao real com Storage para download
-3. Adicionar annotations/marcacoes sobre as imagens
-4. Implementar comparacao side-by-side de capturas
-5. Adicionar timeline de capturas do mesmo ponto
+1. Adicionar mapa interactivo com localizacao da obra
+2. Implementar upload de planta baixa (floor plan)
+3. Adicionar marcadores de pontos de captura na planta
+4. Integrar timeline de actividade
+5. Dashboard comparativo entre obras
+
