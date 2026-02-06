@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -10,10 +10,11 @@ import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Download, X, ZoomIn, ZoomOut, RotateCcw,
-  PanelRightClose, PanelRightOpen, AlertTriangle,
+  PanelRightClose, PanelRightOpen, AlertTriangle, Brain, Loader2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { pt } from 'date-fns/locale';
+import { toast } from 'sonner';
 
 interface ProjectViewerProps {
   projectId: string;
@@ -32,6 +33,7 @@ const SEVERITY_STYLES: Record<string, string> = {
 export function ProjectViewer({ projectId, open, onClose, siteId }: ProjectViewerProps) {
   const [zoom, setZoom] = useState(1);
   const [panelOpen, setPanelOpen] = useState(true);
+  const queryClient = useQueryClient();
 
   const { data: project } = useQuery({
     queryKey: ['project', projectId],
@@ -75,6 +77,22 @@ export function ProjectViewer({ projectId, open, onClose, siteId }: ProjectViewe
     enabled: open,
   });
 
+  const analyzeMutation = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke('ai-analyze-project', {
+        body: { projectId, analysisType: 'full' },
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['project-elements', projectId] });
+      toast.success(`Análise concluída: ${data?.elements_count || 0} elementos detectados`);
+    },
+    onError: (err: Error) => toast.error('Erro na análise', { description: err.message }),
+  });
+
   if (!project) return null;
 
   const isPdf = project.file_type?.includes('pdf');
@@ -86,6 +104,19 @@ export function ProjectViewer({ projectId, open, onClose, siteId }: ProjectViewe
         <DialogHeader className="px-4 py-3 border-b flex flex-row items-center justify-between">
           <DialogTitle className="text-base">{project.name}</DialogTitle>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => analyzeMutation.mutate()}
+              disabled={analyzeMutation.isPending}
+            >
+              {analyzeMutation.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Brain className="mr-2 h-4 w-4" />
+              )}
+              Analisar
+            </Button>
             {isImage && (
               <>
                 <Button variant="ghost" size="icon" onClick={() => setZoom(z => Math.min(z + 0.25, 3))}>
@@ -120,11 +151,7 @@ export function ProjectViewer({ projectId, open, onClose, siteId }: ProjectViewe
           {/* Main viewer */}
           <div className="flex-1 overflow-auto bg-muted/30 flex items-center justify-center">
             {isPdf && project.file_url ? (
-              <iframe
-                src={project.file_url}
-                className="w-full h-full border-0"
-                title={project.name}
-              />
+              <iframe src={project.file_url} className="w-full h-full border-0" title={project.name} />
             ) : isImage && project.file_url ? (
               <div className="overflow-auto w-full h-full flex items-center justify-center p-4">
                 <img
@@ -187,6 +214,11 @@ export function ProjectViewer({ projectId, open, onClose, siteId }: ProjectViewe
                      project.analysis_status === 'analyzing' ? 'A analisar' :
                      project.analysis_status === 'completed' ? 'Concluída' : 'Falhou'}
                   </Badge>
+                  {project.analyzed_at && (
+                    <p className="text-xs text-muted-foreground">
+                      Analisado em {format(new Date(project.analyzed_at), 'dd MMM yyyy HH:mm', { locale: pt })}
+                    </p>
+                  )}
                 </div>
 
                 {/* Elements */}
@@ -198,16 +230,21 @@ export function ProjectViewer({ projectId, open, onClose, siteId }: ProjectViewe
                         Elementos ({elements.length})
                       </h4>
                       <div className="space-y-2">
-                        {elements.slice(0, 10).map(el => (
+                        {elements.slice(0, 20).map(el => (
                           <div key={el.id} className="text-xs p-2 rounded-lg bg-muted/50">
-                            <span className="font-medium">{el.element_code || el.element_type}</span>
+                            <div className="flex items-center justify-between">
+                              <span className="font-medium">{el.element_code || el.element_type}</span>
+                              {el.confidence != null && (
+                                <span className="text-muted-foreground">{Math.round(el.confidence * 100)}%</span>
+                              )}
+                            </div>
                             {el.location_description && (
                               <p className="text-muted-foreground mt-0.5">{el.location_description}</p>
                             )}
                           </div>
                         ))}
-                        {elements.length > 10 && (
-                          <p className="text-xs text-muted-foreground">+{elements.length - 10} mais</p>
+                        {elements.length > 20 && (
+                          <p className="text-xs text-muted-foreground">+{elements.length - 20} mais</p>
                         )}
                       </div>
                     </div>

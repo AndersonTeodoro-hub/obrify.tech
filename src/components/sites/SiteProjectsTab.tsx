@@ -9,11 +9,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Map, Building2, Columns3, Droplets, Wind, Zap, Flame, Radio, FileStack,
-  Plus, ArrowLeft, Eye, Download, Trash2, FileText
+  Plus, ArrowLeft, Eye, Download, Trash2, FileText, Brain, GitCompareArrows, Loader2,
 } from 'lucide-react';
 import { UploadProjectModal } from './UploadProjectModal';
 import { ProjectViewer } from './ProjectViewer';
 import { ProjectConflictsSummary } from './ProjectConflictsSummary';
+import { ProjectConflictsDetail } from './ProjectConflictsDetail';
+import { CompareProjectsModal } from './CompareProjectsModal';
 import { format } from 'date-fns';
 import { pt } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -70,6 +72,8 @@ export function SiteProjectsTab({ siteId, orgId }: SiteProjectsTabProps) {
   const [selectedSpecialty, setSelectedSpecialty] = useState<ProjectSpecialty | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [viewingProject, setViewingProject] = useState<string | null>(null);
+  const [analyzingIds, setAnalyzingIds] = useState<Set<string>>(new Set());
+  const [compareProject, setCompareProject] = useState<{ id: string; name: string } | null>(null);
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects', siteId],
@@ -108,13 +112,28 @@ export function SiteProjectsTab({ siteId, orgId }: SiteProjectsTabProps) {
     onError: () => toast.error('Erro ao eliminar projecto'),
   });
 
-  // Count projects per specialty
+  const handleAnalyze = async (projectId: string) => {
+    setAnalyzingIds(prev => new Set(prev).add(projectId));
+    try {
+      const { data, error } = await supabase.functions.invoke('ai-analyze-project', {
+        body: { projectId, analysisType: 'full' },
+      });
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['projects', siteId] });
+      queryClient.invalidateQueries({ queryKey: ['project-elements'] });
+      toast.success(`Análise concluída: ${data?.elements_count || 0} elementos detectados`);
+    } catch (err: any) {
+      toast.error('Erro na análise', { description: err.message });
+    } finally {
+      setAnalyzingIds(prev => { const s = new Set(prev); s.delete(projectId); return s; });
+    }
+  };
+
   const countsBySpecialty = SPECIALTIES.reduce((acc, s) => {
     acc[s.key] = projects.filter(p => p.specialty === s.key).length;
     return acc;
   }, {} as Record<ProjectSpecialty, number>);
 
-  // Conflicts count per project
   const conflictsByProject = (projectId: string) =>
     conflicts.filter(c =>
       (c.project1_id === projectId || c.project2_id === projectId) &&
@@ -151,6 +170,14 @@ export function SiteProjectsTab({ siteId, orgId }: SiteProjectsTabProps) {
         </div>
 
         <ProjectConflictsSummary siteId={siteId} conflicts={conflicts} />
+
+        <ProjectConflictsDetail
+          siteId={siteId}
+          orgId={orgId}
+          conflicts={conflicts}
+          projects={projects.map(p => ({ id: p.id, name: p.name, specialty: p.specialty }))}
+          onViewProject={setViewingProject}
+        />
 
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           {SPECIALTIES.map(({ key, icon: Icon, color }) => {
@@ -189,6 +216,15 @@ export function SiteProjectsTab({ siteId, orgId }: SiteProjectsTabProps) {
           siteId={siteId}
           orgId={orgId}
         />
+
+        {viewingProject && (
+          <ProjectViewer
+            projectId={viewingProject}
+            open={!!viewingProject}
+            onClose={() => setViewingProject(null)}
+            siteId={siteId}
+          />
+        )}
       </div>
     );
   }
@@ -246,6 +282,7 @@ export function SiteProjectsTab({ siteId, orgId }: SiteProjectsTabProps) {
             <TableBody>
               {filteredProjects.map(project => {
                 const cCount = conflictsByProject(project.id);
+                const isAnalyzing = analyzingIds.has(project.id);
                 return (
                   <TableRow key={project.id}>
                     <TableCell className="font-medium">{project.name}</TableCell>
@@ -263,7 +300,7 @@ export function SiteProjectsTab({ siteId, orgId }: SiteProjectsTabProps) {
                     </TableCell>
                     <TableCell>
                       <Badge className={ANALYSIS_STATUS_STYLES[project.analysis_status] || ''} variant="outline">
-                        {ANALYSIS_STATUS_LABELS[project.analysis_status] || project.analysis_status}
+                        {isAnalyzing ? 'A analisar...' : (ANALYSIS_STATUS_LABELS[project.analysis_status] || project.analysis_status)}
                       </Badge>
                     </TableCell>
                     <TableCell>
@@ -275,6 +312,23 @@ export function SiteProjectsTab({ siteId, orgId }: SiteProjectsTabProps) {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Analisar com IA"
+                          onClick={() => handleAnalyze(project.id)}
+                          disabled={isAnalyzing}
+                        >
+                          {isAnalyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Comparar"
+                          onClick={() => setCompareProject({ id: project.id, name: project.name })}
+                        >
+                          <GitCompareArrows className="h-4 w-4" />
+                        </Button>
                         <Button variant="ghost" size="icon" onClick={() => setViewingProject(project.id)}>
                           <Eye className="h-4 w-4" />
                         </Button>
@@ -320,6 +374,17 @@ export function SiteProjectsTab({ siteId, orgId }: SiteProjectsTabProps) {
           open={!!viewingProject}
           onClose={() => setViewingProject(null)}
           siteId={siteId}
+        />
+      )}
+
+      {compareProject && (
+        <CompareProjectsModal
+          open={!!compareProject}
+          onOpenChange={(v) => { if (!v) setCompareProject(null); }}
+          siteId={siteId}
+          sourceProjectId={compareProject.id}
+          sourceProjectName={compareProject.name}
+          projects={projects.map(p => ({ id: p.id, name: p.name, specialty: p.specialty }))}
         />
       )}
     </div>

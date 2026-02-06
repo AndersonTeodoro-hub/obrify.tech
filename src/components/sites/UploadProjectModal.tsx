@@ -43,6 +43,16 @@ const FLOOR_OPTIONS = [
   'Piso 5', 'Piso 6', 'Piso 7', 'Piso 8', 'Piso 9', 'Piso 10', 'Cobertura',
 ];
 
+const SPECIALTY_COMPARISONS: Record<string, ProjectSpecialty[]> = {
+  structure: ['architecture', 'plumbing', 'hvac', 'electrical'],
+  architecture: ['structure'],
+  plumbing: ['structure', 'electrical'],
+  electrical: ['structure', 'plumbing'],
+  hvac: ['structure'],
+  gas: ['structure'],
+  telecom: ['structure', 'electrical'],
+};
+
 export function UploadProjectModal({
   open, onOpenChange, siteId, orgId, preSelectedSpecialty,
 }: UploadProjectModalProps) {
@@ -67,6 +77,42 @@ export function UploadProjectModal({
     setFiles([]);
   };
 
+  const triggerAutoAnalysis = async (projectId: string, projectSpecialty: string) => {
+    try {
+      // Analyze the uploaded project
+      await supabase.functions.invoke('ai-analyze-project', {
+        body: { projectId, analysisType: 'full' },
+      });
+      queryClient.invalidateQueries({ queryKey: ['projects', siteId] });
+
+      // Auto-compare with related specialties
+      const relatedSpecialties = SPECIALTY_COMPARISONS[projectSpecialty] || [];
+      if (relatedSpecialties.length > 0) {
+        const { data: relatedProjects } = await supabase
+          .from('projects')
+          .select('id, specialty')
+          .eq('site_id', siteId)
+          .eq('is_current_version', true)
+          .in('specialty', relatedSpecialties);
+
+        if (relatedProjects && relatedProjects.length > 0) {
+          for (const rp of relatedProjects) {
+            try {
+              await supabase.functions.invoke('ai-compare-projects', {
+                body: { project1Id: projectId, project2Id: rp.id },
+              });
+            } catch (e) {
+              console.error('Auto-compare error:', e);
+            }
+          }
+          queryClient.invalidateQueries({ queryKey: ['project-conflicts', siteId] });
+        }
+      }
+    } catch (e) {
+      console.error('Auto-analysis error:', e);
+    }
+  };
+
   const uploadMutation = useMutation({
     mutationFn: async () => {
       if (!specialty || files.length === 0 || !user) throw new Error('Campos obrigatórios em falta');
@@ -75,7 +121,6 @@ export function UploadProjectModal({
       const ext = file.name.split('.').pop();
       const path = `organizations/${orgId}/sites/${siteId}/projects/${specialty}/${Date.now()}.${ext}`;
 
-      // Upload file
       const { error: uploadError } = await supabase.storage
         .from('documents')
         .upload(path, file);
@@ -83,7 +128,6 @@ export function UploadProjectModal({
 
       const { data: urlData } = supabase.storage.from('documents').getPublicUrl(path);
 
-      // If marking as current, unmark others
       if (isCurrent) {
         await supabase
           .from('projects')
@@ -95,7 +139,7 @@ export function UploadProjectModal({
 
       const zone = floorOrZone === '__custom' ? customFloor : floorOrZone;
 
-      const { error } = await supabase.from('projects').insert({
+      const { data: inserted, error } = await supabase.from('projects').insert({
         organization_id: orgId,
         site_id: siteId,
         specialty,
@@ -108,14 +152,20 @@ export function UploadProjectModal({
         file_type: file.type,
         file_size: file.size,
         uploaded_by: user.id,
-      });
+      }).select('id').single();
       if (error) throw error;
+
+      return { projectId: inserted.id, specialty };
     },
-    onSuccess: () => {
+    onSuccess: ({ projectId, specialty: projSpecialty }) => {
       queryClient.invalidateQueries({ queryKey: ['projects', siteId] });
       toast.success('Projecto carregado com sucesso');
+      toast.info('Análise IA iniciada em segundo plano');
       resetForm();
       onOpenChange(false);
+
+      // Trigger auto-analysis in background (non-blocking)
+      triggerAutoAnalysis(projectId, projSpecialty);
     },
     onError: (err: Error) => {
       toast.error('Erro ao carregar projecto', { description: err.message });
@@ -138,7 +188,6 @@ export function UploadProjectModal({
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* Specialty */}
           <div className="space-y-2">
             <Label>Especialidade *</Label>
             <Select value={specialty} onValueChange={(v) => setSpecialty(v as ProjectSpecialty)}>
@@ -153,7 +202,6 @@ export function UploadProjectModal({
             </Select>
           </div>
 
-          {/* Floor / Zone */}
           <div className="space-y-2">
             <Label>Piso / Zona</Label>
             <Select value={floorOrZone} onValueChange={setFloorOrZone}>
@@ -176,7 +224,6 @@ export function UploadProjectModal({
             )}
           </div>
 
-          {/* Version */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Versão</Label>
@@ -190,7 +237,6 @@ export function UploadProjectModal({
             </div>
           </div>
 
-          {/* Description */}
           <div className="space-y-2">
             <Label>Descrição (opcional)</Label>
             <Textarea
@@ -201,7 +247,6 @@ export function UploadProjectModal({
             />
           </div>
 
-          {/* Dropzone */}
           <div className="space-y-2">
             <Label>Ficheiro *</Label>
             <DropZone
@@ -219,9 +264,7 @@ export function UploadProjectModal({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancelar
-          </Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
           <Button onClick={() => uploadMutation.mutate()} disabled={!canSubmit}>
             {uploadMutation.isPending ? (
               <>

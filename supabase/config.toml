@@ -8,3 +8,9 @@ verify_jwt = false
 
 [functions.ai-obrify-agent]
 verify_jwt = false
+
+[functions.ai-analyze-project]
+verify_jwt = false
+
+[functions.ai-compare-projects]
+verify_jwt = false
