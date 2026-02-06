@@ -54,6 +54,20 @@
     "termsText": "En continuant, vous acceptez nos",
     "termsOfService": "Conditions d'utilisation",
     "privacyPolicy": "Politique de confidentialité",
+    "forgotPassword": {
+      "title": "Récupérer mot de passe",
+      "description": "Entrez votre email pour recevoir les instructions",
+      "submit": "Envoyer les instructions",
+      "success": "Email envoyé ! Vérifiez votre boîte de réception.",
+      "backToLogin": "Retour à la connexion"
+    },
+    "resetPassword": {
+      "title": "Nouveau mot de passe",
+      "newPassword": "Nouveau mot de passe",
+      "confirmPassword": "Confirmer le mot de passe",
+      "submit": "Changer le mot de passe",
+      "success": "Mot de passe changé avec succès !"
+    },
     "landing": {
       "badge": "Plateforme Opérationnelle",
       "mobileTitle": "Inspection avec",
@@ -208,7 +222,16 @@
   "settings": {
     "title": "Paramètres",
     "subtitle": "Configurer votre compte et préférences",
-    "profile": "Profil",
+    "general": "Général",
+    "profile": {
+      "title": "Profil",
+      "name": "Nom complet",
+      "email": "Email",
+      "avatar": "Photo de profil",
+      "uploadAvatar": "Télécharger photo",
+      "save": "Enregistrer les modifications",
+      "saved": "Profil mis à jour avec succès"
+    },
     "account": "Compte",
     "notifications": "Notifications",
     "appearance": "Apparence",

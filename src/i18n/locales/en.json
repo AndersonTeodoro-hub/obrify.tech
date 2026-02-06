@@ -63,6 +63,20 @@
     "privacyPolicy": "Privacy Policy",
     "checkEmail": "Check your email",
     "confirmationSent": "We sent a confirmation email to your address.",
+    "forgotPassword": {
+      "title": "Reset password",
+      "description": "Enter your email to receive instructions",
+      "submit": "Send instructions",
+      "success": "Email sent! Check your inbox.",
+      "backToLogin": "Back to login"
+    },
+    "resetPassword": {
+      "title": "New password",
+      "newPassword": "New password",
+      "confirmPassword": "Confirm password",
+      "submit": "Change password",
+      "success": "Password changed successfully!"
+    },
     "landing": {
       "badge": "Operational Platform",
       "mobileTitle": "Inspection with",
@@ -720,7 +734,15 @@
     "title": "Settings",
     "subtitle": "Manage your preferences",
     "general": "General",
-    "profile": "Profile",
+    "profile": {
+      "title": "Profile",
+      "name": "Full name",
+      "email": "Email",
+      "avatar": "Profile picture",
+      "uploadAvatar": "Upload photo",
+      "save": "Save changes",
+      "saved": "Profile updated successfully"
+    },
     "account": "Account information",
     "appearance": "Appearance",
     "theme": "Theme",

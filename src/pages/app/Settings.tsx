@@ -77,7 +77,7 @@ export default function Settings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['profile'] });
-      toast.success(t('settings.profileSaved', 'Perfil actualizado com sucesso'));
+      toast.success(t('settings.profile.saved', 'Perfil actualizado com sucesso'));
     },
     onError: () => {
       toast.error(t('common.error'));
@@ -155,7 +155,7 @@ export default function Settings() {
                   <User className="w-5 h-5 text-primary" />
                 </div>
                 <div>
-                  <CardTitle className="text-lg">{t('settings.profile')}</CardTitle>
+                  <CardTitle className="text-lg">{t('settings.profile.title')}</CardTitle>
                   <CardDescription>{t('settings.account')}</CardDescription>
                 </div>
               </div>
@@ -177,7 +177,7 @@ export default function Settings() {
                     disabled={avatarUploading}
                   >
                     {avatarUploading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Upload className="w-4 h-4 mr-2" />}
-                    {t('settings.profileUploadAvatar', 'Carregar foto')}
+                    {t('settings.profile.uploadAvatar', 'Carregar foto')}
                   </Button>
                   <input
                     ref={fileInputRef}
@@ -191,7 +191,7 @@ export default function Settings() {
 
               {/* Full Name */}
               <div className="space-y-2">
-                <Label>{t('settings.profileName', 'Nome completo')}</Label>
+                <Label>{t('settings.profile.name', 'Nome completo')}</Label>
                 <Input
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
@@ -209,7 +209,7 @@ export default function Settings() {
                 onClick={handleSaveProfile}
                 disabled={updateProfileMutation.isPending}
               >
-                {updateProfileMutation.isPending ? t('common.loading') : t('settings.profileSave', 'Guardar alterações')}
+                {updateProfileMutation.isPending ? t('common.loading') : t('settings.profile.save', 'Guardar alterações')}
               </Button>
             </CardContent>
           </Card>

@@ -63,6 +63,20 @@
     "privacyPolicy": "Política de Privacidade",
     "checkEmail": "Verifique o seu email",
     "confirmationSent": "Enviámos um email de confirmação para o seu endereço.",
+    "forgotPassword": {
+      "title": "Recuperar password",
+      "description": "Insira o seu email para receber instruções",
+      "submit": "Enviar instruções",
+      "success": "Email enviado! Verifique a sua caixa de correio.",
+      "backToLogin": "Voltar ao login"
+    },
+    "resetPassword": {
+      "title": "Nova password",
+      "newPassword": "Nova password",
+      "confirmPassword": "Confirmar password",
+      "submit": "Alterar password",
+      "success": "Password alterada com sucesso!"
+    },
     "landing": {
       "badge": "Plataforma Operacional",
       "mobileTitle": "Fiscalização com",
@@ -720,7 +734,15 @@
     "title": "Definições",
     "subtitle": "Gerir as suas preferências",
     "general": "Geral",
-    "profile": "Perfil",
+    "profile": {
+      "title": "Perfil",
+      "name": "Nome completo",
+      "email": "Email",
+      "avatar": "Foto de perfil",
+      "uploadAvatar": "Carregar foto",
+      "save": "Guardar alterações",
+      "saved": "Perfil actualizado com sucesso"
+    },
     "account": "Informações da conta",
     "appearance": "Aparência",
     "theme": "Tema",
