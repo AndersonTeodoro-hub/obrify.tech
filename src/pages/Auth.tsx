@@ -1,25 +1,23 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Activity, Building2, Camera, Shield, ArrowRight, Loader2 } from "lucide-react";
+import { Activity, Loader2, Eye, EyeOff } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { Checkbox } from "@/components/ui/checkbox";
 
 export default function AuthPage() {
+  const [isLogin, setIsLogin] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [signupEmail, setSignupEmail] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
   const [signupName, setSignupName] = useState("");
   const [signupConfirmPassword, setSignupConfirmPassword] = useState("");
-  
+
   const { signIn, signUp } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -27,307 +25,275 @@ export default function AuthPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-
     const { error } = await signIn(loginEmail, loginPassword);
-
     if (error) {
-      toast({
-        title: "Erro ao entrar",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Erro ao entrar", description: error.message, variant: "destructive" });
     } else {
-      toast({
-        title: "Bem-vindo!",
-        description: "Login efetuado com sucesso.",
-      });
+      toast({ title: "Bem-vindo!", description: "Login efetuado com sucesso." });
       navigate("/app");
     }
-
     setIsLoading(false);
   };
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-
     if (signupPassword !== signupConfirmPassword) {
-      toast({
-        title: "Erro",
-        description: "As passwords não coincidem.",
-        variant: "destructive",
-      });
+      toast({ title: "Erro", description: "As passwords não coincidem.", variant: "destructive" });
       return;
     }
-
     if (signupPassword.length < 6) {
-      toast({
-        title: "Erro",
-        description: "A password deve ter pelo menos 6 caracteres.",
-        variant: "destructive",
-      });
+      toast({ title: "Erro", description: "A password deve ter pelo menos 6 caracteres.", variant: "destructive" });
       return;
     }
-
     setIsLoading(true);
-
     const { error } = await signUp(signupEmail, signupPassword, signupName);
-
     if (error) {
-      toast({
-        title: "Erro ao criar conta",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Erro ao criar conta", description: error.message, variant: "destructive" });
     } else {
-      toast({
-        title: "Conta criada!",
-        description: "A sua conta foi criada com sucesso.",
-      });
+      toast({ title: "Conta criada!", description: "A sua conta foi criada com sucesso." });
       navigate("/app");
     }
-
     setIsLoading(false);
   };
 
-  const features = [
-    {
-      icon: Building2,
-      title: "Gestão Multi-obra",
-      description: "Organize todas as suas obras num único lugar",
-    },
-    {
-      icon: Camera,
-      title: "Capturas Inteligentes",
-      description: "Fotos, vídeos e 360° para documentação completa",
-    },
-    {
-      icon: Shield,
-      title: "Fiscalização Guiada",
-      description: "Checklists técnicos e relatórios automáticos",
-    },
-  ];
-
   return (
-    <div className="min-h-screen flex">
-      {/* Left Panel - Branding */}
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-primary/10 via-accent/5 to-background relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_var(--tw-gradient-stops))] from-primary/20 via-transparent to-transparent" />
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSA2MCAwIEwgMCAwIDAgNjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0icmdiYSgwLDAsMCwwLjAzKSIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI2dyaWQpIi8+PC9zdmc+')] opacity-50" />
-        
-        <div className="relative z-10 flex flex-col justify-between p-12 w-full">
-          <div>
-            <div className="flex items-center gap-3 mb-16">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center glow-primary">
-                <Activity className="w-7 h-7 text-primary-foreground" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold gradient-text">SitePulse</h1>
-                <p className="text-xs text-muted-foreground">Fiscalização Inteligente</p>
-              </div>
-            </div>
-
-            <div className="space-y-2 mb-12">
-              <h2 className="text-4xl font-bold leading-tight">
-                Transforme a forma como
-                <br />
-                <span className="gradient-text">fiscaliza as suas obras</span>
-              </h2>
-              <p className="text-lg text-muted-foreground max-w-md">
-                Plataforma moderna para acompanhamento e fiscalização de construção com capturas inteligentes e relatórios automáticos.
-              </p>
-            </div>
+    <div className="min-h-screen flex flex-col lg:flex-row">
+      {/* Mobile Hero */}
+      <div className="lg:hidden relative h-[45vh] overflow-hidden">
+        <img src="/images/hero-drone.jpeg" alt="Drone a inspecionar obra" className="absolute inset-0 w-full h-full object-cover" />
+        <div className="absolute inset-0 bg-gradient-to-b from-slate-900/80 via-slate-900/70 to-slate-900/90" />
+        <div className="relative z-10 flex flex-col justify-center items-center h-full px-6 text-center">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/10 mb-4 animate-fade-in">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-xs text-white/90 font-medium">Plataforma Operacional</span>
           </div>
-
-          <div className="space-y-6">
-            {features.map((feature, index) => (
-              <div key={index} className="flex items-start gap-4 p-4 rounded-xl glass glass-hover">
-                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                  <feature.icon className="w-5 h-5 text-primary" />
-                </div>
-                <div>
-                  <h3 className="font-semibold">{feature.title}</h3>
-                  <p className="text-sm text-muted-foreground">{feature.description}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-12">
-            <p className="text-sm text-muted-foreground">
-              Preparado para integração com{" "}
-              <span className="text-primary font-medium">Drones</span> e{" "}
-              <span className="text-accent font-medium">Inteligência Artificial</span>
-            </p>
-          </div>
+          <h2 className="text-2xl font-bold text-white mb-2 animate-fade-in">
+            Fiscalização com <span className="bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent">IA</span>
+          </h2>
+          <p className="text-sm text-slate-300 max-w-xs animate-fade-in">
+            Detecte defeitos, digitalize inspeções, gere relatórios.
+          </p>
         </div>
       </div>
 
-      {/* Right Panel - Auth Forms */}
-      <div className="flex-1 flex items-center justify-center p-6 lg:p-12 bg-background">
-        <div className="w-full max-w-md">
-          <div className="flex justify-end gap-1 mb-6">
-            <LanguageSwitcher />
-            <ThemeToggle />
-          </div>
+      {/* Left - Form */}
+      <div className="flex-1 lg:w-[40%] lg:max-w-none flex flex-col bg-white dark:bg-slate-950 relative">
+        <div className="absolute top-4 right-4 flex gap-1 z-10">
+          <LanguageSwitcher />
+          <ThemeToggle />
+        </div>
 
-          {/* Mobile Logo */}
-          <div className="lg:hidden flex items-center gap-3 mb-8 justify-center">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center">
-              <Activity className="w-6 h-6 text-primary-foreground" />
+        <div className="flex-1 flex items-center justify-center px-6 py-10 lg:px-12">
+          <div className="w-full max-w-[400px]">
+            {/* Logo */}
+            <div className="flex items-center gap-3 mb-10">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 dark:from-slate-600 dark:to-slate-800 flex items-center justify-center shadow-lg">
+                <Activity className="w-5 h-5 text-white" />
+              </div>
+              <span className="text-xl font-bold text-foreground">Obrify</span>
             </div>
-            <div>
-              <h1 className="text-xl font-bold gradient-text">SitePulse</h1>
-              <p className="text-xs text-muted-foreground">Fiscalização Inteligente</p>
-            </div>
-          </div>
 
-          <Tabs defaultValue="login" className="w-full">
-            <TabsList className="grid w-full grid-cols-2 mb-6">
-              <TabsTrigger value="login">Entrar</TabsTrigger>
-              <TabsTrigger value="signup">Criar Conta</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="login">
-              <Card className="glass border-border/50">
-                <CardHeader>
-                  <CardTitle>Bem-vindo de volta</CardTitle>
-                  <CardDescription>
-                    Introduza as suas credenciais para aceder à plataforma
-                  </CardDescription>
-                </CardHeader>
-                <form onSubmit={handleLogin}>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="login-email">Email</Label>
-                      <Input
-                        id="login-email"
-                        type="email"
-                        placeholder="seu@email.com"
-                        value={loginEmail}
-                        onChange={(e) => setLoginEmail(e.target.value)}
-                        required
-                        className="bg-background/50"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="login-password">Password</Label>
-                      <Input
+            {isLogin ? (
+              <>
+                <h1 className="text-2xl font-bold text-foreground mb-1">Bem-vindo</h1>
+                <p className="text-sm text-muted-foreground mb-8">Entre na sua conta para continuar</p>
+                <form onSubmit={handleLogin} className="space-y-5">
+                  <div className="space-y-1.5">
+                    <label htmlFor="login-email" className="text-sm font-medium text-foreground">Email</label>
+                    <input
+                      id="login-email"
+                      type="email"
+                      placeholder="seu@email.com"
+                      value={loginEmail}
+                      onChange={(e) => setLoginEmail(e.target.value)}
+                      required
+                      className="w-full h-11 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label htmlFor="login-password" className="text-sm font-medium text-foreground">Password</label>
+                    <div className="relative">
+                      <input
                         id="login-password"
-                        type="password"
+                        type={showPassword ? "text" : "password"}
                         placeholder="••••••••"
                         value={loginPassword}
                         onChange={(e) => setLoginPassword(e.target.value)}
                         required
-                        className="bg-background/50"
+                        className="w-full h-11 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                       />
+                      <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
                     </div>
-                  </CardContent>
-                  <CardFooter className="flex flex-col gap-4">
-                    <Button
-                      type="submit"
-                      className="w-full bg-gradient-to-r from-primary to-accent hover:opacity-90 transition-opacity"
-                      disabled={isLoading}
-                    >
-                      {isLoading ? (
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      ) : (
-                        <ArrowRight className="w-4 h-4 mr-2" />
-                      )}
-                      Entrar
-                    </Button>
-                  </CardFooter>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Checkbox id="remember" />
+                      <label htmlFor="remember" className="text-sm text-muted-foreground cursor-pointer">Lembrar-me</label>
+                    </div>
+                    <button type="button" className="text-sm text-primary hover:underline">Esqueceu password?</button>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full h-11 rounded-xl bg-gradient-to-br from-primary-600 to-primary-700 text-white font-semibold shadow-lg hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
+                  >
+                    {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                    Entrar
+                  </button>
                 </form>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="signup">
-              <Card className="glass border-border/50">
-                <CardHeader>
-                  <CardTitle>Criar nova conta</CardTitle>
-                  <CardDescription>
-                    Preencha os dados para começar a usar o SitePulse
-                  </CardDescription>
-                </CardHeader>
-                <form onSubmit={handleSignup}>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="signup-name">Nome completo</Label>
-                      <Input
-                        id="signup-name"
-                        type="text"
-                        placeholder="O seu nome"
-                        value={signupName}
-                        onChange={(e) => setSignupName(e.target.value)}
-                        required
-                        className="bg-background/50"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="signup-email">Email</Label>
-                      <Input
-                        id="signup-email"
-                        type="email"
-                        placeholder="seu@email.com"
-                        value={signupEmail}
-                        onChange={(e) => setSignupEmail(e.target.value)}
-                        required
-                        className="bg-background/50"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="signup-password">Password</Label>
-                      <Input
-                        id="signup-password"
-                        type="password"
-                        placeholder="••••••••"
-                        value={signupPassword}
-                        onChange={(e) => setSignupPassword(e.target.value)}
-                        required
-                        className="bg-background/50"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="signup-confirm">Confirmar password</Label>
-                      <Input
-                        id="signup-confirm"
-                        type="password"
-                        placeholder="••••••••"
-                        value={signupConfirmPassword}
-                        onChange={(e) => setSignupConfirmPassword(e.target.value)}
-                        required
-                        className="bg-background/50"
-                      />
-                    </div>
-                  </CardContent>
-                  <CardFooter className="flex flex-col gap-4">
-                    <Button
-                      type="submit"
-                      className="w-full bg-gradient-to-r from-primary to-accent hover:opacity-90 transition-opacity"
-                      disabled={isLoading}
-                    >
-                      {isLoading ? (
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      ) : (
-                        <ArrowRight className="w-4 h-4 mr-2" />
-                      )}
-                      Criar Conta
-                    </Button>
-                  </CardFooter>
+                <div className="flex items-center gap-3 my-6">
+                  <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
+                  <span className="text-xs text-muted-foreground">ou</span>
+                  <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
+                </div>
+                <p className="text-center text-sm text-muted-foreground">
+                  Ainda não tem conta?{" "}
+                  <button onClick={() => setIsLogin(false)} className="text-primary font-medium hover:underline">
+                    Criar conta gratuita
+                  </button>
+                </p>
+              </>
+            ) : (
+              <>
+                <h1 className="text-2xl font-bold text-foreground mb-1">Criar conta</h1>
+                <p className="text-sm text-muted-foreground mb-8">Preencha os dados para começar a usar o Obrify</p>
+                <form onSubmit={handleSignup} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label htmlFor="signup-name" className="text-sm font-medium text-foreground">Nome completo</label>
+                    <input
+                      id="signup-name"
+                      type="text"
+                      placeholder="O seu nome"
+                      value={signupName}
+                      onChange={(e) => setSignupName(e.target.value)}
+                      required
+                      className="w-full h-11 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label htmlFor="signup-email" className="text-sm font-medium text-foreground">Email</label>
+                    <input
+                      id="signup-email"
+                      type="email"
+                      placeholder="seu@email.com"
+                      value={signupEmail}
+                      onChange={(e) => setSignupEmail(e.target.value)}
+                      required
+                      className="w-full h-11 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label htmlFor="signup-password" className="text-sm font-medium text-foreground">Password</label>
+                    <input
+                      id="signup-password"
+                      type="password"
+                      placeholder="••••••••"
+                      value={signupPassword}
+                      onChange={(e) => setSignupPassword(e.target.value)}
+                      required
+                      className="w-full h-11 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label htmlFor="signup-confirm" className="text-sm font-medium text-foreground">Confirmar password</label>
+                    <input
+                      id="signup-confirm"
+                      type="password"
+                      placeholder="••••••••"
+                      value={signupConfirmPassword}
+                      onChange={(e) => setSignupConfirmPassword(e.target.value)}
+                      required
+                      className="w-full h-11 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full h-11 rounded-xl bg-gradient-to-br from-primary-600 to-primary-700 text-white font-semibold shadow-lg hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
+                  >
+                    {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                    Criar Conta
+                  </button>
                 </form>
-              </Card>
-            </TabsContent>
-          </Tabs>
+                <div className="flex items-center gap-3 my-6">
+                  <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
+                  <span className="text-xs text-muted-foreground">ou</span>
+                  <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
+                </div>
+                <p className="text-center text-sm text-muted-foreground">
+                  Já tem conta?{" "}
+                  <button onClick={() => setIsLogin(true)} className="text-primary font-medium hover:underline">
+                    Entrar
+                  </button>
+                </p>
+              </>
+            )}
 
-          <p className="text-center text-sm text-muted-foreground mt-6">
-            Ao continuar, concorda com os nossos{" "}
-            <Link to="/terms" className="text-primary hover:underline">
-              Termos de Serviço
-            </Link>{" "}
-            e{" "}
-            <Link to="/privacy" className="text-primary hover:underline">
-              Política de Privacidade
-            </Link>
-          </p>
+            <p className="text-center text-xs text-muted-foreground mt-8">© 2026 Obrify</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Right - Hero (desktop only) */}
+      <div className="hidden lg:block lg:w-[60%] relative overflow-hidden">
+        <img src="/images/hero-drone.jpeg" alt="Drone a inspecionar obra" className="absolute inset-0 w-full h-full object-cover" />
+        <div className="absolute inset-0 bg-gradient-to-br from-slate-900/80 via-slate-900/60 to-slate-900/80" />
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSA2MCAwIEwgMCAwIDAgNjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0icmdiYSgyNTUsMjU1LDI1NSwwLjA1KSIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI2dyaWQpIi8+PC9zdmc+')] opacity-60" />
+
+        <div className="relative z-10 flex flex-col justify-between h-full p-12">
+          {/* Top - Badge */}
+          <div className="animate-fade-in">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/10">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-sm text-white/90 font-medium">Plataforma Operacional</span>
+            </div>
+          </div>
+
+          {/* Center */}
+          <div className="space-y-6 animate-fade-in" style={{ animationDelay: "100ms" }}>
+            <h2 className="text-4xl xl:text-5xl font-bold text-white leading-tight">
+              Fiscalização de obras com{" "}
+              <span className="bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent">
+                Inteligência Artificial
+              </span>
+            </h2>
+            <p className="text-lg text-slate-300 max-w-lg">
+              Detecte defeitos automaticamente, digitalize inspeções e gere relatórios profissionais.
+            </p>
+            <div className="flex flex-wrap gap-2" style={{ animationDelay: "200ms" }}>
+              {[
+                { icon: "👁", label: "Visão por IA" },
+                { icon: "✓", label: "Checklists Digitais" },
+                { icon: "📄", label: "Relatórios PDF" },
+                { icon: "🚁", label: "Captura por Drone" },
+              ].map((pill) => (
+                <span key={pill.label} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 backdrop-blur-sm text-sm text-white border border-white/5">
+                  <span className="text-amber-500">{pill.icon}</span>
+                  {pill.label}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Bottom - Stats */}
+          <div className="flex items-center gap-8 animate-fade-in" style={{ animationDelay: "300ms" }}>
+            <div>
+              <p className="text-3xl font-bold text-white">3x</p>
+              <p className="text-sm text-slate-400">Mais produtividade</p>
+            </div>
+            <div className="w-px h-10 bg-white/20" />
+            <div>
+              <p className="text-3xl font-bold text-white">94%</p>
+              <p className="text-sm text-slate-400">Menos papel</p>
+            </div>
+            <div className="w-px h-10 bg-white/20" />
+            <div>
+              <p className="text-3xl font-bold text-white">IA</p>
+              <p className="text-sm text-slate-400">Deteção automática</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
