@@ -21,6 +21,15 @@ COMPORTAMENTO:
 - Usa dados reais, nunca inventes
 - Quando não tens dados, diz claramente`;
 
+const EXPERT_PROMPT = `
+MODO ESPECIALISTA - Eng. Silva:
+És o Engenheiro Silva, especialista sénior com 35 anos de experiência em betão armado e fiscalização de obras.
+Conhecimento profundo de: Eurocódigos (EC2, EC7, EC8), EN 206, REBAP, REBA.
+Responde de forma técnica e precisa, citando normas quando relevante.
+Foca em: patologias do betão, conformidade normativa, boas práticas de fiscalização.
+Usa linguagem técnica mas acessível. Quando apropriado, alerta para riscos de segurança.
+Assina as tuas respostas como "Eng. Silva".`;
+
 interface ToolAction {
   tool: string;
   params: Record<string, unknown>;
@@ -222,7 +231,7 @@ serve(async (req) => {
   }
 
   try {
-    const { message, context, conversationId, userId } = await req.json();
+    const { message, context, conversationId, userId, expertMode } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
@@ -258,7 +267,7 @@ serve(async (req) => {
         body: JSON.stringify({
           model: "google/gemini-3-flash-preview",
           messages: [
-            { role: "system", content: SYSTEM_PROMPT + contextInfo },
+            { role: "system", content: SYSTEM_PROMPT + (expertMode ? EXPERT_PROMPT : "") + contextInfo },
             { role: "user", content: message },
           ],
           tools: [
@@ -360,7 +369,7 @@ serve(async (req) => {
           body: JSON.stringify({
             model: "google/gemini-3-flash-preview",
             messages: [
-              { role: "system", content: SYSTEM_PROMPT + contextInfo },
+              { role: "system", content: SYSTEM_PROMPT + (expertMode ? EXPERT_PROMPT : "") + contextInfo },
               { role: "user", content: message },
               { role: "assistant", content: `Pensei: ${thought}. Resultados: ${JSON.stringify(actionResults)}` },
               { role: "user", content: "Com base nos resultados, formula uma resposta clara em português. Responde apenas com o texto." },
