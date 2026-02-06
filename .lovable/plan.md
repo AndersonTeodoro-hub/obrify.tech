@@ -1,92 +1,125 @@
 
-
-# Plano: Auto-admin para email especifico + campo PIN nos perfis
+# Plano: Sistema Obrify Agent Completo
 
 ## Resumo
 
-Quando o email `cris7981x@gmail.com` criar conta, o sistema automaticamente:
-1. Cria uma organizacao padrao (se nao existir)
-2. Cria um membership com role `admin` nessa organizacao
-3. Adiciona um campo `pin` a tabela `profiles`
-
-Tudo isto sera feito atraves de uma migracao SQL que modifica a funcao `handle_new_user()`.
+Criar um agente inteligente acessivel em todas as paginas da aplicacao, com botao flutuante, painel lateral de chat, execucao de accoes (navegacao, queries), sugestoes rapidas e historico persistido em localStorage.
 
 ---
 
-## Alteracoes
+## Ficheiros a Criar
 
-### 1. Migracao SQL
+### 1. Edge Function `supabase/functions/ai-obrify-agent/index.ts`
 
-Uma unica migracao que:
+Nova edge function que:
+- Recebe `{ message, context: { page, siteId, filters } }`
+- Usa tool calling do Lovable AI Gateway (Gemini) para extrair JSON estruturado
+- Define tools: QUERY_SITES, QUERY_CAPTURES, QUERY_NONCONFORMITIES, QUERY_STATS, NAVIGATE, GENERATE_REPORT
+- Executa as tools internamente (queries ao Supabase com service role key)
+- Retorna JSON com `{ thought, actions, response, suggestions }`
+- Nao usa streaming (retorna resposta completa via `supabase.functions.invoke`)
+- Trata erros 429/402
 
-**a) Adiciona coluna `pin` a tabela profiles:**
-```sql
-ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS pin TEXT;
-```
+### 2. Componente `src/components/ai/ObrifyAgent.tsx`
 
-**b) Modifica a funcao `handle_new_user()` para:**
-- Criar o perfil (como ja faz)
-- Se o email for `cris7981x@gmail.com`:
-  - Criar uma organizacao "Obrify" (ou usar existente)
-  - Inserir um membership com role `admin`
+Componente completo com:
 
-Logica da funcao atualizada:
-```text
-1. INSERT INTO profiles (user_id, email, full_name)
-2. IF email = 'cris7981x@gmail.com' THEN
-   a. Criar org "Obrify" se nao existir
-   b. INSERT INTO memberships (user_id, org_id, role = 'admin')
-3. RETURN NEW
-```
+**Botao Flutuante:**
+- `fixed bottom-6 right-6`, circulo 56px
+- Gradiente accent-500 a 600, icone Sparkles
+- Badge de notificacao animado na primeira visita
 
-### 2. Nenhuma alteracao de codigo frontend
+**Painel (Sheet lado direito):**
+- 420px desktop, fullscreen mobile
+- Header: "Obrify Agent" + botao fechar
+- Area de chat scrollavel
+- Mensagens user: direita, fundo primary
+- Mensagens agent: esquerda, fundo slate, suporte markdown (react-markdown nao esta instalado, usaremos whitespace-pre-wrap com formatacao basica)
+- Sugestoes rapidas como botoes clicaveis
+- Input de texto + botao enviar + botao microfone (desactivado)
+- Indicador "A pensar..." com animacao
 
-A logica e toda no backend (trigger SQL). O frontend ja usa `usePermissions()` que le a tabela `memberships` -- portanto o utilizador tera automaticamente todas as permissoes de admin apos login.
+**Mensagem inicial:**
+"Ola! Sou o Obrify, o teu assistente de fiscalizacao. Posso ajudar-te a consultar obras, ver nao-conformidades, gerar relatorios e muito mais. O que precisas?"
+
+**Sugestoes rapidas:**
+- "Ver NCs abertas"
+- "Resumo das obras"
+- "Gerar relatorio"
+
+### 3. Modificar `src/components/layout/AppLayout.tsx`
+
+Adicionar o componente `<ObrifyAgent />` ao layout para estar disponivel em todas as paginas.
+
+### 4. Atualizar `supabase/config.toml`
+
+Adicionar configuracao para a nova edge function com `verify_jwt = false`.
 
 ---
 
 ## Detalhes Tecnicos
 
-A funcao `handle_new_user()` sera substituida por:
+### Edge Function - Tool Calling
 
-```sql
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
-DECLARE
-  _org_id UUID;
-BEGIN
-  -- Create profile
-  INSERT INTO public.profiles (user_id, email, full_name)
-  VALUES (NEW.id, NEW.email, NEW.raw_user_meta_data->>'full_name');
+A edge function usa tool calling do Lovable AI para obter respostas estruturadas:
 
-  -- Auto-admin for specific email
-  IF NEW.email = 'cris7981x@gmail.com' THEN
-    -- Get or create default org
-    SELECT id INTO _org_id FROM public.organizations
-    WHERE name = 'Obrify' LIMIT 1;
-
-    IF _org_id IS NULL THEN
-      INSERT INTO public.organizations (name)
-      VALUES ('Obrify')
-      RETURNING id INTO _org_id;
-    END IF;
-
-    -- Create admin membership
-    INSERT INTO public.memberships (user_id, org_id, role)
-    VALUES (NEW.id, _org_id, 'admin')
-    ON CONFLICT DO NOTHING;
-  END IF;
-
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+```text
+tools = [
+  {
+    name: "obrify_response",
+    parameters: {
+      thought: string,
+      actions: [{ tool: string, params: object }],
+      response: string,
+      suggestions: string[]
+    }
+  }
+]
+tool_choice = { type: "function", function: { name: "obrify_response" } }
 ```
+
+Dentro da funcao, apos receber as actions do modelo, executa queries reais:
+
+```text
+QUERY_SITES -> supabase.from('sites').select(...)
+QUERY_CAPTURES -> supabase.from('captures').select(...)
+QUERY_NONCONFORMITIES -> supabase.from('nonconformities').select(...)
+QUERY_STATS -> queries agregadas com count
+NAVIGATE -> retorna path no response
+GENERATE_REPORT -> placeholder (retorna instrucao)
+```
+
+O fluxo e:
+1. Recebe mensagem + contexto
+2. Envia ao modelo com system prompt + tools
+3. Modelo decide que tool usar
+4. Edge function executa a query real
+5. Envia resultado de volta ao modelo para formatar resposta
+6. Retorna JSON final ao cliente
+
+### Componente - Contexto Automatico
+
+```text
+- useLocation() -> detecta pagina actual
+- useParams() -> extrai siteId se na rota /app/sites/:siteId
+- Envia { page: pathname, siteId, filters: {} } em cada pedido
+```
+
+### Componente - Execucao de Accoes
+
+Quando o agente retorna actions com tool "NAVIGATE":
+- Usa `useNavigate()` para navegar automaticamente
+- Mostra toast a informar a navegacao
+
+### Historico
+
+- State `messages[]` em useState
+- Persist em `localStorage` key `obrify_agent_history`
+- Carrega ao montar, guarda a cada nova mensagem
+- Limpa ao fazer logout (o componente esta dentro de ProtectedRoute)
 
 ---
 
-## Notas de Seguranca
+## Dependencias
 
-- A funcao usa `SECURITY DEFINER` para poder inserir em tabelas protegidas por RLS
-- O email esta hardcoded na funcao do lado do servidor (nao no cliente), o que e seguro
-- O campo `pin` e adicionado como `TEXT` nullable para flexibilidade futura
-
+Nenhuma nova dependencia necessaria. Usa Sheet existente do shadcn/ui.
