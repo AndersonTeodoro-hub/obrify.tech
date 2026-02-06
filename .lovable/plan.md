@@ -1,195 +1,146 @@
 
-# Plano: Analise por IA dos Projectos
+
+# Plano: Integrar ElevenLabs para Voz no Obrify Agent
 
 ## Resumo
 
-Criar duas edge functions para analise e comparacao de plantas tecnicas via Gemini Vision, uma UI de gestao de conflitos, novos tools no agente, e analise automatica apos upload.
+Adicionar capacidades de voz (falar e ouvir) ao Obrify Agent usando ElevenLabs TTS e STT em tempo real, com modo especialista "Eng. Silva".
 
 ---
 
-## 1. Edge Function: ai-analyze-project
+## 0. Pré-requisito: Conectar ElevenLabs
 
-**Ficheiro:** `supabase/functions/ai-analyze-project/index.ts`
-
-Recebe `{ projectId, analysisType: "full" | "quick" }`.
-
-Fluxo:
-1. Busca projecto na tabela `projects` (nome, specialty, file_url, file_type)
-2. Gera signed URL do ficheiro no bucket `documents`
-3. Actualiza `analysis_status` para `analyzing`
-4. Envia imagem/PDF para Gemini Vision (`google/gemini-2.5-flash`) com prompt especializado por tipo de planta:
-   - Detecta elementos estruturais, arquitectura, aguas, electricidade, AVAC
-   - Para cada elemento: tipo, codigo, localizacao, propriedades, confianca
-   - Retorna metadados (escala, titulo) e observacoes
-5. Usa tool calling para output JSON estruturado
-6. Insere elementos detectados na tabela `project_elements`
-7. Actualiza `analysis_status` para `completed` e `analyzed_at` para now()
-8. Em caso de erro, marca `analysis_status` como `failed`
-
-**Nota sobre PDFs:** Gemini Vision suporta PDFs directamente via URL, nao e necessario converter para imagem.
+O projecto nao tem API key da ElevenLabs configurada. Vou usar o conector ElevenLabs do Lovable para a obter. Se nao estiver disponivel, sera pedido ao utilizador para adicionar o secret `ELEVENLABS_API_KEY` manualmente.
 
 ---
 
-## 2. Edge Function: ai-compare-projects
+## 1. Edge Function: elevenlabs-tts
 
-**Ficheiro:** `supabase/functions/ai-compare-projects/index.ts`
+**Ficheiro:** `supabase/functions/elevenlabs-tts/index.ts`
 
-Recebe `{ project1Id, project2Id }`.
+- Recebe `{ text, voiceId? }`
+- Voz padrao: Daniel (`onwK4e9ZLuTAKqWW03F9`) - portugues
+- Modelo: `eleven_multilingual_v2`
+- Voice settings: stability 0.7, similarity_boost 0.8
+- Chama `https://api.elevenlabs.io/v1/text-to-speech/{voiceId}`
+- Retorna audio binario (MP3)
 
-Fluxo:
-1. Busca ambos projectos e gera signed URLs
-2. Envia ambas plantas para Gemini Vision com prompt de comparacao:
-   - Detecta: spatial_overlap, dimension_mismatch, missing_provision, code_violation
-   - Para cada conflito: tipo, severidade, titulo, descricao, localizacao, confianca
-   - Retorna avaliacao de compatibilidade e verificacoes OK
-3. Usa tool calling para output estruturado
-4. Insere conflitos na tabela `project_conflicts`
-5. Se ha conflitos criticos, cria alertas para membros da organizacao
+**config.toml:** Adicionar `[functions.elevenlabs-tts]` com `verify_jwt = false`
 
 ---
 
-## 3. Actualizar config.toml
+## 2. Edge Function: elevenlabs-stt-token
 
-Adicionar as duas novas funcoes:
+**Ficheiro:** `supabase/functions/elevenlabs-stt-token/index.ts`
+
+- Chama `https://api.elevenlabs.io/v1/single-use-token/realtime_scribe`
+- Retorna `{ token }` para o cliente usar com `useScribe`
+
+**config.toml:** Adicionar `[functions.elevenlabs-stt-token]` com `verify_jwt = false`
+
+---
+
+## 3. Instalar Dependencia
+
+Adicionar `@elevenlabs/react` ao `package.json`.
+
+---
+
+## 4. Actualizar ObrifyAgent com Voz
+
+**Ficheiro:** `src/components/ai/ObrifyAgent.tsx`
+
+### Novos estados:
+- `voiceEnabled` (boolean, toggle on/off, persiste em localStorage)
+- `voiceState`: `idle` | `recording` | `processing` | `speaking`
+- `expertMode` (boolean, toggle "Eng. Silva")
+- `audioRef` para controlar reprodução
+
+### Botao de Microfone (substituir o disabled actual na linha 285):
+- Toggle: clique inicia gravacao, segundo clique para
+- Usa `useScribe` do `@elevenlabs/react` com `commitStrategy: "vad"`
+- Ao obter transcricao committed, chama `sendMessage(texto)`
+- Indicador visual: icone muda Mic/MicOff, borda animada durante gravacao
+
+### Reproducao TTS:
+- Apos receber resposta do agente, se `voiceEnabled`, chama edge function `elevenlabs-tts` via `fetch()` com `.blob()`
+- Reproduz audio com `new Audio(URL.createObjectURL(blob))`
+- Indicador visual de "a falar" (ondas ou pulso no avatar do agente)
+- Botao para parar reproducao
+
+### Controlos de Voz (barra no header):
+- Toggle voz on/off (Volume2 / VolumeX icon)
+- Toggle modo especialista "Eng. Silva" (GraduationCap icon)
+
+### Modo Especialista "Eng. Silva":
+- Quando activo, envia flag `expertMode: true` no body para `ai-obrify-agent`
+- Badge visual "Eng. Silva" no header do chat
+- Avatar/indicador diferente nas mensagens do agente
+
+---
+
+## 5. Actualizar ai-obrify-agent
+
+**Ficheiro:** `supabase/functions/ai-obrify-agent/index.ts`
+
+- Receber campo `expertMode` no body
+- Se `expertMode === true`, adiciona ao system prompt:
 
 ```text
-[functions.ai-analyze-project]
-verify_jwt = false
-
-[functions.ai-compare-projects]
-verify_jwt = false
+MODO ESPECIALISTA - Eng. Silva:
+Es o Engenheiro Silva, especialista senior com 35 anos de experiencia em betao armado e fiscalizacao.
+Conhecimento profundo de: Eurocodigos (EC2, EC7, EC8), EN 206, REBAP, REBA.
+Responde de forma tecnica e precisa, citando normas quando relevante.
+Foca em: patologias do betao, conformidade normativa, boas praticas de fiscalizacao.
+Usa linguagem tecnica mas acessivel. Quando apropriado, alerta para riscos de seguranca.
 ```
 
 ---
 
-## 4. Actualizar SiteProjectsTab
-
-Adicionar botao "Analisar" nas accoes de cada projecto na tabela, que chama a edge function `ai-analyze-project` e mostra progresso via badge de status.
-
-Adicionar botao "Comparar" que abre modal para seleccionar segundo projecto e chama `ai-compare-projects`.
-
----
-
-## 5. Actualizar ProjectViewer
-
-Adicionar botao "Analisar" no header do viewer que dispara analise e refresca elementos no painel lateral.
-
----
-
-## 6. Seccao de Conflitos na Tab de Projectos
-
-Expandir `ProjectConflictsSummary` com lista detalhada de conflitos:
-
-Cada conflito mostra:
-- Severidade (badge colorido), titulo, especialidades envolvidas
-- Localizacao, estado, confianca IA
-- Botoes: Confirmar, Descartar, Criar NC
-
-Workflow de estados: detected -> confirmed -> resolved | dismissed | nc_created
-
-Botao "Criar NC" insere na tabela `nonconformities` com dados do conflito e actualiza `project_conflicts.related_nc_id` e status para `nc_created`.
-
----
-
-## 7. Tools do Agente
-
-Adicionar ao `ai-obrify-agent/index.ts`:
-
-| Tool | Descricao |
-|------|-----------|
-| QUERY_PROJECTS | Consulta projectos por siteId, specialty, status analise |
-| ANALYZE_PROJECT | Chama ai-analyze-project |
-| COMPARE_PROJECTS | Chama ai-compare-projects |
-| QUERY_CONFLICTS | Consulta conflitos por siteId, severity, status |
-| CREATE_NC_FROM_CONFLICT | Cria NC a partir de conflito |
-
-Actualizar o enum de tools no tool calling do modelo.
-
----
-
-## 8. Analise Automatica pos-Upload
-
-No `UploadProjectModal`, apos upload com sucesso:
-- Chamar `ai-analyze-project` em background (sem bloquear UI)
-- Apos analise completa, comparar automaticamente com projectos de especialidades relacionadas no mesmo site:
-  - Estruturas compara com: Arquitectura, Aguas, AVAC, Electricidade
-  - Arquitectura compara com: Estruturas
-  - Aguas compara com: Estruturas, Electricidade
-- Toast a informar que analise foi iniciada
-
----
-
-## 9. Ficheiros a Criar
+## 6. Ficheiros a Criar
 
 | Ficheiro | Descricao |
 |----------|-----------|
-| `supabase/functions/ai-analyze-project/index.ts` | Edge function de analise de planta |
-| `supabase/functions/ai-compare-projects/index.ts` | Edge function de comparacao |
-| `src/components/sites/ProjectConflictsDetail.tsx` | Lista detalhada de conflitos com accoes |
-| `src/components/sites/CompareProjectsModal.tsx` | Modal para seleccionar projecto a comparar |
+| `supabase/functions/elevenlabs-tts/index.ts` | Edge function TTS |
+| `supabase/functions/elevenlabs-stt-token/index.ts` | Edge function token STT |
 
-## 10. Ficheiros a Modificar
+## 7. Ficheiros a Modificar
 
 | Ficheiro | Alteracao |
 |----------|-----------|
-| `supabase/config.toml` | Adicionar 2 novas funcoes |
-| `supabase/functions/ai-obrify-agent/index.ts` | Adicionar 5 novas tools |
-| `src/components/sites/SiteProjectsTab.tsx` | Botoes Analisar e Comparar nas accoes |
-| `src/components/sites/ProjectViewer.tsx` | Botao Analisar no header |
-| `src/components/sites/UploadProjectModal.tsx` | Analise automatica pos-upload |
-| `src/components/sites/ProjectConflictsSummary.tsx` | Expandir com lista detalhada ou link |
+| `supabase/config.toml` | Adicionar 2 funcoes |
+| `src/components/ai/ObrifyAgent.tsx` | Voz, gravacao, modo especialista |
+| `supabase/functions/ai-obrify-agent/index.ts` | Suporte expertMode |
+| `package.json` | Adicionar @elevenlabs/react |
 
 ---
 
 ## Detalhes Tecnicos
 
-### Prompt de Analise (ai-analyze-project)
-
-O prompt e adaptado pela especialidade do projecto. Exemplo para arquitectura detecta paredes, portas, janelas, escadas. Para estruturas detecta pilares, vigas, lajes, paredes estruturais. O output e forcado via tool calling com schema:
+### Fluxo de Gravacao (STT)
 
 ```text
-{
-  metadata: { escala, titulo, notas },
-  elementos: [{ tipo, codigo, localizacao, propriedades, confianca }],
-  observacoes: []
-}
+1. User clica no microfone
+2. Frontend pede token via edge function elevenlabs-stt-token
+3. useScribe conecta com token e microfone
+4. Transcricao parcial mostrada em tempo real no input
+5. VAD detecta silencio -> commit da transcricao
+6. Texto committed e enviado como mensagem (sendMessage)
+7. Desconecta scribe
 ```
 
-### Prompt de Comparacao (ai-compare-projects)
-
-Envia duas imagens ao Gemini com contexto das especialidades. Output forcado via tool calling:
+### Fluxo de Reproducao (TTS)
 
 ```text
-{
-  compatibilidade: "boa" | "moderada" | "problematica",
-  resumo: string,
-  conflitos: [{ tipo, severidade, titulo, descricao, localizacao, confianca }],
-  verificacoes_ok: [string]
-}
+1. Agente responde com texto
+2. Se voiceEnabled, chama fetch elevenlabs-tts com o texto
+3. Recebe blob MP3
+4. Cria Audio e reproduz
+5. Mostra indicador "a falar" ate audio terminar
+6. User pode clicar para parar
 ```
 
-### Fluxo de Criacao de NC a partir de Conflito
+### Playback com fetch (nao supabase.functions.invoke)
 
-```text
-1. User clica "Criar NC" num conflito
-2. INSERT em nonconformities com:
-   - title: conflito.title
-   - description: conflito.description
-   - severity: mapeamento (critical->critical, high->major, etc.)
-   - site_id: conflito.site_id
-   - status: open
-3. UPDATE project_conflicts SET status = 'nc_created', related_nc_id = nc.id
-4. Toast de sucesso com link para NC
-```
+Usar `fetch()` directo para o TTS porque o SDK Supabase corrompe dados binarios ao tentar parse JSON. Usar `.blob()` e `URL.createObjectURL()`.
 
-### Mapeamento de Especialidades para Comparacao Automatica
-
-```text
-structure -> [architecture, plumbing, hvac, electrical]
-architecture -> [structure]
-plumbing -> [structure, electrical]
-electrical -> [structure, plumbing]
-hvac -> [structure]
-gas -> [structure]
-telecom -> [structure, electrical]
-```
