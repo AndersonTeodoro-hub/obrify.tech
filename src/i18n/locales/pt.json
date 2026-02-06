@@ -96,7 +96,9 @@
       "stat1Label": "Mais produtividade",
       "stat2Label": "Menos papel",
       "stat3Label": "Deteção automática"
-    }
+    },
+    "continueWithGoogle": "Continuar com Google",
+    "socialLoginError": "Erro ao fazer login com Google"
   },
   "brand": {
     "name": "SitePulse",
@@ -829,6 +831,64 @@
       "exportList": "Exportar lista",
       "analyzePending": "Analisar pendentes",
       "viewConflicts": "Ver conflitos"
+    }
+  },
+  "documents": {
+    "upload": "Carregar Documento",
+    "name": "Nome",
+    "type": "Tipo",
+    "size": "Tamanho",
+    "date": "Data",
+    "file": "Ficheiro",
+    "notes": "Notas",
+    "download": "Descarregar",
+    "delete": "Eliminar",
+    "empty": "Nenhum documento carregado",
+    "uploadSuccess": "Documento carregado com sucesso",
+    "deleteSuccess": "Documento eliminado com sucesso",
+    "deleteConfirm": "Tem a certeza que deseja eliminar o documento \"{{name}}\"?",
+    "types": {
+      "contract": "Contrato",
+      "license": "Licença",
+      "permit": "Alvará",
+      "insurance": "Seguro",
+      "minutes": "Acta",
+      "safetyPlan": "Plano de Segurança",
+      "other": "Outro"
+    }
+  },
+  "drones": {
+    "register": "Registar Drone",
+    "subtitle": "Gestão de drones e missões automatizadas com IA",
+    "name": "Nome/Identificador",
+    "manufacturer": "Fabricante",
+    "model": "Modelo",
+    "serialNumber": "Número de série",
+    "purchaseDate": "Data de aquisição",
+    "flightHours": "Horas de voo",
+    "totalDrones": "Drones Registados",
+    "equipment": "Equipamentos",
+    "missions": "Missões",
+    "noDrones": "Nenhum drone registado",
+    "registerFirst": "Registe o seu primeiro drone para começar",
+    "noMissions": "Nenhuma missão planeada",
+    "useChatForMissions": "Use o chat IA para criar missões automaticamente",
+    "registerSuccess": "Drone registado com sucesso",
+    "updateSuccess": "Drone atualizado com sucesso",
+    "deleteSuccess": "Drone eliminado com sucesso",
+    "deleteConfirm": "Tem a certeza que deseja eliminar o drone \"{{name}}\"?",
+    "status": {
+      "label": "Estado",
+      "available": "Disponível",
+      "inMission": "Em Missão",
+      "in_mission": "Em Missão",
+      "maintenance": "Manutenção",
+      "offline": "Offline",
+      "draft": "Rascunho",
+      "planned": "Planeada",
+      "executing": "Em Execução",
+      "completed": "Concluída",
+      "failed": "Falhou"
     }
   }
 }

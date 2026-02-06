@@ -771,28 +771,37 @@ export type Database = {
           created_at: string
           doc_type: string | null
           file_path: string
+          file_size: number | null
           id: string
           name: string
+          notes: string | null
           org_id: string
           site_id: string
+          uploaded_by: string | null
         }
         Insert: {
           created_at?: string
           doc_type?: string | null
           file_path: string
+          file_size?: number | null
           id?: string
           name: string
+          notes?: string | null
           org_id: string
           site_id: string
+          uploaded_by?: string | null
         }
         Update: {
           created_at?: string
           doc_type?: string | null
           file_path?: string
+          file_size?: number | null
           id?: string
           name?: string
+          notes?: string | null
           org_id?: string
           site_id?: string
+          uploaded_by?: string | null
         }
         Relationships: [
           {
@@ -916,6 +925,7 @@ export type Database = {
           name: string
           notes: string | null
           org_id: string
+          purchase_date: string | null
           serial_number: string | null
           status: Database["public"]["Enums"]["drone_status"]
           total_flight_hours: number | null
@@ -932,6 +942,7 @@ export type Database = {
           name: string
           notes?: string | null
           org_id: string
+          purchase_date?: string | null
           serial_number?: string | null
           status?: Database["public"]["Enums"]["drone_status"]
           total_flight_hours?: number | null
@@ -948,6 +959,7 @@ export type Database = {
           name?: string
           notes?: string | null
           org_id?: string
+          purchase_date?: string | null
           serial_number?: string | null
           status?: Database["public"]["Enums"]["drone_status"]
           total_flight_hours?: number | null
