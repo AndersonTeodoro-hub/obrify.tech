@@ -1,12 +1,24 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 import { Activity, Loader2, Eye, EyeOff } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -18,11 +30,24 @@ export default function AuthPage() {
   const [signupPassword, setSignupPassword] = useState("");
   const [signupName, setSignupName] = useState("");
   const [signupConfirmPassword, setSignupConfirmPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
 
   const { signIn, signUp } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const { t } = useTranslation();
+
+  // Remember me: load saved email
+  useEffect(() => {
+    const savedEmail = localStorage.getItem('obrify_remember_email');
+    if (savedEmail) {
+      setLoginEmail(savedEmail);
+      setRememberMe(true);
+    }
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,6 +56,12 @@ export default function AuthPage() {
     if (error) {
       toast({ title: t("auth.loginError"), description: error.message, variant: "destructive" });
     } else {
+      // Remember me
+      if (rememberMe) {
+        localStorage.setItem('obrify_remember_email', loginEmail);
+      } else {
+        localStorage.removeItem('obrify_remember_email');
+      }
       toast({ title: t("auth.loginSuccess"), description: t("auth.loginSuccessDesc") });
       navigate("/app");
     }
@@ -56,6 +87,23 @@ export default function AuthPage() {
       navigate("/app");
     }
     setIsLoading(false);
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotEmail.trim()) return;
+    setForgotLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
+      redirectTo: window.location.origin + '/reset-password',
+    });
+    if (error) {
+      toast({ title: t("common.error"), description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: t("common.success"), description: t("auth.forgotPassword.success") });
+      setShowForgotPassword(false);
+      setForgotEmail("");
+    }
+    setForgotLoading(false);
   };
 
   const pills = [
@@ -141,10 +189,14 @@ export default function AuthPage() {
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Checkbox id="remember" />
+                      <Checkbox
+                        id="remember"
+                        checked={rememberMe}
+                        onCheckedChange={(checked) => setRememberMe(checked === true)}
+                      />
                       <label htmlFor="remember" className="text-sm text-muted-foreground cursor-pointer">{t("auth.landing.rememberMe")}</label>
                     </div>
-                    <button type="button" className="text-sm text-primary hover:underline">{t("auth.landing.forgotPassword")}</button>
+                    <button type="button" onClick={() => setShowForgotPassword(true)} className="text-sm text-primary hover:underline">{t("auth.landing.forgotPassword")}</button>
                   </div>
                   <button
                     type="submit"
@@ -174,57 +226,21 @@ export default function AuthPage() {
                 <form onSubmit={handleSignup} className="space-y-4">
                   <div className="space-y-1.5">
                     <label htmlFor="signup-name" className="text-sm font-medium text-foreground">{t("auth.fullName")}</label>
-                    <input
-                      id="signup-name"
-                      type="text"
-                      placeholder={t("auth.fullNamePlaceholder")}
-                      value={signupName}
-                      onChange={(e) => setSignupName(e.target.value)}
-                      required
-                      className="w-full h-11 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-                    />
+                    <input id="signup-name" type="text" placeholder={t("auth.fullNamePlaceholder")} value={signupName} onChange={(e) => setSignupName(e.target.value)} required className="w-full h-11 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" />
                   </div>
                   <div className="space-y-1.5">
                     <label htmlFor="signup-email" className="text-sm font-medium text-foreground">{t("auth.email")}</label>
-                    <input
-                      id="signup-email"
-                      type="email"
-                      placeholder={t("auth.emailPlaceholder")}
-                      value={signupEmail}
-                      onChange={(e) => setSignupEmail(e.target.value)}
-                      required
-                      className="w-full h-11 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-                    />
+                    <input id="signup-email" type="email" placeholder={t("auth.emailPlaceholder")} value={signupEmail} onChange={(e) => setSignupEmail(e.target.value)} required className="w-full h-11 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" />
                   </div>
                   <div className="space-y-1.5">
                     <label htmlFor="signup-password" className="text-sm font-medium text-foreground">{t("auth.password")}</label>
-                    <input
-                      id="signup-password"
-                      type="password"
-                      placeholder="••••••••"
-                      value={signupPassword}
-                      onChange={(e) => setSignupPassword(e.target.value)}
-                      required
-                      className="w-full h-11 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-                    />
+                    <input id="signup-password" type="password" placeholder="••••••••" value={signupPassword} onChange={(e) => setSignupPassword(e.target.value)} required className="w-full h-11 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" />
                   </div>
                   <div className="space-y-1.5">
                     <label htmlFor="signup-confirm" className="text-sm font-medium text-foreground">{t("auth.confirmPassword")}</label>
-                    <input
-                      id="signup-confirm"
-                      type="password"
-                      placeholder="••••••••"
-                      value={signupConfirmPassword}
-                      onChange={(e) => setSignupConfirmPassword(e.target.value)}
-                      required
-                      className="w-full h-11 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-                    />
+                    <input id="signup-confirm" type="password" placeholder="••••••••" value={signupConfirmPassword} onChange={(e) => setSignupConfirmPassword(e.target.value)} required className="w-full h-11 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" />
                   </div>
-                  <button
-                    type="submit"
-                    disabled={isLoading}
-                    className="w-full h-11 rounded-xl bg-gradient-to-br from-primary-600 to-primary-700 text-white font-semibold shadow-lg hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
-                  >
+                  <button type="submit" disabled={isLoading} className="w-full h-11 rounded-xl bg-gradient-to-br from-primary-600 to-primary-700 text-white font-semibold shadow-lg hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2">
                     {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
                     {t("auth.signup")}
                   </button>
@@ -255,7 +271,6 @@ export default function AuthPage() {
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSA2MCAwIEwgMCAwIDAgNjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0icmdiYSgyNTUsMjU1LDI1NSwwLjA1KSIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI2dyaWQpIi8+PC9zdmc+')] opacity-60" />
 
         <div className="relative z-10 flex flex-col justify-between h-full p-12">
-          {/* Top - Badge */}
           <div className="animate-fade-in">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/10">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -263,7 +278,6 @@ export default function AuthPage() {
             </div>
           </div>
 
-          {/* Center */}
           <div className="space-y-6 animate-fade-in" style={{ animationDelay: "100ms" }}>
             <h2 className="text-4xl xl:text-5xl font-bold text-white leading-tight">
               {t("auth.landing.heroTitle")}{" "}
@@ -271,9 +285,7 @@ export default function AuthPage() {
                 {t("auth.landing.heroHighlight")}
               </span>
             </h2>
-            <p className="text-lg text-slate-300 max-w-lg">
-              {t("auth.landing.heroSubtitle")}
-            </p>
+            <p className="text-lg text-slate-300 max-w-lg">{t("auth.landing.heroSubtitle")}</p>
             <div className="flex flex-wrap gap-2" style={{ animationDelay: "200ms" }}>
               {pills.map((pill) => (
                 <span key={pill.label} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 backdrop-blur-sm text-sm text-white border border-white/5">
@@ -284,25 +296,48 @@ export default function AuthPage() {
             </div>
           </div>
 
-          {/* Bottom - Stats */}
           <div className="flex items-center gap-8 animate-fade-in" style={{ animationDelay: "300ms" }}>
-            <div>
-              <p className="text-3xl font-bold text-white">3x</p>
-              <p className="text-sm text-slate-400">{t("auth.landing.stat1Label")}</p>
-            </div>
+            <div><p className="text-3xl font-bold text-white">3x</p><p className="text-sm text-slate-400">{t("auth.landing.stat1Label")}</p></div>
             <div className="w-px h-10 bg-white/20" />
-            <div>
-              <p className="text-3xl font-bold text-white">94%</p>
-              <p className="text-sm text-slate-400">{t("auth.landing.stat2Label")}</p>
-            </div>
+            <div><p className="text-3xl font-bold text-white">94%</p><p className="text-sm text-slate-400">{t("auth.landing.stat2Label")}</p></div>
             <div className="w-px h-10 bg-white/20" />
-            <div>
-              <p className="text-3xl font-bold text-white">IA</p>
-              <p className="text-sm text-slate-400">{t("auth.landing.stat3Label")}</p>
-            </div>
+            <div><p className="text-3xl font-bold text-white">IA</p><p className="text-sm text-slate-400">{t("auth.landing.stat3Label")}</p></div>
           </div>
         </div>
       </div>
+
+      {/* Forgot Password Modal */}
+      <Dialog open={showForgotPassword} onOpenChange={setShowForgotPassword}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>{t("auth.forgotPassword.title")}</DialogTitle>
+            <DialogDescription>{t("auth.forgotPassword.description")}</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleForgotPassword}>
+            <div className="py-4">
+              <Label htmlFor="forgot-email">{t("auth.email")}</Label>
+              <Input
+                id="forgot-email"
+                type="email"
+                value={forgotEmail}
+                onChange={(e) => setForgotEmail(e.target.value)}
+                placeholder={t("auth.emailPlaceholder")}
+                required
+                className="mt-2"
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setShowForgotPassword(false)}>
+                {t("auth.forgotPassword.backToLogin")}
+              </Button>
+              <Button type="submit" disabled={forgotLoading || !forgotEmail.trim()}>
+                {forgotLoading && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+                {t("auth.forgotPassword.submit")}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

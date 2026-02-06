@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { useQuery } from '@tanstack/react-query';
 import { Sparkles, Send, X, Mic, MicOff, Bot, History, Volume2, VolumeX, GraduationCap, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
@@ -67,6 +68,20 @@ export function ObrifyAgent({ open: controlledOpen, onOpenChange }: ObrifyAgentP
   const [loading, setLoading] = useState(false);
   const [showBadge, setShowBadge] = useState(() => !localStorage.getItem('obrify_agent_seen'));
   const [activeTab, setActiveTab] = useState('chat');
+
+  // Agent alert notifications
+  const { data: alertCount } = useQuery({
+    queryKey: ['agent-alerts'],
+    queryFn: async () => {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const [ncsResult, conflictsResult] = await Promise.all([
+        supabase.from('nonconformities').select('id', { count: 'exact', head: true }).eq('severity', 'critical').eq('status', 'OPEN').lt('created_at', sevenDaysAgo),
+        supabase.from('project_conflicts').select('id', { count: 'exact', head: true }).eq('severity', 'critical').eq('status', 'detected'),
+      ]);
+      return (ncsResult.count || 0) + (conflictsResult.count || 0);
+    },
+    refetchInterval: 60000,
+  });
   const [viewingHistoryConv, setViewingHistoryConv] = useState<string | null>(null);
   const [voiceEnabled, setVoiceEnabled] = useState(() => localStorage.getItem('obrify_voice') === 'true');
   const [expertMode, setExpertMode] = useState(() => localStorage.getItem('obrify_expert') === 'true');
@@ -193,9 +208,26 @@ export function ObrifyAgent({ open: controlledOpen, onOpenChange }: ObrifyAgentP
     localStorage.setItem('obrify_agent_seen', 'true');
     setActiveTab('chat');
     setViewingHistoryConv(null);
+
+    // Generate alert greeting if there are alerts
+    if (alertCount && alertCount > 0) {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const [ncsResult, conflictsResult] = await Promise.all([
+        supabase.from('nonconformities').select('id', { count: 'exact', head: true }).eq('severity', 'critical').eq('status', 'OPEN').lt('created_at', sevenDaysAgo),
+        supabase.from('project_conflicts').select('id', { count: 'exact', head: true }).eq('severity', 'critical').eq('status', 'detected'),
+      ]);
+      const ncCount = ncsResult.count || 0;
+      const conflictCount = conflictsResult.count || 0;
+      let alertText = t('agent.greeting') + '\n\n';
+      if (ncCount > 0) alertText += `⚠️ ${ncCount} NC(s) crítica(s) aberta(s) há mais de 7 dias\n`;
+      if (conflictCount > 0) alertText += `⚠️ ${conflictCount} conflito(s) de projecto aguardam confirmação\n`;
+      alertText += '\n' + t('agent.suggestions.openNCs') + '?';
+      setMessages([{ id: 'welcome', role: 'agent', content: alertText, suggestions: getContextualSuggestions(location.pathname, t), timestamp: Date.now() }]);
+    }
+
     await ensureConversation();
     setTimeout(() => inputRef.current?.focus(), 300);
-  }, [ensureConversation, setOpen]);
+  }, [ensureConversation, setOpen, alertCount, t, location.pathname]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -256,8 +288,10 @@ export function ObrifyAgent({ open: controlledOpen, onOpenChange }: ObrifyAgentP
           aria-label="Abrir Obrify Agent"
         >
           <Sparkles className="h-6 w-6" />
-          {showBadge && (
-            <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 border-2 border-white animate-pulse" />
+          {(showBadge || (alertCount && alertCount > 0)) && (
+            <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-red-500 border-2 border-white flex items-center justify-center text-[10px] font-bold animate-pulse">
+              {alertCount && alertCount > 0 ? alertCount : ''}
+            </span>
           )}
         </button>
       )}

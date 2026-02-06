@@ -11,18 +11,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 
@@ -34,6 +26,9 @@ export default function Organizations() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newOrgName, setNewOrgName] = useState('');
   const [newOrgDescription, setNewOrgDescription] = useState('');
+  const [editingOrg, setEditingOrg] = useState<{ id: string; name: string; description?: string | null } | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
 
   const { data: memberships, isLoading } = useQuery({
     queryKey: ['user-memberships', user?.id],
@@ -42,31 +37,41 @@ export default function Organizations() {
         .from('memberships')
         .select('*, organizations(*)')
         .eq('user_id', user?.id);
-      
       if (error) throw error;
       return data;
     },
     enabled: !!user?.id,
   });
 
+  // Real member count
+  const orgIds = memberships?.map(m => m.org_id) || [];
+  const { data: memberCounts } = useQuery({
+    queryKey: ['member-counts', orgIds],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('memberships')
+        .select('org_id')
+        .in('org_id', orgIds);
+      if (error) throw error;
+      const counts: Record<string, number> = {};
+      data.forEach(m => { counts[m.org_id] = (counts[m.org_id] || 0) + 1; });
+      return counts;
+    },
+    enabled: orgIds.length > 0,
+  });
+
   const createOrgMutation = useMutation({
     mutationFn: async () => {
-      // Create organization
       const { data: org, error: orgError } = await supabase
         .from('organizations')
-        .insert({ name: newOrgName })
+        .insert({ name: newOrgName, description: newOrgDescription || null } as any)
         .select()
         .single();
-
       if (orgError) throw orgError;
-
-      // Create membership as admin
       const { error: memberError } = await supabase
         .from('memberships')
         .insert([{ org_id: org.id, user_id: user?.id!, role: 'admin' }]);
-
       if (memberError) throw memberError;
-
       return org;
     },
     onSuccess: () => {
@@ -74,17 +79,29 @@ export default function Organizations() {
       setIsCreateOpen(false);
       setNewOrgName('');
       setNewOrgDescription('');
-      toast({
-        title: t('common.success'),
-        description: t('organizations.create') + ' - OK',
-      });
+      toast({ title: t('common.success'), description: t('organizations.create') + ' - OK' });
     },
     onError: (error: any) => {
-      toast({
-        title: t('common.error'),
-        description: error.message,
-        variant: 'destructive',
-      });
+      toast({ title: t('common.error'), description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const editOrgMutation = useMutation({
+    mutationFn: async () => {
+      if (!editingOrg) return;
+      const { error } = await supabase
+        .from('organizations')
+        .update({ name: editName, description: editDescription || null } as any)
+        .eq('id', editingOrg.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['user-memberships'] });
+      setEditingOrg(null);
+      toast({ title: t('common.success'), description: t('organizations.editSuccess', 'Organização actualizada') });
+    },
+    onError: (error: any) => {
+      toast({ title: t('common.error'), description: error.message, variant: 'destructive' });
     },
   });
 
@@ -95,28 +112,24 @@ export default function Organizations() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['user-memberships'] });
-      toast({
-        title: t('common.success'),
-        description: t('common.delete') + ' - OK',
-      });
+      toast({ title: t('common.success'), description: t('common.delete') + ' - OK' });
     },
     onError: (error: any) => {
-      toast({
-        title: t('common.error'),
-        description: error.message,
-        variant: 'destructive',
-      });
+      toast({ title: t('common.error'), description: error.message, variant: 'destructive' });
     },
   });
 
+  const openEditModal = (org: any) => {
+    setEditingOrg(org);
+    setEditName(org.name);
+    setEditDescription((org as any).description || '');
+  };
+
   const getRoleBadgeVariant = (role: string) => {
     switch (role) {
-      case 'admin':
-        return 'default';
-      case 'manager':
-        return 'secondary';
-      default:
-        return 'outline';
+      case 'admin': return 'default';
+      case 'manager': return 'secondary';
+      default: return 'outline';
     }
   };
 
@@ -165,7 +178,7 @@ export default function Organizations() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="glass">
-                      <DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => openEditModal(membership.organizations)}>
                         <Pencil className="w-4 h-4 mr-2" />
                         {t('common.edit')}
                       </DropdownMenuItem>
@@ -182,11 +195,11 @@ export default function Organizations() {
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-muted-foreground line-clamp-2">
-                  {t('organizations.descriptionPlaceholder')}
+                  {(membership.organizations as any)?.description || t('organizations.descriptionPlaceholder')}
                 </p>
                 <div className="flex items-center gap-2 mt-4 text-sm text-muted-foreground">
                   <Users className="w-4 h-4" />
-                  <span>{t('organizations.members')}</span>
+                  <span>{memberCounts?.[membership.org_id] || 1} {t('organizations.members')}</span>
                 </div>
               </CardContent>
             </Card>
@@ -216,33 +229,42 @@ export default function Organizations() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label htmlFor="org-name">{t('organizations.name')}</Label>
-              <Input
-                id="org-name"
-                placeholder={t('organizations.namePlaceholder')}
-                value={newOrgName}
-                onChange={(e) => setNewOrgName(e.target.value)}
-              />
+              <Input id="org-name" placeholder={t('organizations.namePlaceholder')} value={newOrgName} onChange={(e) => setNewOrgName(e.target.value)} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="org-description">{t('organizations.description')}</Label>
-              <Textarea
-                id="org-description"
-                placeholder={t('organizations.descriptionPlaceholder')}
-                value={newOrgDescription}
-                onChange={(e) => setNewOrgDescription(e.target.value)}
-              />
+              <Textarea id="org-description" placeholder={t('organizations.descriptionPlaceholder')} value={newOrgDescription} onChange={(e) => setNewOrgDescription(e.target.value)} />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsCreateOpen(false)}>
-              {t('common.cancel')}
-            </Button>
-            <Button
-              onClick={() => createOrgMutation.mutate()}
-              disabled={!newOrgName.trim() || createOrgMutation.isPending}
-              className="bg-gradient-to-r from-primary to-accent"
-            >
+            <Button variant="outline" onClick={() => setIsCreateOpen(false)}>{t('common.cancel')}</Button>
+            <Button onClick={() => createOrgMutation.mutate()} disabled={!newOrgName.trim() || createOrgMutation.isPending} className="bg-gradient-to-r from-primary to-accent">
               {createOrgMutation.isPending ? t('common.loading') : t('common.create')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Organization Dialog */}
+      <Dialog open={!!editingOrg} onOpenChange={(open) => !open && setEditingOrg(null)}>
+        <DialogContent className="glass">
+          <DialogHeader>
+            <DialogTitle>{t('organizations.edit')}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>{t('organizations.name')}</Label>
+              <Input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder={t('organizations.namePlaceholder')} />
+            </div>
+            <div className="space-y-2">
+              <Label>{t('organizations.description')}</Label>
+              <Textarea value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder={t('organizations.descriptionPlaceholder')} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingOrg(null)}>{t('common.cancel')}</Button>
+            <Button onClick={() => editOrgMutation.mutate()} disabled={!editName.trim() || editOrgMutation.isPending}>
+              {editOrgMutation.isPending ? t('common.loading') : t('common.save')}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -10,6 +10,7 @@ import "@/i18n";
 
 // Pages
 import AuthPage from "./pages/Auth";
+import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
 
 // App Pages
@@ -41,6 +42,7 @@ const App = () => (
             <Routes>
             <Route path="/" element={<Navigate to="/auth" replace />} />
               <Route path="/auth" element={<AuthPage />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/invite/:token" element={<AcceptInvite />} />
               <Route 
                 path="/app" 
