@@ -224,5 +224,40 @@
     "en": "English",
     "es": "Español",
     "fr": "Français"
+  },
+  "agent": {
+    "greeting": "Bonjour ! Je suis Obrify, votre assistant d'inspection. Je peux vous aider à consulter les chantiers, voir les non-conformités, générer des rapports et bien plus. De quoi avez-vous besoin ?",
+    "thinking": "Réflexion en cours...",
+    "error": "Une erreur est survenue. Veuillez réessayer.",
+    "tooManyRequests": "Trop de demandes. Veuillez réessayer bientôt.",
+    "creditsExhausted": "Crédits épuisés.",
+    "clear": "Effacer",
+    "recording": "Écoute en cours...",
+    "inputPlaceholder": "Écrivez votre question...",
+    "speaking": "En train de parler...",
+    "voiceOn": "Voix activée",
+    "voiceOff": "Voix désactivée",
+    "expertMode": "Mode Ing. Silva",
+    "backToCurrent": "Retour à la conversation actuelle",
+    "navigation": "Navigation",
+    "navigatingTo": "Navigation vers {{path}}",
+    "history": "Historique",
+    "historyEmpty": "Pas encore de conversations",
+    "historyEmptyDesc": "Commencez à parler avec Obrify !",
+    "suggestions": {
+      "openNCs": "Voir NCs ouvertes",
+      "siteSummary": "Résumé des chantiers",
+      "generateReport": "Générer un rapport",
+      "daySummary": "Résumé du jour",
+      "urgentNCs": "NCs urgentes",
+      "recentActivity": "Activité récente",
+      "siteOverview": "Résumé de ce chantier",
+      "siteNCs": "NCs ouvertes ici",
+      "projectConflicts": "Conflits de projets",
+      "filterCritical": "Filtrer critiques",
+      "exportList": "Exporter la liste",
+      "analyzePending": "Analyser en attente",
+      "viewConflicts": "Voir les conflits"
+    }
   }
 }

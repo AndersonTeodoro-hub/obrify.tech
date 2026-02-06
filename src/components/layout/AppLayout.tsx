@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Outlet } from 'react-router-dom';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import { AppSidebar } from './AppSidebar';
@@ -7,10 +7,21 @@ import { HelpButton } from '@/components/onboarding/HelpButton';
 import { WelcomeModal } from '@/components/onboarding/WelcomeModal';
 import { startProductTour } from '@/components/onboarding/ProductTour';
 import { ObrifyAgent } from '@/components/ai/ObrifyAgent';
+import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 
 export function AppLayout() {
   const [showWelcome, setShowWelcome] = useState(false);
   const [showPulse, setShowPulse] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
+
+  const toggleAgent = useCallback(() => setAgentOpen(prev => !prev), []);
+  const closeAgent = useCallback(() => setAgentOpen(false), []);
+
+  useKeyboardShortcuts({
+    onToggleAgent: toggleAgent,
+    onCloseAgent: closeAgent,
+    isAgentOpen: agentOpen,
+  });
 
   useEffect(() => {
     const completed = localStorage.getItem('sitepulse_onboarding_completed');
@@ -46,7 +57,7 @@ export function AppLayout() {
       </div>
 
       <HelpButton showPulse={showPulse} onTourComplete={() => setShowPulse(false)} />
-      <ObrifyAgent />
+      <ObrifyAgent open={agentOpen} onOpenChange={setAgentOpen} />
 
       <WelcomeModal
         open={showWelcome}

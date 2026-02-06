@@ -773,5 +773,40 @@
     "version": "Versão",
     "releaseNotes": "Notas de versão",
     "discoverSitePulse": "Descobrir SitePulse"
+  },
+  "agent": {
+    "greeting": "Olá! Sou o Obrify, o teu assistente de fiscalização. Posso ajudar-te a consultar obras, ver não-conformidades, gerar relatórios e muito mais. O que precisas?",
+    "thinking": "A pensar...",
+    "error": "Ocorreu um erro. Tenta novamente.",
+    "tooManyRequests": "Demasiados pedidos. Tenta novamente em breve.",
+    "creditsExhausted": "Créditos esgotados.",
+    "clear": "Limpar",
+    "recording": "A ouvir...",
+    "inputPlaceholder": "Escreve a tua pergunta...",
+    "speaking": "A falar...",
+    "voiceOn": "Voz ligada",
+    "voiceOff": "Voz desligada",
+    "expertMode": "Modo Eng. Silva",
+    "backToCurrent": "Voltar à conversa actual",
+    "navigation": "Navegação",
+    "navigatingTo": "A navegar para {{path}}",
+    "history": "Histórico",
+    "historyEmpty": "Ainda sem conversas",
+    "historyEmptyDesc": "Começa a falar com o Obrify!",
+    "suggestions": {
+      "openNCs": "Ver NCs abertas",
+      "siteSummary": "Resumo das obras",
+      "generateReport": "Gerar relatório",
+      "daySummary": "Resumo do dia",
+      "urgentNCs": "NCs urgentes",
+      "recentActivity": "Actividade recente",
+      "siteOverview": "Resumo desta obra",
+      "siteNCs": "NCs abertas aqui",
+      "projectConflicts": "Conflitos de projectos",
+      "filterCritical": "Filtrar críticas",
+      "exportList": "Exportar lista",
+      "analyzePending": "Analisar pendentes",
+      "viewConflicts": "Ver conflitos"
+    }
   }
 }

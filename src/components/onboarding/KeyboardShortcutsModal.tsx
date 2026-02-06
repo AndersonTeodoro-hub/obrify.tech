@@ -12,10 +12,11 @@ interface KeyboardShortcutsModalProps {
 }
 
 const shortcuts = [
-  { keys: ['Ctrl', 'K'], action: 'Pesquisa rápida' },
+  { keys: ['Ctrl', 'K'], action: 'Abrir Obrify Agent' },
+  { keys: ['Ctrl', '↵'], action: 'Enviar mensagem (no agente)' },
+  { keys: ['Esc'], action: 'Fechar painel / modal' },
   { keys: ['Ctrl', 'N'], action: 'Novo item' },
   { keys: ['Ctrl', 'S'], action: 'Guardar' },
-  { keys: ['Esc'], action: 'Fechar modal' },
   { keys: ['?'], action: 'Atalhos de teclado' },
 ];
 

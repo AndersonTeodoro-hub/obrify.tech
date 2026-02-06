@@ -186,8 +186,9 @@ export function SiteProjectsTab({ siteId, orgId }: SiteProjectsTabProps) {
             return (
               <Card
                 key={key}
-                className="cursor-pointer hover:shadow-md hover:border-accent/40 transition-all"
+                className="cursor-pointer hover:shadow-md hover:border-accent/40 transition-all animate-fade-in"
                 onClick={() => setSelectedSpecialty(key)}
+                style={{ animationDelay: `${SPECIALTIES.indexOf({ key, icon: Icon, color } as any) * 50}ms` }}
               >
                 <CardContent className="p-5 flex flex-col items-center gap-3 text-center">
                   <div className={`p-3 rounded-xl bg-muted/50 ${color}`}>

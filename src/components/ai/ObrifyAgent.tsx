@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useParams, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Sparkles, Send, X, Mic, MicOff, Bot, History, Volume2, VolumeX, GraduationCap, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { useAgentConversation } from '@/hooks/use-agent-conversation';
@@ -20,18 +22,47 @@ interface Message {
   timestamp: number;
 }
 
-const INITIAL_MESSAGE: Message = {
-  id: 'welcome',
-  role: 'agent',
-  content:
-    'Olá! Sou o Obrify, o teu assistente de fiscalização. Posso ajudar-te a consultar obras, ver não-conformidades, gerar relatórios e muito mais. O que precisas?',
-  suggestions: ['Ver NCs abertas', 'Resumo das obras', 'Gerar relatório'],
-  timestamp: Date.now(),
-};
+interface ObrifyAgentProps {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
 
-export function ObrifyAgent() {
-  const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
+function getContextualSuggestions(pathname: string, t: (key: string) => string): string[] {
+  if (pathname === '/app/dashboard') {
+    return [t('agent.suggestions.daySummary'), t('agent.suggestions.urgentNCs'), t('agent.suggestions.recentActivity')];
+  }
+  if (pathname.startsWith('/app/sites/') && pathname.split('/').length >= 4) {
+    return [t('agent.suggestions.siteOverview'), t('agent.suggestions.siteNCs'), t('agent.suggestions.generateReport'), t('agent.suggestions.projectConflicts')];
+  }
+  if (pathname === '/app/nonconformities') {
+    return [t('agent.suggestions.filterCritical'), t('agent.suggestions.exportList'), t('agent.suggestions.openNCs')];
+  }
+  return [t('agent.suggestions.openNCs'), t('agent.suggestions.siteSummary'), t('agent.suggestions.generateReport')];
+}
+
+export function ObrifyAgent({ open: controlledOpen, onOpenChange }: ObrifyAgentProps) {
+  const { t, i18n } = useTranslation();
+  const [internalOpen, setInternalOpen] = useState(false);
+  
+  const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setOpen = useCallback((v: boolean) => {
+    if (onOpenChange) onOpenChange(v);
+    else setInternalOpen(v);
+  }, [onOpenChange]);
+
+  const location = useLocation();
+  const params = useParams();
+  const navigate = useNavigate();
+
+  const createInitialMessage = useCallback((): Message => ({
+    id: 'welcome',
+    role: 'agent',
+    content: t('agent.greeting'),
+    suggestions: getContextualSuggestions(location.pathname, t),
+    timestamp: Date.now(),
+  }), [t, location.pathname]);
+
+  const [messages, setMessages] = useState<Message[]>(() => [createInitialMessage()]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [showBadge, setShowBadge] = useState(() => !localStorage.getItem('obrify_agent_seen'));
@@ -41,10 +72,6 @@ export function ObrifyAgent() {
   const [expertMode, setExpertMode] = useState(() => localStorage.getItem('obrify_expert') === 'true');
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const location = useLocation();
-  const params = useParams();
-  const navigate = useNavigate();
 
   const {
     conversationId,
@@ -57,6 +84,16 @@ export function ObrifyAgent() {
     loadMessages,
     userId,
   } = useAgentConversation();
+
+  // Update suggestions when route changes
+  useEffect(() => {
+    setMessages(prev => {
+      if (prev.length === 1 && prev[0].id === 'welcome') {
+        return [createInitialMessage()];
+      }
+      return prev;
+    });
+  }, [location.pathname, createInitialMessage]);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -86,7 +123,7 @@ export function ObrifyAgent() {
         };
 
         const { data, error } = await supabase.functions.invoke('ai-obrify-agent', {
-          body: { message: text.trim(), context, conversationId: convId, userId, expertMode },
+          body: { message: text.trim(), context, conversationId: convId, userId, expertMode, language: i18n.language },
         });
 
         if (error) throw error;
@@ -96,7 +133,7 @@ export function ObrifyAgent() {
             const navTo = action?.result?.navigateTo;
             if (navTo) {
               navigate(navTo);
-              toast({ title: 'Navegação', description: `A navegar para ${navTo}` });
+              toast({ title: t('agent.navigation'), description: t('agent.navigatingTo', { path: navTo }) });
             }
           }
         }
@@ -104,13 +141,12 @@ export function ObrifyAgent() {
         const agentMsg: Message = {
           id: crypto.randomUUID(),
           role: 'agent',
-          content: data?.response || data?.error || 'Desculpa, não consegui processar o pedido.',
+          content: data?.response || data?.error || t('agent.error'),
           suggestions: data?.suggestions,
           timestamp: Date.now(),
         };
         setMessages((prev) => [...prev, agentMsg]);
 
-        // TTS playback
         if (voiceEnabled && agentMsg.content) {
           playTTS(agentMsg.content);
         }
@@ -120,10 +156,10 @@ export function ObrifyAgent() {
           id: crypto.randomUUID(),
           role: 'agent',
           content: e?.message?.includes('429')
-            ? 'Demasiados pedidos. Tenta novamente em breve.'
+            ? t('agent.tooManyRequests')
             : e?.message?.includes('402')
-              ? 'Créditos esgotados.'
-              : 'Ocorreu um erro. Tenta novamente.',
+              ? t('agent.creditsExhausted')
+              : t('agent.error'),
           timestamp: Date.now(),
         };
         setMessages((prev) => [...prev, errorMsg]);
@@ -131,7 +167,7 @@ export function ObrifyAgent() {
         setLoading(false);
       }
     },
-    [loading, location.pathname, params.siteId, navigate, conversationId, ensureConversation, setTitle, messages, userId, expertMode, voiceEnabled]
+    [loading, location.pathname, params.siteId, navigate, conversationId, ensureConversation, setTitle, messages, userId, expertMode, voiceEnabled, i18n.language, t]
   );
 
   const { voiceState, partialTranscript, startRecording, stopRecording, playTTS, stopAudio } = useAgentVoice({
@@ -139,14 +175,12 @@ export function ObrifyAgent() {
     voiceEnabled,
   });
 
-  // Scroll to bottom
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, loading]);
 
-  // Show partial transcript in input
   useEffect(() => {
     if (partialTranscript && voiceState === 'recording') {
       setInput(partialTranscript);
@@ -161,16 +195,23 @@ export function ObrifyAgent() {
     setViewingHistoryConv(null);
     await ensureConversation();
     setTimeout(() => inputRef.current?.focus(), 300);
-  }, [ensureConversation]);
+  }, [ensureConversation, setOpen]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     sendMessage(input);
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      sendMessage(input);
+    }
+  };
+
   const handleClear = async () => {
     await resetConversation();
-    setMessages([INITIAL_MESSAGE]);
+    setMessages([createInitialMessage()]);
     setViewingHistoryConv(null);
   };
 
@@ -183,7 +224,7 @@ export function ObrifyAgent() {
       content: m.content,
       timestamp: new Date(m.created_at).getTime(),
     }));
-    setMessages(mapped.length > 0 ? mapped : [INITIAL_MESSAGE]);
+    setMessages(mapped.length > 0 ? mapped : [createInitialMessage()]);
     setActiveTab('chat');
   };
 
@@ -192,12 +233,14 @@ export function ObrifyAgent() {
     setVoiceEnabled(next);
     localStorage.setItem('obrify_voice', String(next));
     if (!next) stopAudio();
+    toast({ title: next ? t('agent.voiceOn') : t('agent.voiceOff') });
   };
 
   const toggleExpert = () => {
     const next = !expertMode;
     setExpertMode(next);
     localStorage.setItem('obrify_expert', String(next));
+    toast({ title: next ? t('agent.expertMode') : 'Modo normal activado' });
   };
 
   const isViewingHistory = viewingHistoryConv !== null && viewingHistoryConv !== conversationId;
@@ -233,7 +276,7 @@ export function ObrifyAgent() {
               </SheetTitle>
               {expertMode && (
                 <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 border-amber-500 text-amber-600 dark:text-amber-400">
-                  Eng. Silva
+                  {t('agent.expertMode')}
                 </Badge>
               )}
             </div>
@@ -243,7 +286,7 @@ export function ObrifyAgent() {
                 size="icon"
                 onClick={toggleExpert}
                 className={`h-8 w-8 ${expertMode ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}
-                title="Modo Eng. Silva"
+                title={t('agent.expertMode')}
               >
                 <GraduationCap className="h-4 w-4" />
               </Button>
@@ -252,12 +295,12 @@ export function ObrifyAgent() {
                 size="icon"
                 onClick={toggleVoice}
                 className={`h-8 w-8 ${voiceEnabled ? 'text-accent-600' : 'text-muted-foreground'}`}
-                title={voiceEnabled ? 'Desligar voz' : 'Ligar voz'}
+                title={voiceEnabled ? t('agent.voiceOff') : t('agent.voiceOn')}
               >
                 {voiceEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
               </Button>
               <Button variant="ghost" size="sm" onClick={handleClear} className="text-xs text-muted-foreground h-8 px-2">
-                Limpar
+                {t('agent.clear')}
               </Button>
               <Button variant="ghost" size="icon" onClick={() => setOpen(false)} className="h-8 w-8">
                 <X className="h-4 w-4" />
@@ -272,7 +315,7 @@ export function ObrifyAgent() {
                 <Bot className="h-3.5 w-3.5" /> Chat
               </TabsTrigger>
               <TabsTrigger value="history" className="text-xs gap-1.5">
-                <History className="h-3.5 w-3.5" /> Histórico
+                <History className="h-3.5 w-3.5" /> {t('agent.history', 'Histórico')}
               </TabsTrigger>
             </TabsList>
 
@@ -282,11 +325,11 @@ export function ObrifyAgent() {
                   <button
                     onClick={() => {
                       setViewingHistoryConv(null);
-                      setMessages([INITIAL_MESSAGE]);
+                      setMessages([createInitialMessage()]);
                     }}
                     className="text-xs text-accent-600 hover:underline"
                   >
-                    ← Voltar à conversa actual
+                    ← {t('agent.backToCurrent')}
                   </button>
                 </div>
               )}
@@ -294,8 +337,12 @@ export function ObrifyAgent() {
               {/* Messages */}
               <ScrollArea className="flex-1 px-4 py-3" ref={scrollRef as any}>
                 <div className="space-y-3">
-                  {messages.map((msg) => (
-                    <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  {messages.map((msg, idx) => (
+                    <div
+                      key={msg.id}
+                      className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}
+                      style={{ animationDelay: `${idx * 30}ms` }}
+                    >
                       <div
                         className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
                           msg.role === 'user'
@@ -306,7 +353,7 @@ export function ObrifyAgent() {
                         {msg.role === 'agent' && expertMode && (
                           <div className="flex items-center gap-1 mb-1">
                             <GraduationCap className="h-3 w-3 text-amber-600 dark:text-amber-400" />
-                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">Eng. Silva</span>
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">{t('agent.expertMode')}</span>
                           </div>
                         )}
                         <p className="whitespace-pre-wrap">{msg.content}</p>
@@ -329,14 +376,11 @@ export function ObrifyAgent() {
                   ) : null}
 
                   {loading && (
-                    <div className="flex justify-start">
-                      <div className="bg-muted rounded-xl rounded-bl-sm px-3 py-2 text-sm text-muted-foreground">
-                        <span className="inline-flex gap-1">
-                          A pensar
-                          <span className="animate-bounce" style={{ animationDelay: '0ms' }}>.</span>
-                          <span className="animate-bounce" style={{ animationDelay: '150ms' }}>.</span>
-                          <span className="animate-bounce" style={{ animationDelay: '300ms' }}>.</span>
-                        </span>
+                    <div className="flex justify-start animate-fade-in">
+                      <div className="bg-muted rounded-xl rounded-bl-sm px-3 py-2.5 w-[70%] space-y-2">
+                        <Skeleton className="h-3 w-full" />
+                        <Skeleton className="h-3 w-4/5" />
+                        <Skeleton className="h-3 w-3/5" />
                       </div>
                     </div>
                   )}
@@ -353,7 +397,7 @@ export function ObrifyAgent() {
                       <span className="w-1 h-2 bg-accent-500 rounded-full animate-pulse" style={{ animationDelay: '200ms' }} />
                       <span className="w-1 h-5 bg-accent-500 rounded-full animate-pulse" style={{ animationDelay: '300ms' }} />
                     </div>
-                    A falar...
+                    {t('agent.speaking')}
                   </div>
                   <Button variant="ghost" size="icon" onClick={stopAudio} className="h-7 w-7">
                     <Square className="h-3 w-3" />
@@ -371,7 +415,7 @@ export function ObrifyAgent() {
                     onClick={startRecording}
                     disabled={loading || voiceState === 'processing'}
                     className={`shrink-0 h-9 w-9 ${isRecording ? 'text-red-500 ring-2 ring-red-500/30 animate-pulse' : 'text-muted-foreground'}`}
-                    title={isRecording ? 'Parar gravação' : 'Gravar voz'}
+                    title={isRecording ? t('agent.recording') : 'Gravar voz'}
                   >
                     {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
                   </Button>
@@ -379,7 +423,8 @@ export function ObrifyAgent() {
                     ref={inputRef}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    placeholder={isRecording ? 'A ouvir...' : 'Escreve a tua pergunta...'}
+                    onKeyDown={handleKeyDown}
+                    placeholder={isRecording ? t('agent.recording') : t('agent.inputPlaceholder')}
                     disabled={loading}
                     className="flex-1 h-9 px-3 text-sm bg-muted rounded-lg border-0 outline-none focus:ring-2 focus:ring-accent-500/30 placeholder:text-muted-foreground disabled:opacity-50"
                   />
