@@ -1,0 +1,262 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useLocation, useParams, useNavigate } from 'react-router-dom';
+import { Sparkles, Send, X, Mic, Bot } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from '@/hooks/use-toast';
+
+interface Message {
+  id: string;
+  role: 'user' | 'agent';
+  content: string;
+  suggestions?: string[];
+  timestamp: number;
+}
+
+const STORAGE_KEY = 'obrify_agent_history';
+const INITIAL_MESSAGE: Message = {
+  id: 'welcome',
+  role: 'agent',
+  content:
+    'Olá! Sou o Obrify, o teu assistente de fiscalização. Posso ajudar-te a consultar obras, ver não-conformidades, gerar relatórios e muito mais. O que precisas?',
+  suggestions: ['Ver NCs abertas', 'Resumo das obras', 'Gerar relatório'],
+  timestamp: Date.now(),
+};
+
+function loadHistory(): Message[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return [INITIAL_MESSAGE];
+}
+
+function saveHistory(msgs: Message[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(msgs.slice(-50)));
+  } catch {}
+}
+
+export function ObrifyAgent() {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState<Message[]>(loadHistory);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [showBadge, setShowBadge] = useState(() => !localStorage.getItem('obrify_agent_seen'));
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const location = useLocation();
+  const params = useParams();
+  const navigate = useNavigate();
+
+  // Persist messages
+  useEffect(() => {
+    saveHistory(messages);
+  }, [messages]);
+
+  // Scroll to bottom
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, loading]);
+
+  const handleOpen = () => {
+    setOpen(true);
+    setShowBadge(false);
+    localStorage.setItem('obrify_agent_seen', 'true');
+    setTimeout(() => inputRef.current?.focus(), 300);
+  };
+
+  const sendMessage = useCallback(
+    async (text: string) => {
+      if (!text.trim() || loading) return;
+
+      const userMsg: Message = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: text.trim(),
+        timestamp: Date.now(),
+      };
+      setMessages((prev) => [...prev, userMsg]);
+      setInput('');
+      setLoading(true);
+
+      try {
+        const context = {
+          page: location.pathname,
+          siteId: params.siteId || null,
+          filters: {},
+        };
+
+        const { data, error } = await supabase.functions.invoke('ai-obrify-agent', {
+          body: { message: text.trim(), context },
+        });
+
+        if (error) throw error;
+
+        // Handle navigation actions
+        if (data?.actions) {
+          for (const action of data.actions) {
+            const navTo = action?.result?.navigateTo;
+            if (navTo) {
+              navigate(navTo);
+              toast({ title: 'Navegação', description: `A navegar para ${navTo}` });
+            }
+          }
+        }
+
+        const agentMsg: Message = {
+          id: crypto.randomUUID(),
+          role: 'agent',
+          content: data?.response || data?.error || 'Desculpa, não consegui processar o pedido.',
+          suggestions: data?.suggestions,
+          timestamp: Date.now(),
+        };
+        setMessages((prev) => [...prev, agentMsg]);
+      } catch (e: any) {
+        console.error('ObrifyAgent error:', e);
+        const errorMsg: Message = {
+          id: crypto.randomUUID(),
+          role: 'agent',
+          content: e?.message?.includes('429')
+            ? 'Demasiados pedidos. Tenta novamente em breve.'
+            : e?.message?.includes('402')
+              ? 'Créditos esgotados.'
+              : 'Ocorreu um erro. Tenta novamente.',
+          timestamp: Date.now(),
+        };
+        setMessages((prev) => [...prev, errorMsg]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [loading, location.pathname, params.siteId, navigate]
+  );
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    sendMessage(input);
+  };
+
+  const handleClear = () => {
+    setMessages([INITIAL_MESSAGE]);
+  };
+
+  return (
+    <>
+      {/* Floating Button */}
+      {!open && (
+        <button
+          onClick={handleOpen}
+          className="fixed bottom-6 right-6 z-50 h-14 w-14 rounded-full bg-gradient-to-br from-accent-500 to-accent-600 text-white shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-200 flex items-center justify-center"
+          aria-label="Abrir Obrify Agent"
+        >
+          <Sparkles className="h-6 w-6" />
+          {showBadge && (
+            <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 border-2 border-white animate-pulse" />
+          )}
+        </button>
+      )}
+
+      {/* Chat Panel */}
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetContent
+          side="right"
+          className="w-full sm:max-w-[420px] p-0 flex flex-col gap-0 [&>button]:hidden"
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b bg-gradient-to-r from-accent-500/10 to-accent-600/5">
+            <div className="flex items-center gap-2">
+              <Bot className="h-5 w-5 text-accent-600" />
+              <SheetTitle className="text-base font-semibold">Obrify Agent</SheetTitle>
+            </div>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="sm" onClick={handleClear} className="text-xs text-muted-foreground">
+                Limpar
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => setOpen(false)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          {/* Messages */}
+          <ScrollArea className="flex-1 px-4 py-3" ref={scrollRef as any}>
+            <div className="space-y-3">
+              {messages.map((msg) => (
+                <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
+                      msg.role === 'user'
+                        ? 'bg-primary text-primary-foreground rounded-br-sm'
+                        : 'bg-muted text-foreground rounded-bl-sm'
+                    }`}
+                  >
+                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                  </div>
+                </div>
+              ))}
+
+              {/* Suggestions from last agent message */}
+              {!loading && messages.length > 0 && messages[messages.length - 1].role === 'agent' && messages[messages.length - 1].suggestions?.length ? (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {messages[messages.length - 1].suggestions!.map((s, i) => (
+                    <button
+                      key={i}
+                      onClick={() => sendMessage(s)}
+                      className="text-xs px-3 py-1.5 rounded-full border border-accent-300 text-accent-700 dark:border-accent-700 dark:text-accent-300 hover:bg-accent-50 dark:hover:bg-accent-900/30 transition-colors"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {/* Loading indicator */}
+              {loading && (
+                <div className="flex justify-start">
+                  <div className="bg-muted rounded-xl rounded-bl-sm px-3 py-2 text-sm text-muted-foreground">
+                    <span className="inline-flex gap-1">
+                      A pensar
+                      <span className="animate-bounce" style={{ animationDelay: '0ms' }}>.</span>
+                      <span className="animate-bounce" style={{ animationDelay: '150ms' }}>.</span>
+                      <span className="animate-bounce" style={{ animationDelay: '300ms' }}>.</span>
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+
+          {/* Input */}
+          <form onSubmit={handleSubmit} className="flex items-center gap-2 p-3 border-t bg-background">
+            <Button type="button" variant="ghost" size="icon" disabled className="shrink-0 opacity-40">
+              <Mic className="h-4 w-4" />
+            </Button>
+            <input
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Escreve a tua pergunta..."
+              disabled={loading}
+              className="flex-1 h-9 px-3 text-sm bg-muted rounded-lg border-0 outline-none focus:ring-2 focus:ring-accent-500/30 placeholder:text-muted-foreground disabled:opacity-50"
+            />
+            <Button
+              type="submit"
+              size="icon"
+              variant="accent"
+              disabled={!input.trim() || loading}
+              className="shrink-0"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
+          </form>
+        </SheetContent>
+      </Sheet>
+    </>
+  );
+}

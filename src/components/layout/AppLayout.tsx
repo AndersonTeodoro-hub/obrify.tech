@@ -6,6 +6,7 @@ import { AppHeader } from './AppHeader';
 import { HelpButton } from '@/components/onboarding/HelpButton';
 import { WelcomeModal } from '@/components/onboarding/WelcomeModal';
 import { startProductTour } from '@/components/onboarding/ProductTour';
+import { ObrifyAgent } from '@/components/ai/ObrifyAgent';
 
 export function AppLayout() {
   const [showWelcome, setShowWelcome] = useState(false);
@@ -45,6 +46,7 @@ export function AppLayout() {
       </div>
 
       <HelpButton showPulse={showPulse} onTourComplete={() => setShowPulse(false)} />
+      <ObrifyAgent />
 
       <WelcomeModal
         open={showWelcome}
