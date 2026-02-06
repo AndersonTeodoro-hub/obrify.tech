@@ -1,215 +1,233 @@
 
-# Plano: Relatorio de Compatibilizacao e Polish Final
+# Plano: Completar Funcionalidades com UI Existente
 
 ## Resumo
 
-Adicionar geracao de PDF de compatibilizacao, comandos rapidos contextuais no agente, atalhos de teclado funcionais, polish visual (skeletons, animacoes, empty states), e traducoes do agente para os 4 idiomas.
+Implementar 7 funcionalidades que ja tem UI mas faltam logica: forgot password, edicao de perfil, editar organizacao, contagem real de membros, lembrar-me, upload de foto da obra, e notificacoes do agente.
 
 ---
 
-## 1. Relatorio de Compatibilizacao (PDF)
+## Migracoes de Base de Dados
 
-### 1.1 Funcao no pdfGenerator.ts
+Duas alteracoes de schema necessarias:
 
-Nova funcao `generateCompatibilizationReport` em `src/services/pdfGenerator.ts`:
+1. **Adicionar `image_url` a `sites`**: coluna TEXT nullable para foto da obra
+2. **Adicionar `description` a `organizations`**: coluna TEXT nullable (ja existe no UI mas nao na tabela)
+3. **Criar bucket `site-images`**: bucket publico para fotos de obras
 
-Parametros: `{ siteId, includeResolved?, includeImages? }`
+```sql
+ALTER TABLE public.sites ADD COLUMN image_url TEXT;
+ALTER TABLE public.organizations ADD COLUMN description TEXT;
 
-Seccoes do PDF:
-- **Capa**: Logo, "RELATORIO DE COMPATIBILIZACAO", nome da obra, data
-- **Sumario Executivo**: total conflitos, breakdown por severidade (tabela com cores), taxa de resolucao
-- **Projectos Analisados**: tabela com nome, especialidade, versao, data de upload, estado de analise
-- **Conflitos**: lista ordenada por severidade, cada um com badge de severidade, tipo, titulo, descricao, localizacao, recomendacao, estado
-- **Checklist de Verificacoes Padrao**: lista fixa de verificacoes tipicas (sobreposicoes, cotas, provisoes, normas)
-- **Recomendacoes**: geradas automaticamente com base nos conflitos (ex: "Rever coordenacao entre Estruturas e Aguas")
-- **Assinatura**
+INSERT INTO storage.buckets (id, name, public) VALUES ('site-images', 'site-images', true);
 
-Dados necessarios: queries a `projects`, `project_conflicts`, `project_elements` e `sites`.
+CREATE POLICY "Authenticated users can upload site images"
+ON storage.objects FOR INSERT TO authenticated
+WITH CHECK (bucket_id = 'site-images');
 
-### 1.2 Modal de Opcoes
+CREATE POLICY "Anyone can view site images"
+ON storage.objects FOR SELECT TO public
+USING (bucket_id = 'site-images');
 
-Novo componente `src/components/sites/GenerateCompatReportModal.tsx`:
-- Checkbox "Incluir conflitos resolvidos"
-- Checkbox "Incluir imagens das plantas"
-- Botao "Gerar Relatorio" com loading state
-- Chama `generateCompatibilizationReport` e faz download + persiste no bucket `documents` e tabela `documents`
-
-### 1.3 Botao na UI
-
-Adicionar botao "Gerar Relatorio" no `ProjectConflictsDetail.tsx` (header da seccao de conflitos) e tambem na vista geral de projectos em `SiteProjectsTab.tsx`.
-
----
-
-## 2. Comandos Rapidos Contextuais
-
-### 2.1 Logica no ObrifyAgent.tsx
-
-Substituir as sugestoes estaticas do `INITIAL_MESSAGE` por sugestoes dinamicas baseadas em `location.pathname`:
-
-| Pagina (pathname) | Sugestoes |
-|---|---|
-| `/app/dashboard` | "Resumo do dia", "NCs urgentes", "Actividade recente" |
-| `/app/sites/:siteId` | "Resumo desta obra", "NCs abertas aqui", "Gerar relatorio", "Conflitos de projectos" |
-| `/app/nonconformities` | "Filtrar criticas", "Exportar lista", "NCs mais antigas" |
-| `/app/sites/:siteId` (tab projectos) | "Analisar pendentes", "Ver conflitos", "Gerar relatorio compatibilizacao" |
-| Default | "Ver NCs abertas", "Resumo das obras", "Gerar relatorio" |
-
-Implementar como funcao `getContextualSuggestions(pathname)` que retorna array de strings.
-
----
-
-## 3. Atalhos de Teclado
-
-### 3.1 Hook useKeyboardShortcuts
-
-Novo hook `src/hooks/use-keyboard-shortcuts.tsx` com `useEffect` que escuta `keydown`:
-
-| Atalho | Accao |
-|---|---|
-| `Ctrl+K` / `Cmd+K` | Abre o Obrify Agent |
-| `Escape` | Fecha painel do agente (se aberto) |
-| `Ctrl+Enter` | Envia mensagem (dentro do agente) |
-
-### 3.2 Integracao
-
-- O hook e usado no `AppLayout.tsx` para os atalhos globais
-- O `ObrifyAgent` expoe `open/setOpen` via callback props ou ref para o layout controlar
-- Actualizar `KeyboardShortcutsModal` com os novos atalhos
-- `Ctrl+Enter` e tratado directamente no `ObrifyAgent` no `onKeyDown` do input
-
----
-
-## 4. Polish Visual
-
-### 4.1 ObrifyAgent
-
-- **Loading com skeleton**: Substituir os 3 pontos animados por um skeleton de 2-3 linhas (usando o Skeleton existente) para parecer uma mensagem a carregar
-- **Animacao slide-in**: O SheetContent ja tem animacao do Radix; adicionar `animate-fade-in` nas mensagens individuais com delay incremental
-- **Empty state no historico**: Na `AgentHistoryTab`, quando sem conversas, mostrar icone + texto elegante ("Ainda sem conversas. Comeca a falar com o Obrify!")
-- **Feedback visual**: Toast apos toggle de voz on/off e toggle de modo especialista
-
-### 4.2 ProjectConflictsDetail
-
-- Skeleton loading enquanto dados carregam
-- Empty state quando nao ha conflitos: icone CheckCircle2 verde + "Sem incompatibilidades detectadas"
-- Animacao `animate-fade-in` nos cards de conflito com staggered delay
-
-### 4.3 SiteProjectsTab
-
-- Animacao staggered nos cards de especialidade (ja usa grid, adicionar delay por indice)
-
----
-
-## 5. Traducoes do Agente
-
-### 5.1 Novas chaves i18n
-
-Adicionar seccao `agent` nos 4 ficheiros de locale (`pt.json`, `en.json`, `es.json`, `fr.json`):
-
-```text
-agent.greeting - Mensagem de boas-vindas
-agent.thinking - "A pensar..." / "Thinking..."
-agent.error - "Ocorreu um erro..."
-agent.tooManyRequests - "Demasiados pedidos..."
-agent.creditsExhausted - "Creditos esgotados"
-agent.clear - "Limpar"
-agent.recording - "A ouvir..."
-agent.inputPlaceholder - "Escreve a tua pergunta..."
-agent.speaking - "A falar..."
-agent.voiceOn - "Voz ligada"
-agent.voiceOff - "Voz desligada"
-agent.expertMode - "Modo Eng. Silva"
-agent.backToCurrent - "Voltar a conversa actual"
-agent.navigation - "Navegacao"
-agent.navigatingTo - "A navegar para {{path}}"
-agent.historyEmpty - "Ainda sem conversas"
-agent.historyEmptyDesc - "Comeca a falar com o Obrify!"
-agent.suggestions.openNCs - "Ver NCs abertas"
-agent.suggestions.siteSummary - "Resumo das obras"
-agent.suggestions.generateReport - "Gerar relatorio"
-agent.suggestions.daySummary - "Resumo do dia"
-agent.suggestions.urgentNCs - "NCs urgentes"
-agent.suggestions.recentActivity - "Actividade recente"
-agent.suggestions.siteOverview - "Resumo desta obra"
-agent.suggestions.siteNCs - "NCs abertas aqui"
-agent.suggestions.projectConflicts - "Conflitos de projectos"
-agent.suggestions.filterCritical - "Filtrar criticas"
-agent.suggestions.exportList - "Exportar lista"
-agent.suggestions.analyzePending - "Analisar pendentes"
-agent.suggestions.viewConflicts - "Ver conflitos"
+CREATE POLICY "Authenticated users can delete site images"
+ON storage.objects FOR DELETE TO authenticated
+USING (bucket_id = 'site-images');
 ```
 
-### 5.2 Actualizar ObrifyAgent
+---
 
-- Substituir todos os textos hardcoded por `t('agent.xxx')`
-- A mensagem inicial (greeting) usa `t('agent.greeting')`
-- As sugestoes contextuais usam as chaves `t('agent.suggestions.xxx')`
-- O agente envia o idioma actual no body para `ai-obrify-agent` para que o modelo responda no idioma certo
+## 1. Esqueci a Password
 
-### 5.3 Actualizar ai-obrify-agent
+### 1.1 Modal no Auth.tsx
 
-- Receber campo `language` no body (default: 'pt')
-- Adicionar ao system prompt: "Responde SEMPRE no idioma: {{language}}"
+- Novo estado `showForgotPassword`
+- O botao "Esqueceu password?" (linha 147) abre o modal
+- Modal com campo email e botao "Enviar instrucoes"
+- Chama `supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + '/reset-password' })`
+- Mostra toast sucesso/erro
+
+### 1.2 Pagina /reset-password
+
+Novo ficheiro `src/pages/ResetPassword.tsx`:
+- Campos: nova password + confirmar password
+- Ao montar, verifica se ha sessao (o link do email autentica automaticamente)
+- Chama `supabase.auth.updateUser({ password })`
+- Apos sucesso, redireciona para `/auth` com toast
+
+### 1.3 Rota no App.tsx
+
+- Adicionar `<Route path="/reset-password" element={<ResetPassword />} />`
 
 ---
 
-## 6. Ficheiros a Criar
+## 2. Edicao de Perfil
+
+### 2.1 Actualizar Settings.tsx
+
+Na seccao Perfil (linhas 78-97), adicionar:
+- Query para buscar dados do perfil: `supabase.from('profiles').select('*').eq('user_id', user.id).single()`
+- Campo editavel: Nome completo (Input)
+- Upload de avatar: botao que faz upload para bucket `captures` (ja existe) ou prefixed path
+- Campo read-only: Email
+- Botao "Guardar alteracoes"
+- Mutation: `supabase.from('profiles').update({ full_name, avatar_url }).eq('user_id', user.id)`
+- Toast sucesso/erro
+
+### 2.2 Avatar no Header
+
+Actualizar `AppSidebar.tsx` e `AppHeader.tsx`:
+- Query ao perfil para obter `full_name` e `avatar_url`
+- Mostrar avatar real no componente `Avatar` (usar `AvatarImage` do Radix)
+- Fallback para iniciais do nome
+
+---
+
+## 3. Editar Organizacao
+
+### 3.1 No Organizations.tsx
+
+- Novo estado `editingOrg` (org seleccionada ou null)
+- O `DropdownMenuItem` de editar (linha 168-170) define `editingOrg`
+- Novo Dialog de edicao com campos Nome e Descricao pre-preenchidos
+- Mutation: `supabase.from('organizations').update({ name, description }).eq('id', orgId)`
+- Verificacao de permissao: so admins (ja filtrado pela condicao `membership.role === 'admin'`)
+- Toast + invalidate query
+
+---
+
+## 4. Contagem Real de Membros
+
+### 4.1 No Organizations.tsx
+
+- Alterar a query de memberships para tambem buscar contagem
+- Query separada ou adicional: `supabase.from('memberships').select('org_id').in('org_id', orgIds)` e contar por org_id
+- Ou fazer uma query `.select('org_id, count', { count: 'exact' })` agrupada
+- Abordagem mais simples: query separada com `useQuery` que faz `supabase.from('memberships').select('org_id')` e conta no cliente
+- Mostrar no card: "X membros" em vez de texto estatico (linha 188-190)
+
+---
+
+## 5. Lembrar-me
+
+### 5.1 No Auth.tsx
+
+- Novo estado `rememberMe` (boolean)
+- `useEffect` ao montar: le `localStorage.getItem('obrify_remember_email')`, se existir preenche `loginEmail` e marca checkbox
+- Conectar o `Checkbox` (linha 144) ao estado `rememberMe`
+- No `handleLogin` com sucesso: se `rememberMe` guarda email, senao remove
+- Nao requer backend
+
+---
+
+## 6. Upload de Foto da Obra
+
+### 6.1 No Sites.tsx (criar obra)
+
+- Adicionar campo de upload de imagem no Dialog de criacao (antes do DialogFooter)
+- Preview da imagem seleccionada
+- Ao criar: upload para `site-images/{orgId}/{siteId}/{filename}`, obter URL publica
+- Guardar `image_url` na insercao do site
+
+### 6.2 No EditSiteModal.tsx
+
+- Adicionar campo de upload/preview similar
+- Ao guardar: upload + update `image_url`
+
+### 6.3 No card da obra (Sites.tsx)
+
+- Substituir o placeholder gradient (linhas 217-220) por imagem real se `site.image_url` existir
+- Fallback para o placeholder com HardHat actual
+
+---
+
+## 7. Notificacoes do Agente
+
+### 7.1 No ObrifyAgent.tsx
+
+- Ao abrir o painel (`handleOpen`), fazer 2 queries:
+  - NCs criticas abertas ha mais de 7 dias: `supabase.from('nonconformities').select('id').eq('severity', 'critical').eq('status', 'open').lt('created_at', 7diasAtras)`
+  - Conflitos criticos nao confirmados: `supabase.from('project_conflicts').select('id').eq('severity', 'critical').eq('status', 'pending')`
+- Se houver resultados, prefixar a mensagem de greeting com alertas formatados
+- Badge no botao flutuante: dot vermelho se houver alertas (verificar periodicamente ou ao montar)
+
+---
+
+## 8. Traducoes i18n
+
+Adicionar as seguintes chaves nos 4 ficheiros de locale:
+
+**auth.forgotPassword**: title, description, submit, success, backToLogin
+**auth.resetPassword**: title, newPassword, confirmPassword, submit, success
+**settings.profile**: title, name, email, avatar, uploadAvatar, save, saved
+**organizations.edit**: title, save, success (renomear/adicionar)
+**sites.uploadImage, sites.imageUploaded**
+
+---
+
+## Ficheiros a Criar
 
 | Ficheiro | Descricao |
-|---|---|
-| `src/components/sites/GenerateCompatReportModal.tsx` | Modal com opcoes para gerar relatorio |
-| `src/hooks/use-keyboard-shortcuts.tsx` | Hook para atalhos globais |
+|----------|-----------|
+| `src/pages/ResetPassword.tsx` | Pagina para redefinir password |
 
-## 7. Ficheiros a Modificar
+## Ficheiros a Modificar
 
 | Ficheiro | Alteracao |
-|---|---|
-| `src/services/pdfGenerator.ts` | Nova funcao `generateCompatibilizationReport` |
-| `src/components/ai/ObrifyAgent.tsx` | Sugestoes contextuais, traducoes, Ctrl+Enter, polish visual |
-| `src/components/ai/AgentHistoryTab.tsx` | Empty state elegante |
-| `src/components/sites/ProjectConflictsDetail.tsx` | Botao "Gerar Relatorio", skeleton, empty state, animacoes |
-| `src/components/sites/SiteProjectsTab.tsx` | Botao relatorio, animacoes staggered nos cards |
-| `src/components/layout/AppLayout.tsx` | Integrar useKeyboardShortcuts |
-| `src/components/onboarding/KeyboardShortcutsModal.tsx` | Adicionar novos atalhos |
-| `supabase/functions/ai-obrify-agent/index.ts` | Receber `language`, adicionar ao prompt |
-| `src/i18n/locales/pt.json` | Seccao `agent` |
-| `src/i18n/locales/en.json` | Seccao `agent` |
-| `src/i18n/locales/es.json` | Seccao `agent` |
-| `src/i18n/locales/fr.json` | Seccao `agent` |
+|----------|-----------|
+| `src/App.tsx` | +1 rota /reset-password |
+| `src/pages/Auth.tsx` | Modal forgot password, lembrar-me, checkbox funcional |
+| `src/pages/app/Settings.tsx` | Edicao de perfil com nome, avatar, guardar |
+| `src/pages/app/Organizations.tsx` | Modal editar org, contagem membros, mutation editar |
+| `src/pages/app/Sites.tsx` | Upload foto ao criar, mostrar foto no card |
+| `src/components/sites/EditSiteModal.tsx` | Campo upload foto ao editar |
+| `src/components/layout/AppSidebar.tsx` | Avatar real do perfil |
+| `src/components/layout/AppHeader.tsx` | Avatar real no header (se aplicavel) |
+| `src/components/ai/ObrifyAgent.tsx` | Alertas proactivos ao abrir, badge no FAB |
+| `src/i18n/locales/pt.json` | Novas chaves traducao |
+| `src/i18n/locales/en.json` | Novas chaves traducao |
+| `src/i18n/locales/es.json` | Novas chaves traducao |
+| `src/i18n/locales/fr.json` | Novas chaves traducao |
 
 ---
 
 ## Detalhes Tecnicos
 
-### Geracao do Relatorio de Compatibilizacao
-
-A funcao faz queries directas ao Supabase (como os outros geradores):
+### Reset Password Flow
 
 ```text
-1. Query sites (nome, morada)
-2. Query projects WHERE site_id (nome, specialty, version, analysis_status)
-3. Query project_conflicts WHERE site_id (+ opcionalmente resolvidos)
-4. Gera PDF com jsPDF + autoTable
-5. Upload blob para bucket documents em /org/site/reports/
-6. INSERT em tabela documents (name, type, file_path, site_id, org_id)
-7. Retorna blob para download
+1. User clica "Esqueceu password?"
+2. Modal abre com campo email
+3. supabase.auth.resetPasswordForEmail(email, { redirectTo: origin + '/reset-password' })
+4. User recebe email com link
+5. Link redireciona para /reset-password (Supabase injeta sessao automaticamente)
+6. User preenche nova password
+7. supabase.auth.updateUser({ password })
+8. Redireciona para /auth com toast sucesso
 ```
 
-### Atalhos de Teclado - Comunicacao com ObrifyAgent
-
-O `AppLayout` precisa de controlar o estado `open` do `ObrifyAgent`. Opcoes:
-- Usar um estado elevado no `AppLayout` e passar `open/onOpenChange` como props ao `ObrifyAgent`
-- Manter simples e funcional
-
-Abordagem escolhida: elevar estado `open` para `AppLayout` e passar como props.
-
-### Sugestoes Contextuais
+### Upload de Avatar
 
 ```text
-function getContextualSuggestions(pathname: string, t: TFunction): string[] {
-  if (pathname === '/app/dashboard') return [t('agent.suggestions.daySummary'), ...];
-  if (pathname.includes('/app/sites/') && pathname.includes('siteId')) return [...];
-  if (pathname === '/app/nonconformities') return [...];
-  return [t('agent.suggestions.openNCs'), ...]; // default
-}
+1. User seleciona ficheiro
+2. Upload para bucket captures: avatars/{userId}/{filename}
+3. Obter URL publica com getPublicUrl
+4. Update profiles.avatar_url
+5. Invalidar query do perfil
+```
+
+### Contagem de Membros
+
+```text
+- Query: supabase.from('memberships').select('org_id')
+- Agrupar no cliente: reduce por org_id para obter Map<orgId, count>
+- Mostrar count no card
+```
+
+### Alertas do Agente
+
+```text
+- Ao abrir: 2 queries paralelas (NCs + conflitos)
+- Se alertas > 0: mensagem formatada como greeting
+- Badge: useQuery com refetchInterval de 60s para manter badge actualizado
+- Dot vermelho no FAB com numero de alertas
 ```
