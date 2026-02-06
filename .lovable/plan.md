@@ -1,125 +1,161 @@
 
-# Plano: Sistema Obrify Agent Completo
+# Plano: Historico e Organizacao de Ficheiros do Obrify Agent
 
 ## Resumo
 
-Criar um agente inteligente acessivel em todas as paginas da aplicacao, com botao flutuante, painel lateral de chat, execucao de accoes (navegacao, queries), sugestoes rapidas e historico persistido em localStorage.
+Adicionar persistencia de conversas na base de dados, log de accoes, organizacao automatica de ficheiros por pastas, e uma tab de historico no painel do agente.
 
 ---
 
-## Ficheiros a Criar
+## 1. Migracao de Base de Dados
 
-### 1. Edge Function `supabase/functions/ai-obrify-agent/index.ts`
+Criar 4 novas tabelas:
 
-Nova edge function que:
-- Recebe `{ message, context: { page, siteId, filters } }`
-- Usa tool calling do Lovable AI Gateway (Gemini) para extrair JSON estruturado
-- Define tools: QUERY_SITES, QUERY_CAPTURES, QUERY_NONCONFORMITIES, QUERY_STATS, NAVIGATE, GENERATE_REPORT
-- Executa as tools internamente (queries ao Supabase com service role key)
-- Retorna JSON com `{ thought, actions, response, suggestions }`
-- Nao usa streaming (retorna resposta completa via `supabase.functions.invoke`)
-- Trata erros 429/402
+### agent_conversations
+- `id` UUID PK
+- `organization_id` UUID FK -> organizations
+- `user_id` UUID (auth.uid)
+- `started_at` TIMESTAMPTZ DEFAULT now()
+- `ended_at` TIMESTAMPTZ nullable
+- `title` TEXT nullable
+- `message_count` INTEGER DEFAULT 0
 
-### 2. Componente `src/components/ai/ObrifyAgent.tsx`
+### agent_messages
+- `id` UUID PK
+- `conversation_id` UUID FK -> agent_conversations
+- `role` TEXT ('user' | 'agent')
+- `content` TEXT
+- `tools_used` JSONB DEFAULT '[]'
+- `context` JSONB DEFAULT '{}'
+- `created_at` TIMESTAMPTZ DEFAULT now()
 
-Componente completo com:
+### agent_actions_log
+- `id` UUID PK
+- `conversation_id` UUID FK -> agent_conversations
+- `message_id` UUID FK -> agent_messages (nullable)
+- `tool_name` TEXT
+- `params` JSONB DEFAULT '{}'
+- `result` JSONB DEFAULT '{}'
+- `success` BOOLEAN DEFAULT true
+- `created_at` TIMESTAMPTZ DEFAULT now()
 
-**Botao Flutuante:**
-- `fixed bottom-6 right-6`, circulo 56px
-- Gradiente accent-500 a 600, icone Sparkles
-- Badge de notificacao animado na primeira visita
+### file_organization
+- `id` UUID PK
+- `organization_id` UUID FK -> organizations
+- `site_id` UUID nullable
+- `file_path` TEXT
+- `file_type` TEXT (capture, inspection, nc_evidence, report, project)
+- `original_name` TEXT
+- `generated_by` TEXT ('user' | 'agent')
+- `related_entity_id` UUID nullable
+- `tags` TEXT[] DEFAULT '{}'
+- `created_at` TIMESTAMPTZ DEFAULT now()
 
-**Painel (Sheet lado direito):**
-- 420px desktop, fullscreen mobile
-- Header: "Obrify Agent" + botao fechar
-- Area de chat scrollavel
-- Mensagens user: direita, fundo primary
-- Mensagens agent: esquerda, fundo slate, suporte markdown (react-markdown nao esta instalado, usaremos whitespace-pre-wrap com formatacao basica)
-- Sugestoes rapidas como botoes clicaveis
-- Input de texto + botao enviar + botao microfone (desactivado)
-- Indicador "A pensar..." com animacao
+### RLS Policies
+- agent_conversations: SELECT/INSERT/UPDATE onde o user pertence a organizacao via `is_org_member(auth.uid(), organization_id)`
+- agent_messages: SELECT/INSERT via join com agent_conversations do proprio user
+- agent_actions_log: SELECT/INSERT via join com agent_conversations
+- file_organization: SELECT para membros da org, INSERT/UPDATE para admin/manager
 
-**Mensagem inicial:**
-"Ola! Sou o Obrify, o teu assistente de fiscalizacao. Posso ajudar-te a consultar obras, ver nao-conformidades, gerar relatorios e muito mais. O que precisas?"
+### Trigger
+- Trigger em agent_messages para incrementar `message_count` em agent_conversations automaticamente
 
-**Sugestoes rapidas:**
-- "Ver NCs abertas"
-- "Resumo das obras"
-- "Gerar relatorio"
+---
 
-### 3. Modificar `src/components/layout/AppLayout.tsx`
+## 2. Funcoes Helper de Ficheiros
 
-Adicionar o componente `<ObrifyAgent />` ao layout para estar disponivel em todas as paginas.
+Criar funcao SQL `get_file_path` que gera caminhos padronizados:
 
-### 4. Atualizar `supabase/config.toml`
+```text
+organizations/{orgId}/sites/{siteId}/captures/{YYYY}-{MM}/
+organizations/{orgId}/sites/{siteId}/inspections/{YYYY}-{MM}/
+organizations/{orgId}/sites/{siteId}/nonconformities/{status}/
+organizations/{orgId}/sites/{siteId}/reports/{type}/
+```
 
-Adicionar configuracao para a nova edge function com `verify_jwt = false`.
+---
+
+## 3. Actualizar Edge Function `ai-obrify-agent`
+
+Modificacoes:
+- Receber `conversationId` e `userId` no body
+- Guardar cada mensagem (user + agent) na tabela `agent_messages`
+- Registar cada accao executada em `agent_actions_log`
+- Adicionar 3 novas tools:
+  - `LIST_FILES`: consulta `file_organization` por siteId/type/folder
+  - `SAVE_REPORT`: placeholder que regista na `file_organization` e retorna path
+  - `ORGANIZE_FILES`: consulta e lista ficheiros por criterios
+- Actualizar o enum de tools no tool calling do modelo
+
+---
+
+## 4. Actualizar Componente ObrifyAgent
+
+### Gestao de Conversas
+- Ao abrir, verificar se existe conversa activa (ultima conversa com `ended_at` NULL e `started_at` nos ultimos 30 min)
+- Se nao, criar nova conversa via Supabase
+- Guardar `conversationId` em state
+- Enviar `conversationId` e `userId` em cada pedido ao edge function
+
+### Tab Historico
+- Adicionar tabs no painel: "Chat" | "Historico"
+- Tab Historico: lista de conversas anteriores com titulo e data
+- Ao clicar numa conversa, carrega as mensagens dessa conversa
+- Titulo da conversa gerado automaticamente (primeira mensagem do user truncada a 50 chars)
+
+### Limpar conversa
+- Botao "Limpar" agora marca `ended_at` na conversa actual e cria uma nova
+
+### Usar useAuth
+- Importar `useAuth` para obter `user.id` e passar ao edge function
+- Obter `organization_id` do user via query a memberships
+
+---
+
+## 5. Ficheiros a Criar/Modificar
+
+| Ficheiro | Accao |
+|----------|-------|
+| `supabase/migrations/..._agent_history.sql` | Criar - Tabelas + RLS + triggers |
+| `supabase/functions/ai-obrify-agent/index.ts` | Modificar - Persistencia + novas tools |
+| `src/components/ai/ObrifyAgent.tsx` | Modificar - Conversas BD + tab historico |
 
 ---
 
 ## Detalhes Tecnicos
 
-### Edge Function - Tool Calling
-
-A edge function usa tool calling do Lovable AI para obter respostas estruturadas:
+### Fluxo de Conversa
 
 ```text
-tools = [
-  {
-    name: "obrify_response",
-    parameters: {
-      thought: string,
-      actions: [{ tool: string, params: object }],
-      response: string,
-      suggestions: string[]
-    }
-  }
-]
-tool_choice = { type: "function", function: { name: "obrify_response" } }
+1. User abre painel
+2. Verifica conversa activa (< 30 min inactividade)
+3. Se nao existe -> cria nova agent_conversation
+4. User envia mensagem
+5. Frontend envia { message, context, conversationId, userId }
+6. Edge function:
+   a. Insere user message em agent_messages
+   b. Processa com IA
+   c. Executa tools e regista em agent_actions_log
+   d. Insere agent message em agent_messages
+   e. Retorna resposta
+7. Frontend actualiza UI
 ```
 
-Dentro da funcao, apos receber as actions do modelo, executa queries reais:
+### Tab Historico - UI
 
 ```text
-QUERY_SITES -> supabase.from('sites').select(...)
-QUERY_CAPTURES -> supabase.from('captures').select(...)
-QUERY_NONCONFORMITIES -> supabase.from('nonconformities').select(...)
-QUERY_STATS -> queries agregadas com count
-NAVIGATE -> retorna path no response
-GENERATE_REPORT -> placeholder (retorna instrucao)
+[Chat]  [Historico]
+-------------------------
+| 05 Fev - "Ver NCs..."  |
+| 04 Fev - "Resumo..."   |
+| 03 Fev - "Relatorio..." |
+-------------------------
 ```
 
-O fluxo e:
-1. Recebe mensagem + contexto
-2. Envia ao modelo com system prompt + tools
-3. Modelo decide que tool usar
-4. Edge function executa a query real
-5. Envia resultado de volta ao modelo para formatar resposta
-6. Retorna JSON final ao cliente
+Ao clicar numa conversa anterior:
+- Carrega mensagens dessa conversa
+- Mostra em modo leitura (sem input, ou com input para continuar)
 
-### Componente - Contexto Automatico
+### Organizacao de Ficheiros
 
-```text
-- useLocation() -> detecta pagina actual
-- useParams() -> extrai siteId se na rota /app/sites/:siteId
-- Envia { page: pathname, siteId, filters: {} } em cada pedido
-```
-
-### Componente - Execucao de Accoes
-
-Quando o agente retorna actions com tool "NAVIGATE":
-- Usa `useNavigate()` para navegar automaticamente
-- Mostra toast a informar a navegacao
-
-### Historico
-
-- State `messages[]` em useState
-- Persist em `localStorage` key `obrify_agent_history`
-- Carrega ao montar, guarda a cada nova mensagem
-- Limpa ao fazer logout (o componente esta dentro de ProtectedRoute)
-
----
-
-## Dependencias
-
-Nenhuma nova dependencia necessaria. Usa Sheet existente do shadcn/ui.
+A tabela `file_organization` serve como indice/catalogo. Os ficheiros fisicos continuam nos buckets existentes (captures, documents). A tabela regista metadados e o caminho padronizado para consulta rapida pelo agente.
