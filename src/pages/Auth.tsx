@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { Activity, Loader2, Eye, EyeOff } from "lucide-react";
@@ -21,15 +22,16 @@ export default function AuthPage() {
   const { signIn, signUp } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { t } = useTranslation();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     const { error } = await signIn(loginEmail, loginPassword);
     if (error) {
-      toast({ title: "Erro ao entrar", description: error.message, variant: "destructive" });
+      toast({ title: t("auth.loginError"), description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Bem-vindo!", description: "Login efetuado com sucesso." });
+      toast({ title: t("auth.loginSuccess"), description: t("auth.loginSuccessDesc") });
       navigate("/app");
     }
     setIsLoading(false);
@@ -38,40 +40,50 @@ export default function AuthPage() {
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (signupPassword !== signupConfirmPassword) {
-      toast({ title: "Erro", description: "As passwords não coincidem.", variant: "destructive" });
+      toast({ title: t("common.error"), description: t("auth.passwordMismatch"), variant: "destructive" });
       return;
     }
     if (signupPassword.length < 6) {
-      toast({ title: "Erro", description: "A password deve ter pelo menos 6 caracteres.", variant: "destructive" });
+      toast({ title: t("common.error"), description: t("auth.passwordTooShort"), variant: "destructive" });
       return;
     }
     setIsLoading(true);
     const { error } = await signUp(signupEmail, signupPassword, signupName);
     if (error) {
-      toast({ title: "Erro ao criar conta", description: error.message, variant: "destructive" });
+      toast({ title: t("auth.signupError"), description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Conta criada!", description: "A sua conta foi criada com sucesso." });
+      toast({ title: t("auth.signupSuccess"), description: t("auth.signupSuccessDesc") });
       navigate("/app");
     }
     setIsLoading(false);
   };
 
+  const pills = [
+    { icon: "👁", label: t("auth.landing.featureAI") },
+    { icon: "✓", label: t("auth.landing.featureChecklists") },
+    { icon: "📄", label: t("auth.landing.featureReports") },
+    { icon: "🚁", label: t("auth.landing.featureDrone") },
+  ];
+
   return (
     <div className="min-h-screen flex flex-col lg:flex-row">
       {/* Mobile Hero */}
       <div className="lg:hidden relative h-[45vh] overflow-hidden">
-        <img src="/images/hero-drone.jpeg" alt="Drone a inspecionar obra" className="absolute inset-0 w-full h-full object-cover" />
+        <img src="/images/hero-drone.jpeg" alt="Drone" className="absolute inset-0 w-full h-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-b from-slate-900/80 via-slate-900/70 to-slate-900/90" />
         <div className="relative z-10 flex flex-col justify-center items-center h-full px-6 text-center">
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/10 mb-4 animate-fade-in">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs text-white/90 font-medium">Plataforma Operacional</span>
+            <span className="text-xs text-white/90 font-medium">{t("auth.landing.badge")}</span>
           </div>
           <h2 className="text-2xl font-bold text-white mb-2 animate-fade-in">
-            Fiscalização com <span className="bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent">IA</span>
+            {t("auth.landing.mobileTitle")}{" "}
+            <span className="bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent">
+              {t("auth.landing.heroHighlight")}
+            </span>
           </h2>
           <p className="text-sm text-slate-300 max-w-xs animate-fade-in">
-            Detecte defeitos, digitalize inspeções, gere relatórios.
+            {t("auth.landing.mobileSubtitle")}
           </p>
         </div>
       </div>
@@ -95,15 +107,15 @@ export default function AuthPage() {
 
             {isLogin ? (
               <>
-                <h1 className="text-2xl font-bold text-foreground mb-1">Bem-vindo</h1>
-                <p className="text-sm text-muted-foreground mb-8">Entre na sua conta para continuar</p>
+                <h1 className="text-2xl font-bold text-foreground mb-1">{t("auth.welcomeBack")}</h1>
+                <p className="text-sm text-muted-foreground mb-8">{t("auth.enterCredentials")}</p>
                 <form onSubmit={handleLogin} className="space-y-5">
                   <div className="space-y-1.5">
-                    <label htmlFor="login-email" className="text-sm font-medium text-foreground">Email</label>
+                    <label htmlFor="login-email" className="text-sm font-medium text-foreground">{t("auth.email")}</label>
                     <input
                       id="login-email"
                       type="email"
-                      placeholder="seu@email.com"
+                      placeholder={t("auth.emailPlaceholder")}
                       value={loginEmail}
                       onChange={(e) => setLoginEmail(e.target.value)}
                       required
@@ -111,7 +123,7 @@ export default function AuthPage() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label htmlFor="login-password" className="text-sm font-medium text-foreground">Password</label>
+                    <label htmlFor="login-password" className="text-sm font-medium text-foreground">{t("auth.password")}</label>
                     <div className="relative">
                       <input
                         id="login-password"
@@ -130,9 +142,9 @@ export default function AuthPage() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Checkbox id="remember" />
-                      <label htmlFor="remember" className="text-sm text-muted-foreground cursor-pointer">Lembrar-me</label>
+                      <label htmlFor="remember" className="text-sm text-muted-foreground cursor-pointer">{t("auth.landing.rememberMe")}</label>
                     </div>
-                    <button type="button" className="text-sm text-primary hover:underline">Esqueceu password?</button>
+                    <button type="button" className="text-sm text-primary hover:underline">{t("auth.landing.forgotPassword")}</button>
                   </div>
                   <button
                     type="submit"
@@ -140,32 +152,32 @@ export default function AuthPage() {
                     className="w-full h-11 rounded-xl bg-gradient-to-br from-primary-600 to-primary-700 text-white font-semibold shadow-lg hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
                   >
                     {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
-                    Entrar
+                    {t("auth.login")}
                   </button>
                 </form>
                 <div className="flex items-center gap-3 my-6">
                   <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
-                  <span className="text-xs text-muted-foreground">ou</span>
+                  <span className="text-xs text-muted-foreground">{t("common.or")}</span>
                   <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
                 </div>
                 <p className="text-center text-sm text-muted-foreground">
-                  Ainda não tem conta?{" "}
+                  {t("auth.landing.noAccount")}{" "}
                   <button onClick={() => setIsLogin(false)} className="text-primary font-medium hover:underline">
-                    Criar conta gratuita
+                    {t("auth.landing.createFreeAccount")}
                   </button>
                 </p>
               </>
             ) : (
               <>
-                <h1 className="text-2xl font-bold text-foreground mb-1">Criar conta</h1>
-                <p className="text-sm text-muted-foreground mb-8">Preencha os dados para começar a usar o Obrify</p>
+                <h1 className="text-2xl font-bold text-foreground mb-1">{t("auth.createAccount")}</h1>
+                <p className="text-sm text-muted-foreground mb-8">{t("auth.fillDataToStart")}</p>
                 <form onSubmit={handleSignup} className="space-y-4">
                   <div className="space-y-1.5">
-                    <label htmlFor="signup-name" className="text-sm font-medium text-foreground">Nome completo</label>
+                    <label htmlFor="signup-name" className="text-sm font-medium text-foreground">{t("auth.fullName")}</label>
                     <input
                       id="signup-name"
                       type="text"
-                      placeholder="O seu nome"
+                      placeholder={t("auth.fullNamePlaceholder")}
                       value={signupName}
                       onChange={(e) => setSignupName(e.target.value)}
                       required
@@ -173,11 +185,11 @@ export default function AuthPage() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label htmlFor="signup-email" className="text-sm font-medium text-foreground">Email</label>
+                    <label htmlFor="signup-email" className="text-sm font-medium text-foreground">{t("auth.email")}</label>
                     <input
                       id="signup-email"
                       type="email"
-                      placeholder="seu@email.com"
+                      placeholder={t("auth.emailPlaceholder")}
                       value={signupEmail}
                       onChange={(e) => setSignupEmail(e.target.value)}
                       required
@@ -185,7 +197,7 @@ export default function AuthPage() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label htmlFor="signup-password" className="text-sm font-medium text-foreground">Password</label>
+                    <label htmlFor="signup-password" className="text-sm font-medium text-foreground">{t("auth.password")}</label>
                     <input
                       id="signup-password"
                       type="password"
@@ -197,7 +209,7 @@ export default function AuthPage() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label htmlFor="signup-confirm" className="text-sm font-medium text-foreground">Confirmar password</label>
+                    <label htmlFor="signup-confirm" className="text-sm font-medium text-foreground">{t("auth.confirmPassword")}</label>
                     <input
                       id="signup-confirm"
                       type="password"
@@ -214,18 +226,18 @@ export default function AuthPage() {
                     className="w-full h-11 rounded-xl bg-gradient-to-br from-primary-600 to-primary-700 text-white font-semibold shadow-lg hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
                   >
                     {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
-                    Criar Conta
+                    {t("auth.signup")}
                   </button>
                 </form>
                 <div className="flex items-center gap-3 my-6">
                   <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
-                  <span className="text-xs text-muted-foreground">ou</span>
+                  <span className="text-xs text-muted-foreground">{t("common.or")}</span>
                   <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
                 </div>
                 <p className="text-center text-sm text-muted-foreground">
-                  Já tem conta?{" "}
+                  {t("auth.landing.hasAccount")}{" "}
                   <button onClick={() => setIsLogin(true)} className="text-primary font-medium hover:underline">
-                    Entrar
+                    {t("auth.login")}
                   </button>
                 </p>
               </>
@@ -238,7 +250,7 @@ export default function AuthPage() {
 
       {/* Right - Hero (desktop only) */}
       <div className="hidden lg:block lg:w-[60%] relative overflow-hidden">
-        <img src="/images/hero-drone.jpeg" alt="Drone a inspecionar obra" className="absolute inset-0 w-full h-full object-cover" />
+        <img src="/images/hero-drone.jpeg" alt="Drone" className="absolute inset-0 w-full h-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-br from-slate-900/80 via-slate-900/60 to-slate-900/80" />
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSA2MCAwIEwgMCAwIDAgNjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0icmdiYSgyNTUsMjU1LDI1NSwwLjA1KSIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI2dyaWQpIi8+PC9zdmc+')] opacity-60" />
 
@@ -247,28 +259,23 @@ export default function AuthPage() {
           <div className="animate-fade-in">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/10">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-sm text-white/90 font-medium">Plataforma Operacional</span>
+              <span className="text-sm text-white/90 font-medium">{t("auth.landing.badge")}</span>
             </div>
           </div>
 
           {/* Center */}
           <div className="space-y-6 animate-fade-in" style={{ animationDelay: "100ms" }}>
             <h2 className="text-4xl xl:text-5xl font-bold text-white leading-tight">
-              Fiscalização de obras com{" "}
+              {t("auth.landing.heroTitle")}{" "}
               <span className="bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent">
-                Inteligência Artificial
+                {t("auth.landing.heroHighlight")}
               </span>
             </h2>
             <p className="text-lg text-slate-300 max-w-lg">
-              Detecte defeitos automaticamente, digitalize inspeções e gere relatórios profissionais.
+              {t("auth.landing.heroSubtitle")}
             </p>
             <div className="flex flex-wrap gap-2" style={{ animationDelay: "200ms" }}>
-              {[
-                { icon: "👁", label: "Visão por IA" },
-                { icon: "✓", label: "Checklists Digitais" },
-                { icon: "📄", label: "Relatórios PDF" },
-                { icon: "🚁", label: "Captura por Drone" },
-              ].map((pill) => (
+              {pills.map((pill) => (
                 <span key={pill.label} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 backdrop-blur-sm text-sm text-white border border-white/5">
                   <span className="text-amber-500">{pill.icon}</span>
                   {pill.label}
@@ -281,17 +288,17 @@ export default function AuthPage() {
           <div className="flex items-center gap-8 animate-fade-in" style={{ animationDelay: "300ms" }}>
             <div>
               <p className="text-3xl font-bold text-white">3x</p>
-              <p className="text-sm text-slate-400">Mais produtividade</p>
+              <p className="text-sm text-slate-400">{t("auth.landing.stat1Label")}</p>
             </div>
             <div className="w-px h-10 bg-white/20" />
             <div>
               <p className="text-3xl font-bold text-white">94%</p>
-              <p className="text-sm text-slate-400">Menos papel</p>
+              <p className="text-sm text-slate-400">{t("auth.landing.stat2Label")}</p>
             </div>
             <div className="w-px h-10 bg-white/20" />
             <div>
               <p className="text-3xl font-bold text-white">IA</p>
-              <p className="text-sm text-slate-400">Deteção automática</p>
+              <p className="text-sm text-slate-400">{t("auth.landing.stat3Label")}</p>
             </div>
           </div>
         </div>
