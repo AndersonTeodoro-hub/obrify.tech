@@ -13,6 +13,7 @@ import { SiteStructureTab } from '@/components/sites/SiteStructureTab';
 import { SiteCapturesTab } from '@/components/sites/SiteCapturesTab';
 import { SiteInspectionsTab } from '@/components/sites/SiteInspectionsTab';
 import { SiteDocumentsTab } from '@/components/sites/SiteDocumentsTab';
+import { SiteProjectsTab } from '@/components/sites/SiteProjectsTab';
 import { EditSiteModal } from '@/components/sites/EditSiteModal';
 
 export default function SiteDetail() {
@@ -75,9 +76,10 @@ export default function SiteDetail() {
       />
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid">
+        <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-grid">
           <TabsTrigger value="overview">{t('siteDetail.overview')}</TabsTrigger>
           <TabsTrigger value="structure">{t('siteDetail.structure')}</TabsTrigger>
+          <TabsTrigger value="projects">Projectos</TabsTrigger>
           <TabsTrigger value="captures">{t('siteDetail.captures')}</TabsTrigger>
           <TabsTrigger value="inspections">{t('siteDetail.inspections')}</TabsTrigger>
           <TabsTrigger value="documents">{t('siteDetail.documents')}</TabsTrigger>
@@ -89,6 +91,10 @@ export default function SiteDetail() {
 
         <TabsContent value="structure">
           <SiteStructureTab siteId={siteId!} />
+        </TabsContent>
+
+        <TabsContent value="projects">
+          <SiteProjectsTab siteId={siteId!} orgId={site.org_id} />
         </TabsContent>
 
         <TabsContent value="captures">
