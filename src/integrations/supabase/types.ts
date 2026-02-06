@@ -1651,6 +1651,102 @@ export type Database = {
         }
         Relationships: []
       }
+      project_conflicts: {
+        Row: {
+          ai_confidence: number | null
+          conflict_type: Database["public"]["Enums"]["conflict_type"]
+          description: string | null
+          detected_at: string
+          id: string
+          location_description: string | null
+          organization_id: string
+          project1_id: string
+          project2_id: string
+          related_nc_id: string | null
+          resolution_notes: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          severity: Database["public"]["Enums"]["conflict_severity"]
+          site_id: string
+          status: Database["public"]["Enums"]["conflict_status"]
+          title: string
+        }
+        Insert: {
+          ai_confidence?: number | null
+          conflict_type: Database["public"]["Enums"]["conflict_type"]
+          description?: string | null
+          detected_at?: string
+          id?: string
+          location_description?: string | null
+          organization_id: string
+          project1_id: string
+          project2_id: string
+          related_nc_id?: string | null
+          resolution_notes?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          severity: Database["public"]["Enums"]["conflict_severity"]
+          site_id: string
+          status?: Database["public"]["Enums"]["conflict_status"]
+          title: string
+        }
+        Update: {
+          ai_confidence?: number | null
+          conflict_type?: Database["public"]["Enums"]["conflict_type"]
+          description?: string | null
+          detected_at?: string
+          id?: string
+          location_description?: string | null
+          organization_id?: string
+          project1_id?: string
+          project2_id?: string
+          related_nc_id?: string | null
+          resolution_notes?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          severity?: Database["public"]["Enums"]["conflict_severity"]
+          site_id?: string
+          status?: Database["public"]["Enums"]["conflict_status"]
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_conflicts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_conflicts_project1_id_fkey"
+            columns: ["project1_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_conflicts_project2_id_fkey"
+            columns: ["project2_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_conflicts_related_nc_id_fkey"
+            columns: ["related_nc_id"]
+            isOneToOne: false
+            referencedRelation: "nonconformities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_conflicts_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       project_coordinates: {
         Row: {
           altitude_meters: number | null
@@ -1711,6 +1807,47 @@ export type Database = {
           },
         ]
       }
+      project_elements: {
+        Row: {
+          confidence: number | null
+          created_at: string
+          element_code: string | null
+          element_type: string
+          id: string
+          location_description: string | null
+          project_id: string
+          properties: Json
+        }
+        Insert: {
+          confidence?: number | null
+          created_at?: string
+          element_code?: string | null
+          element_type: string
+          id?: string
+          location_description?: string | null
+          project_id: string
+          properties?: Json
+        }
+        Update: {
+          confidence?: number | null
+          created_at?: string
+          element_code?: string | null
+          element_type?: string
+          id?: string
+          location_description?: string | null
+          project_id?: string
+          properties?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_elements_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       project_files: {
         Row: {
           created_at: string
@@ -1752,6 +1889,78 @@ export type Database = {
           },
           {
             foreignKeyName: "project_files_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      projects: {
+        Row: {
+          analysis_status: Database["public"]["Enums"]["project_analysis_status"]
+          analyzed_at: string | null
+          description: string | null
+          file_size: number | null
+          file_type: string | null
+          file_url: string | null
+          floor_or_zone: string | null
+          id: string
+          is_current_version: boolean
+          name: string
+          organization_id: string
+          site_id: string
+          specialty: Database["public"]["Enums"]["project_specialty"]
+          uploaded_at: string
+          uploaded_by: string
+          version: string | null
+        }
+        Insert: {
+          analysis_status?: Database["public"]["Enums"]["project_analysis_status"]
+          analyzed_at?: string | null
+          description?: string | null
+          file_size?: number | null
+          file_type?: string | null
+          file_url?: string | null
+          floor_or_zone?: string | null
+          id?: string
+          is_current_version?: boolean
+          name: string
+          organization_id: string
+          site_id: string
+          specialty: Database["public"]["Enums"]["project_specialty"]
+          uploaded_at?: string
+          uploaded_by: string
+          version?: string | null
+        }
+        Update: {
+          analysis_status?: Database["public"]["Enums"]["project_analysis_status"]
+          analyzed_at?: string | null
+          description?: string | null
+          file_size?: number | null
+          file_type?: string | null
+          file_url?: string | null
+          floor_or_zone?: string | null
+          id?: string
+          is_current_version?: boolean
+          name?: string
+          organization_id?: string
+          site_id?: string
+          specialty?: Database["public"]["Enums"]["project_specialty"]
+          uploaded_at?: string
+          uploaded_by?: string
+          version?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "projects_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "projects_site_id_fkey"
             columns: ["site_id"]
             isOneToOne: false
             referencedRelation: "sites"
@@ -2008,6 +2217,18 @@ export type Database = {
         | "drone_video"
         | "drone_thermal"
         | "phone_360_auto"
+      conflict_severity: "critical" | "high" | "medium" | "low"
+      conflict_status:
+        | "detected"
+        | "confirmed"
+        | "dismissed"
+        | "resolved"
+        | "nc_created"
+      conflict_type:
+        | "spatial_overlap"
+        | "dimension_mismatch"
+        | "missing_provision"
+        | "code_violation"
       document_status: "OK" | "MISSING" | "PENDING_REVIEW"
       drone_status: "available" | "in_mission" | "maintenance" | "offline"
       inspection_result: "OK" | "NC" | "OBS" | "NA"
@@ -2031,6 +2252,7 @@ export type Database = {
         | "timelapse"
       nonconformity_status: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED"
       processing_status: "PENDING" | "PROCESSING" | "DONE" | "FAILED"
+      project_analysis_status: "pending" | "analyzing" | "completed" | "failed"
       project_file_type:
         | "implantacao"
         | "planta_piso"
@@ -2038,6 +2260,16 @@ export type Database = {
         | "armadura"
         | "detalhe"
         | "asbuilt"
+      project_specialty:
+        | "topography"
+        | "architecture"
+        | "structure"
+        | "plumbing"
+        | "electrical"
+        | "hvac"
+        | "gas"
+        | "telecom"
+        | "other"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -2191,6 +2423,20 @@ export const Constants = {
         "drone_thermal",
         "phone_360_auto",
       ],
+      conflict_severity: ["critical", "high", "medium", "low"],
+      conflict_status: [
+        "detected",
+        "confirmed",
+        "dismissed",
+        "resolved",
+        "nc_created",
+      ],
+      conflict_type: [
+        "spatial_overlap",
+        "dimension_mismatch",
+        "missing_provision",
+        "code_violation",
+      ],
       document_status: ["OK", "MISSING", "PENDING_REVIEW"],
       drone_status: ["available", "in_mission", "maintenance", "offline"],
       inspection_result: ["OK", "NC", "OBS", "NA"],
@@ -2217,6 +2463,7 @@ export const Constants = {
       ],
       nonconformity_status: ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"],
       processing_status: ["PENDING", "PROCESSING", "DONE", "FAILED"],
+      project_analysis_status: ["pending", "analyzing", "completed", "failed"],
       project_file_type: [
         "implantacao",
         "planta_piso",
@@ -2224,6 +2471,17 @@ export const Constants = {
         "armadura",
         "detalhe",
         "asbuilt",
+      ],
+      project_specialty: [
+        "topography",
+        "architecture",
+        "structure",
+        "plumbing",
+        "electrical",
+        "hvac",
+        "gas",
+        "telecom",
+        "other",
       ],
     },
   },
