@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.ai-image-analysis]
 verify_jwt = false
+
+[functions.ai-obrify-agent]
+verify_jwt = false
