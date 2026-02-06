@@ -54,6 +54,20 @@
     "termsText": "Al continuar, acepta nuestros",
     "termsOfService": "Términos de Servicio",
     "privacyPolicy": "Política de Privacidad",
+    "forgotPassword": {
+      "title": "Recuperar contraseña",
+      "description": "Introduzca su email para recibir instrucciones",
+      "submit": "Enviar instrucciones",
+      "success": "¡Email enviado! Revise su bandeja de entrada.",
+      "backToLogin": "Volver al login"
+    },
+    "resetPassword": {
+      "title": "Nueva contraseña",
+      "newPassword": "Nueva contraseña",
+      "confirmPassword": "Confirmar contraseña",
+      "submit": "Cambiar contraseña",
+      "success": "¡Contraseña cambiada con éxito!"
+    },
     "landing": {
       "badge": "Plataforma Operacional",
       "mobileTitle": "Inspección con",
@@ -208,7 +222,16 @@
   "settings": {
     "title": "Configuración",
     "subtitle": "Configurar su cuenta y preferencias",
-    "profile": "Perfil",
+    "general": "General",
+    "profile": {
+      "title": "Perfil",
+      "name": "Nombre completo",
+      "email": "Email",
+      "avatar": "Foto de perfil",
+      "uploadAvatar": "Subir foto",
+      "save": "Guardar cambios",
+      "saved": "Perfil actualizado con éxito"
+    },
     "account": "Cuenta",
     "notifications": "Notificaciones",
     "appearance": "Apariencia",
