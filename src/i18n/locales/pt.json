@@ -62,7 +62,27 @@
     "termsOfService": "Termos de Serviço",
     "privacyPolicy": "Política de Privacidade",
     "checkEmail": "Verifique o seu email",
-    "confirmationSent": "Enviámos um email de confirmação para o seu endereço."
+    "confirmationSent": "Enviámos um email de confirmação para o seu endereço.",
+    "landing": {
+      "badge": "Plataforma Operacional",
+      "mobileTitle": "Fiscalização com",
+      "mobileSubtitle": "Detecte defeitos, digitalize inspeções, gere relatórios.",
+      "rememberMe": "Lembrar-me",
+      "forgotPassword": "Esqueceu password?",
+      "noAccount": "Ainda não tem conta?",
+      "createFreeAccount": "Criar conta gratuita",
+      "hasAccount": "Já tem conta?",
+      "heroTitle": "Fiscalização de obras com",
+      "heroHighlight": "Inteligência Artificial",
+      "heroSubtitle": "Detecte defeitos automaticamente, digitalize inspeções e gere relatórios profissionais.",
+      "featureAI": "Visão por IA",
+      "featureChecklists": "Checklists Digitais",
+      "featureReports": "Relatórios PDF",
+      "featureDrone": "Captura por Drone",
+      "stat1Label": "Mais produtividade",
+      "stat2Label": "Menos papel",
+      "stat3Label": "Deteção automática"
+    }
   },
   "brand": {
     "name": "SitePulse",

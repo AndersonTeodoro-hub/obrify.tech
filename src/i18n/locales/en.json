@@ -62,7 +62,27 @@
     "termsOfService": "Terms of Service",
     "privacyPolicy": "Privacy Policy",
     "checkEmail": "Check your email",
-    "confirmationSent": "We sent a confirmation email to your address."
+    "confirmationSent": "We sent a confirmation email to your address.",
+    "landing": {
+      "badge": "Operational Platform",
+      "mobileTitle": "Inspection with",
+      "mobileSubtitle": "Detect defects, digitize inspections, generate reports.",
+      "rememberMe": "Remember me",
+      "forgotPassword": "Forgot password?",
+      "noAccount": "Don't have an account?",
+      "createFreeAccount": "Create free account",
+      "hasAccount": "Already have an account?",
+      "heroTitle": "Construction inspection with",
+      "heroHighlight": "Artificial Intelligence",
+      "heroSubtitle": "Automatically detect defects, digitize inspections and generate professional reports.",
+      "featureAI": "AI Vision",
+      "featureChecklists": "Digital Checklists",
+      "featureReports": "PDF Reports",
+      "featureDrone": "Drone Capture",
+      "stat1Label": "More productivity",
+      "stat2Label": "Less paper",
+      "stat3Label": "Automatic detection"
+    }
   },
   "brand": {
     "name": "SitePulse",

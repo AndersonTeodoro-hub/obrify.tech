@@ -53,7 +53,27 @@
     "passwordTooShort": "La contraseña debe tener al menos 6 caracteres.",
     "termsText": "Al continuar, acepta nuestros",
     "termsOfService": "Términos de Servicio",
-    "privacyPolicy": "Política de Privacidad"
+    "privacyPolicy": "Política de Privacidad",
+    "landing": {
+      "badge": "Plataforma Operacional",
+      "mobileTitle": "Inspección con",
+      "mobileSubtitle": "Detecte defectos, digitalice inspecciones, genere informes.",
+      "rememberMe": "Recordarme",
+      "forgotPassword": "¿Olvidó su contraseña?",
+      "noAccount": "¿No tiene cuenta?",
+      "createFreeAccount": "Crear cuenta gratuita",
+      "hasAccount": "¿Ya tiene cuenta?",
+      "heroTitle": "Inspección de obras con",
+      "heroHighlight": "Inteligencia Artificial",
+      "heroSubtitle": "Detecte defectos automáticamente, digitalice inspecciones y genere informes profesionales.",
+      "featureAI": "Visión por IA",
+      "featureChecklists": "Checklists Digitales",
+      "featureReports": "Informes PDF",
+      "featureDrone": "Captura por Drone",
+      "stat1Label": "Más productividad",
+      "stat2Label": "Menos papel",
+      "stat3Label": "Detección automática"
+    }
   },
   "brand": {
     "name": "SitePulse",
