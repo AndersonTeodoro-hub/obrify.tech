@@ -59,6 +59,130 @@ export type Database = {
           },
         ]
       }
+      agent_actions_log: {
+        Row: {
+          conversation_id: string
+          created_at: string
+          id: string
+          message_id: string | null
+          params: Json
+          result: Json
+          success: boolean
+          tool_name: string
+        }
+        Insert: {
+          conversation_id: string
+          created_at?: string
+          id?: string
+          message_id?: string | null
+          params?: Json
+          result?: Json
+          success?: boolean
+          tool_name: string
+        }
+        Update: {
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          message_id?: string | null
+          params?: Json
+          result?: Json
+          success?: boolean
+          tool_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_actions_log_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "agent_conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_actions_log_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "agent_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_conversations: {
+        Row: {
+          ended_at: string | null
+          id: string
+          message_count: number
+          organization_id: string
+          started_at: string
+          title: string | null
+          user_id: string
+        }
+        Insert: {
+          ended_at?: string | null
+          id?: string
+          message_count?: number
+          organization_id: string
+          started_at?: string
+          title?: string | null
+          user_id: string
+        }
+        Update: {
+          ended_at?: string | null
+          id?: string
+          message_count?: number
+          organization_id?: string
+          started_at?: string
+          title?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_conversations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_messages: {
+        Row: {
+          content: string
+          context: Json
+          conversation_id: string
+          created_at: string
+          id: string
+          role: string
+          tools_used: Json
+        }
+        Insert: {
+          content: string
+          context?: Json
+          conversation_id: string
+          created_at?: string
+          id?: string
+          role: string
+          tools_used?: Json
+        }
+        Update: {
+          content?: string
+          context?: Json
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          role?: string
+          tools_used?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "agent_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ai_analysis_results: {
         Row: {
           ai_model: string | null
@@ -884,6 +1008,60 @@ export type Database = {
             columns: ["inspection_item_id"]
             isOneToOne: false
             referencedRelation: "inspection_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      file_organization: {
+        Row: {
+          created_at: string
+          file_path: string
+          file_type: string
+          generated_by: string
+          id: string
+          organization_id: string
+          original_name: string
+          related_entity_id: string | null
+          site_id: string | null
+          tags: string[]
+        }
+        Insert: {
+          created_at?: string
+          file_path: string
+          file_type: string
+          generated_by?: string
+          id?: string
+          organization_id: string
+          original_name: string
+          related_entity_id?: string | null
+          site_id?: string | null
+          tags?: string[]
+        }
+        Update: {
+          created_at?: string
+          file_path?: string
+          file_type?: string
+          generated_by?: string
+          id?: string
+          organization_id?: string
+          original_name?: string
+          related_entity_id?: string | null
+          site_id?: string | null
+          tags?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "file_organization_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "file_organization_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
             referencedColumns: ["id"]
           },
         ]
@@ -1774,6 +1952,15 @@ export type Database = {
       can_access_site: {
         Args: { _site_id: string; _user_id: string }
         Returns: boolean
+      }
+      get_file_path: {
+        Args: {
+          _date?: string
+          _file_type: string
+          _org_id: string
+          _site_id: string
+        }
+        Returns: string
       }
       get_org_from_site: { Args: { _site_id: string }; Returns: string }
       has_any_org_role: {

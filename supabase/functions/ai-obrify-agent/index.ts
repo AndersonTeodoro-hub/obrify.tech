@@ -10,8 +10,8 @@ const corsHeaders = {
 const SYSTEM_PROMPT = `És o Obrify, um agente inteligente de fiscalização de obras.
 
 CAPACIDADES:
-- Consultar: obras, capturas, inspecções, não-conformidades
-- Executar: navegar para páginas, filtrar dados
+- Consultar: obras, capturas, inspecções, não-conformidades, ficheiros
+- Executar: navegar para páginas, filtrar dados, organizar ficheiros
 - Analisar: comparar dados, calcular estatísticas
 
 COMPORTAMENTO:
@@ -69,17 +69,10 @@ async function executeAction(
       case "QUERY_STATS": {
         const p = action.params as { siteId?: string };
         const results: Record<string, unknown> = {};
-
-        // Sites count
         const { count: sitesCount } = await supabase
-          .from("sites")
-          .select("*", { count: "exact", head: true });
+          .from("sites").select("*", { count: "exact", head: true });
         results.total_sites = sitesCount || 0;
-
-        // NCs by status
-        let ncQuery = supabase
-          .from("nonconformities")
-          .select("status");
+        let ncQuery = supabase.from("nonconformities").select("status");
         if (p.siteId) ncQuery = ncQuery.eq("site_id", p.siteId);
         const { data: ncs } = await ncQuery;
         if (ncs) {
@@ -89,21 +82,12 @@ async function executeAction(
           });
           results.nonconformities = { total: ncs.length, by_status: statusCounts };
         }
-
-        // Inspections count
-        let inspQuery = supabase
-          .from("inspections")
-          .select("*", { count: "exact", head: true });
+        let inspQuery = supabase.from("inspections").select("*", { count: "exact", head: true });
         if (p.siteId) inspQuery = inspQuery.eq("site_id", p.siteId);
         const { count: inspCount } = await inspQuery;
         results.total_inspections = inspCount || 0;
-
-        // Captures count
-        const { count: captCount } = await supabase
-          .from("captures")
-          .select("*", { count: "exact", head: true });
+        const { count: captCount } = await supabase.from("captures").select("*", { count: "exact", head: true });
         results.total_captures = captCount || 0;
-
         return results;
       }
       case "NAVIGATE": {
@@ -112,10 +96,56 @@ async function executeAction(
       }
       case "GENERATE_REPORT": {
         return {
-          message:
-            "Para gerar o relatório, navega até à página de Relatórios e selecciona o tipo desejado.",
+          message: "Para gerar o relatório, navega até à página de Relatórios e selecciona o tipo desejado.",
           navigateTo: "/app/reports",
         };
+      }
+      case "LIST_FILES": {
+        const p = action.params as { siteId?: string; type?: string; folder?: string; limit?: number };
+        let q = supabase.from("file_organization").select("*");
+        if (p.siteId) q = q.eq("site_id", p.siteId);
+        if (p.type) q = q.eq("file_type", p.type);
+        if (p.folder) q = q.ilike("file_path", `%${p.folder}%`);
+        q = q.order("created_at", { ascending: false }).limit(p.limit || 50);
+        const { data, error } = await q;
+        if (error) return { error: error.message };
+        return data;
+      }
+      case "SAVE_REPORT": {
+        const p = action.params as { reportData?: unknown; type?: string; siteId?: string; orgId?: string; name?: string };
+        if (!p.orgId || !p.siteId) return { error: "orgId e siteId são obrigatórios" };
+        const { data: pathData } = await supabase.rpc("get_file_path", {
+          _org_id: p.orgId, _site_id: p.siteId, _file_type: "report",
+        });
+        const filePath = (pathData || `organizations/${p.orgId}/sites/${p.siteId}/reports/`) + (p.name || `report_${Date.now()}.pdf`);
+        const { data, error } = await supabase.from("file_organization").insert({
+          organization_id: p.orgId,
+          site_id: p.siteId,
+          file_path: filePath,
+          file_type: "report",
+          original_name: p.name || "Relatório",
+          generated_by: "agent",
+          tags: [p.type || "general"],
+        }).select().single();
+        if (error) return { error: error.message };
+        return { file: data, path: filePath };
+      }
+      case "ORGANIZE_FILES": {
+        const p = action.params as { siteId?: string; type?: string; orgId?: string };
+        let q = supabase.from("file_organization").select("id, file_path, file_type, original_name, tags, created_at");
+        if (p.orgId) q = q.eq("organization_id", p.orgId);
+        if (p.siteId) q = q.eq("site_id", p.siteId);
+        if (p.type) q = q.eq("file_type", p.type);
+        q = q.order("file_type").order("created_at", { ascending: false }).limit(100);
+        const { data, error } = await q;
+        if (error) return { error: error.message };
+        // Group by type
+        const grouped: Record<string, unknown[]> = {};
+        (data || []).forEach((f: any) => {
+          if (!grouped[f.file_type]) grouped[f.file_type] = [];
+          grouped[f.file_type].push(f);
+        });
+        return { files_by_type: grouped, total: (data || []).length };
       }
       default:
         return { error: `Tool desconhecida: ${action.tool}` };
@@ -131,7 +161,7 @@ serve(async (req) => {
   }
 
   try {
-    const { message, context } = await req.json();
+    const { message, context, conversationId, userId } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
@@ -140,11 +170,22 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
+    // Persist user message if conversationId provided
+    let userMessageId: string | null = null;
+    if (conversationId && userId) {
+      const { data: msgData } = await supabase.from("agent_messages").insert({
+        conversation_id: conversationId,
+        role: "user",
+        content: message,
+        context: context || {},
+      }).select("id").single();
+      userMessageId = msgData?.id || null;
+    }
+
     const contextInfo = context
       ? `\nCONTEXTO ACTUAL: Página: ${context.page || "desconhecida"}${context.siteId ? `, Obra ID: ${context.siteId}` : ""}`
       : "";
 
-    // Step 1: Ask AI what to do
     const aiResponse = await fetch(
       "https://ai.gateway.lovable.dev/v1/chat/completions",
       {
@@ -164,30 +205,22 @@ serve(async (req) => {
               type: "function",
               function: {
                 name: "obrify_response",
-                description:
-                  "Responde ao utilizador com acções e texto. Usa as tools disponíveis para consultar dados reais.",
+                description: "Responde ao utilizador com acções e texto.",
                 parameters: {
                   type: "object",
                   properties: {
-                    thought: {
-                      type: "string",
-                      description: "Raciocínio interno sobre o que vais fazer",
-                    },
+                    thought: { type: "string", description: "Raciocínio interno" },
                     actions: {
                       type: "array",
-                      description: "Acções a executar",
                       items: {
                         type: "object",
                         properties: {
                           tool: {
                             type: "string",
                             enum: [
-                              "QUERY_SITES",
-                              "QUERY_CAPTURES",
-                              "QUERY_NONCONFORMITIES",
-                              "QUERY_STATS",
-                              "NAVIGATE",
-                              "GENERATE_REPORT",
+                              "QUERY_SITES", "QUERY_CAPTURES", "QUERY_NONCONFORMITIES",
+                              "QUERY_STATS", "NAVIGATE", "GENERATE_REPORT",
+                              "LIST_FILES", "SAVE_REPORT", "ORGANIZE_FILES",
                             ],
                           },
                           params: { type: "object" },
@@ -195,41 +228,25 @@ serve(async (req) => {
                         required: ["tool", "params"],
                       },
                     },
-                    response: {
-                      type: "string",
-                      description: "Resposta ao utilizador em linguagem natural",
-                    },
-                    suggestions: {
-                      type: "array",
-                      items: { type: "string" },
-                      description: "2-3 sugestões de follow-up",
-                    },
+                    response: { type: "string", description: "Resposta em linguagem natural" },
+                    suggestions: { type: "array", items: { type: "string" } },
                   },
                   required: ["thought", "actions", "response", "suggestions"],
                 },
               },
             },
           ],
-          tool_choice: {
-            type: "function",
-            function: { name: "obrify_response" },
-          },
+          tool_choice: { type: "function", function: { name: "obrify_response" } },
         }),
       }
     );
 
     if (!aiResponse.ok) {
       if (aiResponse.status === 429) {
-        return new Response(
-          JSON.stringify({ error: "Demasiados pedidos. Tenta novamente em breve." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return new Response(JSON.stringify({ error: "Demasiados pedidos." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       if (aiResponse.status === 402) {
-        return new Response(
-          JSON.stringify({ error: "Créditos esgotados. Contacta o administrador." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return new Response(JSON.stringify({ error: "Créditos esgotados." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       const errText = await aiResponse.text();
       console.error("AI error:", aiResponse.status, errText);
@@ -239,49 +256,51 @@ serve(async (req) => {
     const aiData = await aiResponse.json();
     const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
     if (!toolCall) {
-      // Fallback: use content directly
       const content = aiData.choices?.[0]?.message?.content || "Desculpa, não consegui processar o pedido.";
-      return new Response(
-        JSON.stringify({ thought: "", actions: [], response: content, suggestions: [] }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      // Persist agent message
+      if (conversationId) {
+        await supabase.from("agent_messages").insert({
+          conversation_id: conversationId, role: "agent", content, tools_used: [],
+        });
+      }
+      return new Response(JSON.stringify({ thought: "", actions: [], response: content, suggestions: [] }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const parsed = JSON.parse(toolCall.function.arguments);
     const { thought, actions, suggestions } = parsed;
     let { response: textResponse } = parsed;
 
-    // Step 2: Execute actions and collect results
     const actionResults: unknown[] = [];
     if (actions && actions.length > 0) {
       for (const action of actions) {
         const result = await executeAction(supabase, action);
         actionResults.push({ tool: action.tool, result });
+
+        // Log action
+        if (conversationId) {
+          await supabase.from("agent_actions_log").insert({
+            conversation_id: conversationId,
+            message_id: userMessageId,
+            tool_name: action.tool,
+            params: action.params || {},
+            result: (typeof result === 'object' ? result : { value: result }) || {},
+            success: !(result as any)?.error,
+          });
+        }
       }
 
-      // Step 3: Send results back to AI for final formatting
       const formatResponse = await fetch(
         "https://ai.gateway.lovable.dev/v1/chat/completions",
         {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${LOVABLE_API_KEY}`,
-            "Content-Type": "application/json",
-          },
+          headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             model: "google/gemini-3-flash-preview",
             messages: [
               { role: "system", content: SYSTEM_PROMPT + contextInfo },
               { role: "user", content: message },
-              {
-                role: "assistant",
-                content: `Pensei: ${thought}. Executei as acções e obtive estes resultados: ${JSON.stringify(actionResults)}`,
-              },
-              {
-                role: "user",
-                content:
-                  "Com base nos resultados acima, formula uma resposta clara e concisa em português para o utilizador. Responde apenas com o texto da resposta, sem JSON.",
-              },
+              { role: "assistant", content: `Pensei: ${thought}. Resultados: ${JSON.stringify(actionResults)}` },
+              { role: "user", content: "Com base nos resultados, formula uma resposta clara em português. Responde apenas com o texto." },
             ],
           }),
         }
@@ -294,26 +313,26 @@ serve(async (req) => {
       }
     }
 
-    // Build final response with navigation actions
-    const finalActions = actionResults.filter(
-      (r: any) => r.result?.navigateTo
-    );
+    // Persist agent message
+    if (conversationId) {
+      await supabase.from("agent_messages").insert({
+        conversation_id: conversationId,
+        role: "agent",
+        content: textResponse,
+        tools_used: actions || [],
+      });
+    }
+
+    const finalActions = actionResults.filter((r: any) => r.result?.navigateTo);
 
     return new Response(
-      JSON.stringify({
-        thought,
-        actions: finalActions,
-        response: textResponse,
-        suggestions: suggestions || [],
-      }),
+      JSON.stringify({ thought, actions: finalActions, response: textResponse, suggestions: suggestions || [] }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (e) {
     console.error("obrify-agent error:", e);
     return new Response(
-      JSON.stringify({
-        error: e instanceof Error ? e.message : "Erro desconhecido",
-      }),
+      JSON.stringify({ error: e instanceof Error ? e.message : "Erro desconhecido" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
