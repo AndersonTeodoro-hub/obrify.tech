@@ -1,233 +1,178 @@
 
-# Plano: Completar Funcionalidades com UI Existente
+
+# Plano: Documentos, Drones e Google OAuth
 
 ## Resumo
 
-Implementar 7 funcionalidades que ja tem UI mas faltam logica: forgot password, edicao de perfil, editar organizacao, contagem real de membros, lembrar-me, upload de foto da obra, e notificacoes do agente.
+Implementar 3 funcionalidades: upload/download/delete de documentos da obra, modal de registo de drones com CRUD completo, e login social com Google OAuth.
 
 ---
 
 ## Migracoes de Base de Dados
 
-Duas alteracoes de schema necessarias:
-
-1. **Adicionar `image_url` a `sites`**: coluna TEXT nullable para foto da obra
-2. **Adicionar `description` a `organizations`**: coluna TEXT nullable (ja existe no UI mas nao na tabela)
-3. **Criar bucket `site-images`**: bucket publico para fotos de obras
+A tabela `documents` existe mas faltam colunas `file_size`, `uploaded_by` e `notes`. A tabela `drones` existe mas falta `purchase_date`. Tambem precisamos de RLS no bucket `documents`.
 
 ```sql
-ALTER TABLE public.sites ADD COLUMN image_url TEXT;
-ALTER TABLE public.organizations ADD COLUMN description TEXT;
+-- Adicionar colunas em falta
+ALTER TABLE public.documents ADD COLUMN IF NOT EXISTS file_size BIGINT;
+ALTER TABLE public.documents ADD COLUMN IF NOT EXISTS uploaded_by UUID REFERENCES auth.users(id);
+ALTER TABLE public.documents ADD COLUMN IF NOT EXISTS notes TEXT;
 
-INSERT INTO storage.buckets (id, name, public) VALUES ('site-images', 'site-images', true);
+ALTER TABLE public.drones ADD COLUMN IF NOT EXISTS purchase_date DATE;
 
-CREATE POLICY "Authenticated users can upload site images"
+-- RLS policies para bucket documents (privado - signed URLs para download)
+CREATE POLICY "Authenticated users can upload documents"
 ON storage.objects FOR INSERT TO authenticated
-WITH CHECK (bucket_id = 'site-images');
+WITH CHECK (bucket_id = 'documents');
 
-CREATE POLICY "Anyone can view site images"
-ON storage.objects FOR SELECT TO public
-USING (bucket_id = 'site-images');
+CREATE POLICY "Authenticated users can read documents"
+ON storage.objects FOR SELECT TO authenticated
+USING (bucket_id = 'documents');
 
-CREATE POLICY "Authenticated users can delete site images"
+CREATE POLICY "Authenticated users can delete documents"
 ON storage.objects FOR DELETE TO authenticated
-USING (bucket_id = 'site-images');
+USING (bucket_id = 'documents');
 ```
 
 ---
 
-## 1. Esqueci a Password
+## 1. Upload de Documentos da Obra
 
-### 1.1 Modal no Auth.tsx
+### SiteDocumentsTab.tsx - Reescrever com logica completa
 
-- Novo estado `showForgotPassword`
-- O botao "Esqueceu password?" (linha 147) abre o modal
-- Modal com campo email e botao "Enviar instrucoes"
-- Chama `supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + '/reset-password' })`
-- Mostra toast sucesso/erro
+**Upload Modal:**
+- Estado `showUploadModal` controlado pelos botoes "Carregar Documento"
+- Campos: nome (input), tipo (select com 7 opcoes), ficheiro (input file, max 20MB), notas (textarea)
+- Ao submeter:
+  1. Upload ficheiro para bucket `documents` no path `organizations/{orgId}/sites/{siteId}/docs/{filename}`
+  2. Insert na tabela `documents`: name, doc_type, file_path, file_size, org_id, site_id, uploaded_by, notes
+  3. Toast sucesso + invalidate query
 
-### 1.2 Pagina /reset-password
+**Download:**
+- Ao clicar download: `supabase.storage.from('documents').createSignedUrl(file_path, 3600)`
+- Abre URL em nova tab
 
-Novo ficheiro `src/pages/ResetPassword.tsx`:
-- Campos: nova password + confirmar password
-- Ao montar, verifica se ha sessao (o link do email autentica automaticamente)
-- Chama `supabase.auth.updateUser({ password })`
-- Apos sucesso, redireciona para `/auth` com toast
+**Delete:**
+- Confirmacao com AlertDialog
+- Remove do storage: `supabase.storage.from('documents').remove([file_path])`
+- Remove da tabela: `supabase.from('documents').delete().eq('id', docId)`
+- Toast sucesso
 
-### 1.3 Rota no App.tsx
-
-- Adicionar `<Route path="/reset-password" element={<ResetPassword />} />`
-
----
-
-## 2. Edicao de Perfil
-
-### 2.1 Actualizar Settings.tsx
-
-Na seccao Perfil (linhas 78-97), adicionar:
-- Query para buscar dados do perfil: `supabase.from('profiles').select('*').eq('user_id', user.id).single()`
-- Campo editavel: Nome completo (Input)
-- Upload de avatar: botao que faz upload para bucket `captures` (ja existe) ou prefixed path
-- Campo read-only: Email
-- Botao "Guardar alteracoes"
-- Mutation: `supabase.from('profiles').update({ full_name, avatar_url }).eq('user_id', user.id)`
-- Toast sucesso/erro
-
-### 2.2 Avatar no Header
-
-Actualizar `AppSidebar.tsx` e `AppHeader.tsx`:
-- Query ao perfil para obter `full_name` e `avatar_url`
-- Mostrar avatar real no componente `Avatar` (usar `AvatarImage` do Radix)
-- Fallback para iniciais do nome
+**Lista:**
+- Tabela existente + badge colorido por tipo + tamanho formatado
+- Empty state ja existe
 
 ---
 
-## 3. Editar Organizacao
+## 2. Modal de Registo de Drone
 
-### 3.1 No Organizations.tsx
+### Drone.tsx - Adicionar modal e CRUD
 
-- Novo estado `editingOrg` (org seleccionada ou null)
-- O `DropdownMenuItem` de editar (linha 168-170) define `editingOrg`
-- Novo Dialog de edicao com campos Nome e Descricao pre-preenchidos
-- Mutation: `supabase.from('organizations').update({ name, description }).eq('id', orgId)`
-- Verificacao de permissao: so admins (ja filtrado pela condicao `membership.role === 'admin'`)
+**Modal de Registo:**
+- Estado `showRegisterModal`
+- Campos: nome, fabricante (select: DJI/Autel/Parrot/Skydio/Outro), modelo, numero serie, data aquisicao, horas voo (default 0), estado (select), notas
+- Precisa de `org_id` - buscar da membership do user
+- Insert em `drones` com todos os campos
 - Toast + invalidate query
 
----
+**Editar Drone:**
+- Estado `editingDrone` com drone seleccionado
+- Mesmo modal pre-preenchido
+- Update na tabela
 
-## 4. Contagem Real de Membros
+**Eliminar Drone:**
+- AlertDialog de confirmacao
+- Delete da tabela
 
-### 4.1 No Organizations.tsx
-
-- Alterar a query de memberships para tambem buscar contagem
-- Query separada ou adicional: `supabase.from('memberships').select('org_id').in('org_id', orgIds)` e contar por org_id
-- Ou fazer uma query `.select('org_id, count', { count: 'exact' })` agrupada
-- Abordagem mais simples: query separada com `useQuery` que faz `supabase.from('memberships').select('org_id')` e conta no cliente
-- Mostrar no card: "X membros" em vez de texto estatico (linha 188-190)
-
----
-
-## 5. Lembrar-me
-
-### 5.1 No Auth.tsx
-
-- Novo estado `rememberMe` (boolean)
-- `useEffect` ao montar: le `localStorage.getItem('obrify_remember_email')`, se existir preenche `loginEmail` e marca checkbox
-- Conectar o `Checkbox` (linha 144) ao estado `rememberMe`
-- No `handleLogin` com sucesso: se `rememberMe` guarda email, senao remove
-- Nao requer backend
+**Cards existentes:**
+- Adicionar botoes editar/eliminar a cada card de drone (dropdown menu)
 
 ---
 
-## 6. Upload de Foto da Obra
+## 3. Login Social com Google
 
-### 6.1 No Sites.tsx (criar obra)
+### Configuracao:
+- Usar ferramenta `configure-social-auth` do Lovable Cloud para configurar Google OAuth
+- Isto gera o modulo `src/integrations/lovable/` com `lovable.auth.signInWithOAuth`
 
-- Adicionar campo de upload de imagem no Dialog de criacao (antes do DialogFooter)
-- Preview da imagem seleccionada
-- Ao criar: upload para `site-images/{orgId}/{siteId}/{filename}`, obter URL publica
-- Guardar `image_url` na insercao do site
+### Auth.tsx - Adicionar botao Google:
+- Antes do separador "ou" (ja existe), adicionar botao "Continuar com Google"
+- Estilo: fundo branco, borda cinza, icone SVG do Google
+- Ao clicar: `lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin })`
+- Toast de erro se falhar
+- Mesmo botao no form de registo
 
-### 6.2 No EditSiteModal.tsx
-
-- Adicionar campo de upload/preview similar
-- Ao guardar: upload + update `image_url`
-
-### 6.3 No card da obra (Sites.tsx)
-
-- Substituir o placeholder gradient (linhas 217-220) por imagem real se `site.image_url` existir
-- Fallback para o placeholder com HardHat actual
+### Perfil automatico:
+- O trigger `handle_new_user` ja cria perfil automaticamente com `full_name` e `email` dos metadados - funciona nativamente com OAuth
 
 ---
 
-## 7. Notificacoes do Agente
+## 4. Traducoes i18n
 
-### 7.1 No ObrifyAgent.tsx
-
-- Ao abrir o painel (`handleOpen`), fazer 2 queries:
-  - NCs criticas abertas ha mais de 7 dias: `supabase.from('nonconformities').select('id').eq('severity', 'critical').eq('status', 'open').lt('created_at', 7diasAtras)`
-  - Conflitos criticos nao confirmados: `supabase.from('project_conflicts').select('id').eq('severity', 'critical').eq('status', 'pending')`
-- Se houver resultados, prefixar a mensagem de greeting com alertas formatados
-- Badge no botao flutuante: dot vermelho se houver alertas (verificar periodicamente ou ao montar)
-
----
-
-## 8. Traducoes i18n
-
-Adicionar as seguintes chaves nos 4 ficheiros de locale:
-
-**auth.forgotPassword**: title, description, submit, success, backToLogin
-**auth.resetPassword**: title, newPassword, confirmPassword, submit, success
-**settings.profile**: title, name, email, avatar, uploadAvatar, save, saved
-**organizations.edit**: title, save, success (renomear/adicionar)
-**sites.uploadImage, sites.imageUploaded**
+Adicionar chaves `documents.*` e `drones.*` e `auth.continueWithGoogle`, `auth.orDivider`, `auth.socialLoginError` nos 4 ficheiros de locale (pt, en, es, fr).
 
 ---
 
 ## Ficheiros a Criar
 
-| Ficheiro | Descricao |
-|----------|-----------|
-| `src/pages/ResetPassword.tsx` | Pagina para redefinir password |
+Nenhum ficheiro novo - tudo e modificacao de existentes.
 
 ## Ficheiros a Modificar
 
 | Ficheiro | Alteracao |
 |----------|-----------|
-| `src/App.tsx` | +1 rota /reset-password |
-| `src/pages/Auth.tsx` | Modal forgot password, lembrar-me, checkbox funcional |
-| `src/pages/app/Settings.tsx` | Edicao de perfil com nome, avatar, guardar |
-| `src/pages/app/Organizations.tsx` | Modal editar org, contagem membros, mutation editar |
-| `src/pages/app/Sites.tsx` | Upload foto ao criar, mostrar foto no card |
-| `src/components/sites/EditSiteModal.tsx` | Campo upload foto ao editar |
-| `src/components/layout/AppSidebar.tsx` | Avatar real do perfil |
-| `src/components/layout/AppHeader.tsx` | Avatar real no header (se aplicavel) |
-| `src/components/ai/ObrifyAgent.tsx` | Alertas proactivos ao abrir, badge no FAB |
-| `src/i18n/locales/pt.json` | Novas chaves traducao |
-| `src/i18n/locales/en.json` | Novas chaves traducao |
-| `src/i18n/locales/es.json` | Novas chaves traducao |
-| `src/i18n/locales/fr.json` | Novas chaves traducao |
+| `src/components/sites/SiteDocumentsTab.tsx` | Upload modal, download signed URL, delete com confirmacao |
+| `src/pages/app/Drone.tsx` | Modal registo/edicao, delete, dropdown nos cards |
+| `src/pages/Auth.tsx` | Botao Google OAuth com lovable.auth |
+| `src/i18n/locales/pt.json` | Chaves documents.*, drones.*, auth social |
+| `src/i18n/locales/en.json` | Idem |
+| `src/i18n/locales/es.json` | Idem |
+| `src/i18n/locales/fr.json` | Idem |
 
 ---
 
 ## Detalhes Tecnicos
 
-### Reset Password Flow
+### Upload de Documentos
 
 ```text
-1. User clica "Esqueceu password?"
-2. Modal abre com campo email
-3. supabase.auth.resetPasswordForEmail(email, { redirectTo: origin + '/reset-password' })
-4. User recebe email com link
-5. Link redireciona para /reset-password (Supabase injeta sessao automaticamente)
-6. User preenche nova password
-7. supabase.auth.updateUser({ password })
-8. Redireciona para /auth com toast sucesso
+1. User clica "Carregar Documento"
+2. Modal abre com form
+3. User preenche nome, tipo, seleciona ficheiro, opcionalmente notas
+4. Validacao: nome obrigatorio, ficheiro obrigatorio, max 20MB
+5. Upload: supabase.storage.from('documents').upload(path, file)
+6. Insert: supabase.from('documents').insert({...})
+7. Invalidate query 'site-documents'
+8. Toast sucesso
 ```
 
-### Upload de Avatar
+### Download com Signed URL
 
 ```text
-1. User seleciona ficheiro
-2. Upload para bucket captures: avatars/{userId}/{filename}
-3. Obter URL publica com getPublicUrl
-4. Update profiles.avatar_url
-5. Invalidar query do perfil
+1. User clica icone download
+2. supabase.storage.from('documents').createSignedUrl(file_path, 3600)
+3. window.open(signedUrl, '_blank')
 ```
 
-### Contagem de Membros
+### Registo de Drone
 
 ```text
-- Query: supabase.from('memberships').select('org_id')
-- Agrupar no cliente: reduce por org_id para obter Map<orgId, count>
-- Mostrar count no card
+1. User clica "Registar Drone"
+2. Modal com campos
+3. Buscar org_id da membership do user
+4. supabase.from('drones').insert({...})
+5. Invalidate query 'drones'
+6. Toast sucesso
 ```
 
-### Alertas do Agente
+### Google OAuth
 
 ```text
-- Ao abrir: 2 queries paralelas (NCs + conflitos)
-- Se alertas > 0: mensagem formatada como greeting
-- Badge: useQuery com refetchInterval de 60s para manter badge actualizado
-- Dot vermelho no FAB com numero de alertas
+1. Configurar via configure-social-auth tool
+2. Import lovable module
+3. Botao chama lovable.auth.signInWithOAuth("google", { redirect_uri: origin })
+4. Supabase gere redirect e callback automaticamente
+5. Trigger handle_new_user cria perfil
+6. onAuthStateChange detecta sessao -> redireciona para /app
 ```
+
