@@ -87,7 +87,9 @@
       "stat1Label": "Plus de productivité",
       "stat2Label": "Moins de papier",
       "stat3Label": "Détection automatique"
-    }
+    },
+    "continueWithGoogle": "Continuer avec Google",
+    "socialLoginError": "Erreur de connexion avec Google"
   },
   "brand": {
     "name": "SitePulse",
@@ -281,6 +283,64 @@
       "exportList": "Exporter la liste",
       "analyzePending": "Analyser en attente",
       "viewConflicts": "Voir les conflits"
+    }
+  },
+  "documents": {
+    "upload": "Télécharger Document",
+    "name": "Nom",
+    "type": "Type",
+    "size": "Taille",
+    "date": "Date",
+    "file": "Fichier",
+    "notes": "Notes",
+    "download": "Télécharger",
+    "delete": "Supprimer",
+    "empty": "Aucun document téléchargé",
+    "uploadSuccess": "Document téléchargé avec succès",
+    "deleteSuccess": "Document supprimé avec succès",
+    "deleteConfirm": "Êtes-vous sûr de vouloir supprimer le document \"{{name}}\" ?",
+    "types": {
+      "contract": "Contrat",
+      "license": "Licence",
+      "permit": "Permis",
+      "insurance": "Assurance",
+      "minutes": "Procès-verbal",
+      "safetyPlan": "Plan de Sécurité",
+      "other": "Autre"
+    }
+  },
+  "drones": {
+    "register": "Enregistrer Drone",
+    "subtitle": "Gestion de drones et missions automatisées avec IA",
+    "name": "Nom/Identifiant",
+    "manufacturer": "Fabricant",
+    "model": "Modèle",
+    "serialNumber": "Numéro de série",
+    "purchaseDate": "Date d'achat",
+    "flightHours": "Heures de vol",
+    "totalDrones": "Drones Enregistrés",
+    "equipment": "Équipements",
+    "missions": "Missions",
+    "noDrones": "Aucun drone enregistré",
+    "registerFirst": "Enregistrez votre premier drone pour commencer",
+    "noMissions": "Aucune mission planifiée",
+    "useChatForMissions": "Utilisez le chat IA pour créer des missions automatiquement",
+    "registerSuccess": "Drone enregistré avec succès",
+    "updateSuccess": "Drone mis à jour avec succès",
+    "deleteSuccess": "Drone supprimé avec succès",
+    "deleteConfirm": "Êtes-vous sûr de vouloir supprimer le drone \"{{name}}\" ?",
+    "status": {
+      "label": "Statut",
+      "available": "Disponible",
+      "inMission": "En Mission",
+      "in_mission": "En Mission",
+      "maintenance": "Maintenance",
+      "offline": "Hors ligne",
+      "draft": "Brouillon",
+      "planned": "Planifiée",
+      "executing": "En Exécution",
+      "completed": "Terminée",
+      "failed": "Échouée"
     }
   }
 }

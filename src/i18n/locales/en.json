@@ -96,7 +96,9 @@
       "stat1Label": "More productivity",
       "stat2Label": "Less paper",
       "stat3Label": "Automatic detection"
-    }
+    },
+    "continueWithGoogle": "Continue with Google",
+    "socialLoginError": "Error signing in with Google"
   },
   "brand": {
     "name": "SitePulse",
@@ -829,6 +831,64 @@
       "exportList": "Export list",
       "analyzePending": "Analyze pending",
       "viewConflicts": "View conflicts"
+    }
+  },
+  "documents": {
+    "upload": "Upload Document",
+    "name": "Name",
+    "type": "Type",
+    "size": "Size",
+    "date": "Date",
+    "file": "File",
+    "notes": "Notes",
+    "download": "Download",
+    "delete": "Delete",
+    "empty": "No documents uploaded",
+    "uploadSuccess": "Document uploaded successfully",
+    "deleteSuccess": "Document deleted successfully",
+    "deleteConfirm": "Are you sure you want to delete the document \"{{name}}\"?",
+    "types": {
+      "contract": "Contract",
+      "license": "License",
+      "permit": "Permit",
+      "insurance": "Insurance",
+      "minutes": "Minutes",
+      "safetyPlan": "Safety Plan",
+      "other": "Other"
+    }
+  },
+  "drones": {
+    "register": "Register Drone",
+    "subtitle": "Drone management and AI-automated missions",
+    "name": "Name/Identifier",
+    "manufacturer": "Manufacturer",
+    "model": "Model",
+    "serialNumber": "Serial Number",
+    "purchaseDate": "Purchase Date",
+    "flightHours": "Flight Hours",
+    "totalDrones": "Registered Drones",
+    "equipment": "Equipment",
+    "missions": "Missions",
+    "noDrones": "No drones registered",
+    "registerFirst": "Register your first drone to get started",
+    "noMissions": "No missions planned",
+    "useChatForMissions": "Use the AI chat to create missions automatically",
+    "registerSuccess": "Drone registered successfully",
+    "updateSuccess": "Drone updated successfully",
+    "deleteSuccess": "Drone deleted successfully",
+    "deleteConfirm": "Are you sure you want to delete the drone \"{{name}}\"?",
+    "status": {
+      "label": "Status",
+      "available": "Available",
+      "inMission": "In Mission",
+      "in_mission": "In Mission",
+      "maintenance": "Maintenance",
+      "offline": "Offline",
+      "draft": "Draft",
+      "planned": "Planned",
+      "executing": "Executing",
+      "completed": "Completed",
+      "failed": "Failed"
     }
   }
 }
