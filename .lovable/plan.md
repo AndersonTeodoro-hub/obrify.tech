@@ -1,164 +1,195 @@
 
-# Plano: Modulo Completo de Gestao de Projectos de Obra
+# Plano: Analise por IA dos Projectos
 
 ## Resumo
 
-Criar sistema de gestao de projectos de obra com 3 novas tabelas (projects, project_elements, project_conflicts), nova tab "Projectos" no detalhe da obra com grid por especialidade, upload de ficheiros, visualizador e sumario de conflitos.
-
-Nota: ja existe uma tabela `project_files` e enum `project_file_type` na base de dados. As novas tabelas vao complementar essa estrutura existente.
+Criar duas edge functions para analise e comparacao de plantas tecnicas via Gemini Vision, uma UI de gestao de conflitos, novos tools no agente, e analise automatica apos upload.
 
 ---
 
-## 1. Migracao de Base de Dados
+## 1. Edge Function: ai-analyze-project
 
-### Enums novos
+**Ficheiro:** `supabase/functions/ai-analyze-project/index.ts`
+
+Recebe `{ projectId, analysisType: "full" | "quick" }`.
+
+Fluxo:
+1. Busca projecto na tabela `projects` (nome, specialty, file_url, file_type)
+2. Gera signed URL do ficheiro no bucket `documents`
+3. Actualiza `analysis_status` para `analyzing`
+4. Envia imagem/PDF para Gemini Vision (`google/gemini-2.5-flash`) com prompt especializado por tipo de planta:
+   - Detecta elementos estruturais, arquitectura, aguas, electricidade, AVAC
+   - Para cada elemento: tipo, codigo, localizacao, propriedades, confianca
+   - Retorna metadados (escala, titulo) e observacoes
+5. Usa tool calling para output JSON estruturado
+6. Insere elementos detectados na tabela `project_elements`
+7. Actualiza `analysis_status` para `completed` e `analyzed_at` para now()
+8. Em caso de erro, marca `analysis_status` como `failed`
+
+**Nota sobre PDFs:** Gemini Vision suporta PDFs directamente via URL, nao e necessario converter para imagem.
+
+---
+
+## 2. Edge Function: ai-compare-projects
+
+**Ficheiro:** `supabase/functions/ai-compare-projects/index.ts`
+
+Recebe `{ project1Id, project2Id }`.
+
+Fluxo:
+1. Busca ambos projectos e gera signed URLs
+2. Envia ambas plantas para Gemini Vision com prompt de comparacao:
+   - Detecta: spatial_overlap, dimension_mismatch, missing_provision, code_violation
+   - Para cada conflito: tipo, severidade, titulo, descricao, localizacao, confianca
+   - Retorna avaliacao de compatibilidade e verificacoes OK
+3. Usa tool calling para output estruturado
+4. Insere conflitos na tabela `project_conflicts`
+5. Se ha conflitos criticos, cria alertas para membros da organizacao
+
+---
+
+## 3. Actualizar config.toml
+
+Adicionar as duas novas funcoes:
 
 ```text
-project_specialty: topography, architecture, structure, plumbing, electrical, hvac, gas, telecom, other
-project_analysis_status: pending, analyzing, completed, failed
-conflict_type: spatial_overlap, dimension_mismatch, missing_provision, code_violation
-conflict_severity: critical, high, medium, low
-conflict_status: detected, confirmed, dismissed, resolved, nc_created
+[functions.ai-analyze-project]
+verify_jwt = false
+
+[functions.ai-compare-projects]
+verify_jwt = false
 ```
-
-### Tabela: projects
-
-| Coluna | Tipo | Notas |
-|--------|------|-------|
-| id | UUID PK | |
-| organization_id | UUID FK -> organizations | |
-| site_id | UUID FK -> sites | |
-| specialty | project_specialty enum | |
-| name | TEXT | |
-| description | TEXT nullable | |
-| floor_or_zone | TEXT nullable | |
-| version | TEXT nullable | |
-| is_current_version | BOOLEAN DEFAULT true | |
-| file_url | TEXT nullable | |
-| file_type | TEXT nullable | |
-| file_size | BIGINT nullable | |
-| uploaded_by | UUID | auth.uid |
-| uploaded_at | TIMESTAMPTZ DEFAULT now() | |
-| analyzed_at | TIMESTAMPTZ nullable | |
-| analysis_status | project_analysis_status DEFAULT 'pending' | |
-
-### Tabela: project_elements
-
-| Coluna | Tipo | Notas |
-|--------|------|-------|
-| id | UUID PK | |
-| project_id | UUID FK -> projects ON DELETE CASCADE | |
-| element_type | TEXT | |
-| element_code | TEXT nullable | |
-| location_description | TEXT nullable | |
-| properties | JSONB DEFAULT '{}' | |
-| confidence | FLOAT nullable | |
-| created_at | TIMESTAMPTZ DEFAULT now() | |
-
-### Tabela: project_conflicts
-
-| Coluna | Tipo | Notas |
-|--------|------|-------|
-| id | UUID PK | |
-| organization_id | UUID FK -> organizations | |
-| site_id | UUID FK -> sites | |
-| project1_id | UUID FK -> projects | |
-| project2_id | UUID FK -> projects | |
-| conflict_type | conflict_type enum | |
-| severity | conflict_severity enum | |
-| title | TEXT | |
-| description | TEXT nullable | |
-| location_description | TEXT nullable | |
-| ai_confidence | FLOAT nullable | |
-| status | conflict_status enum DEFAULT 'detected' | |
-| resolved_by | UUID nullable | |
-| resolved_at | TIMESTAMPTZ nullable | |
-| resolution_notes | TEXT nullable | |
-| related_nc_id | UUID nullable FK -> nonconformities | |
-| detected_at | TIMESTAMPTZ DEFAULT now() | |
-
-### RLS Policies
-
-- **projects**: SELECT/INSERT/UPDATE/DELETE para membros da organizacao via `is_org_member(auth.uid(), organization_id)`
-- **project_elements**: SELECT para membros via join com projects; INSERT/UPDATE/DELETE para admin/manager
-- **project_conflicts**: SELECT para membros via join; INSERT/UPDATE para admin/manager/inspector
 
 ---
 
-## 2. Ficheiros a Criar
+## 4. Actualizar SiteProjectsTab
+
+Adicionar botao "Analisar" nas accoes de cada projecto na tabela, que chama a edge function `ai-analyze-project` e mostra progresso via badge de status.
+
+Adicionar botao "Comparar" que abre modal para seleccionar segundo projecto e chama `ai-compare-projects`.
+
+---
+
+## 5. Actualizar ProjectViewer
+
+Adicionar botao "Analisar" no header do viewer que dispara analise e refresca elementos no painel lateral.
+
+---
+
+## 6. Seccao de Conflitos na Tab de Projectos
+
+Expandir `ProjectConflictsSummary` com lista detalhada de conflitos:
+
+Cada conflito mostra:
+- Severidade (badge colorido), titulo, especialidades envolvidas
+- Localizacao, estado, confianca IA
+- Botoes: Confirmar, Descartar, Criar NC
+
+Workflow de estados: detected -> confirmed -> resolved | dismissed | nc_created
+
+Botao "Criar NC" insere na tabela `nonconformities` com dados do conflito e actualiza `project_conflicts.related_nc_id` e status para `nc_created`.
+
+---
+
+## 7. Tools do Agente
+
+Adicionar ao `ai-obrify-agent/index.ts`:
+
+| Tool | Descricao |
+|------|-----------|
+| QUERY_PROJECTS | Consulta projectos por siteId, specialty, status analise |
+| ANALYZE_PROJECT | Chama ai-analyze-project |
+| COMPARE_PROJECTS | Chama ai-compare-projects |
+| QUERY_CONFLICTS | Consulta conflitos por siteId, severity, status |
+| CREATE_NC_FROM_CONFLICT | Cria NC a partir de conflito |
+
+Actualizar o enum de tools no tool calling do modelo.
+
+---
+
+## 8. Analise Automatica pos-Upload
+
+No `UploadProjectModal`, apos upload com sucesso:
+- Chamar `ai-analyze-project` em background (sem bloquear UI)
+- Apos analise completa, comparar automaticamente com projectos de especialidades relacionadas no mesmo site:
+  - Estruturas compara com: Arquitectura, Aguas, AVAC, Electricidade
+  - Arquitectura compara com: Estruturas
+  - Aguas compara com: Estruturas, Electricidade
+- Toast a informar que analise foi iniciada
+
+---
+
+## 9. Ficheiros a Criar
 
 | Ficheiro | Descricao |
 |----------|-----------|
-| `src/components/sites/SiteProjectsTab.tsx` | Tab principal com grid de especialidades e lista de projectos |
-| `src/components/sites/UploadProjectModal.tsx` | Modal de upload com dropzone, selects e checkbox |
-| `src/components/sites/ProjectViewer.tsx` | Visualizador fullscreen com zoom/pan e painel lateral |
-| `src/components/sites/ProjectConflictsSummary.tsx` | Card de sumario de conflitos com breakdown por severidade |
+| `supabase/functions/ai-analyze-project/index.ts` | Edge function de analise de planta |
+| `supabase/functions/ai-compare-projects/index.ts` | Edge function de comparacao |
+| `src/components/sites/ProjectConflictsDetail.tsx` | Lista detalhada de conflitos com accoes |
+| `src/components/sites/CompareProjectsModal.tsx` | Modal para seleccionar projecto a comparar |
 
-## 3. Ficheiros a Modificar
+## 10. Ficheiros a Modificar
 
 | Ficheiro | Alteracao |
 |----------|-----------|
-| `src/pages/app/SiteDetail.tsx` | Adicionar tab "Projectos" (grid-cols-5 -> grid-cols-6) |
+| `supabase/config.toml` | Adicionar 2 novas funcoes |
+| `supabase/functions/ai-obrify-agent/index.ts` | Adicionar 5 novas tools |
+| `src/components/sites/SiteProjectsTab.tsx` | Botoes Analisar e Comparar nas accoes |
+| `src/components/sites/ProjectViewer.tsx` | Botao Analisar no header |
+| `src/components/sites/UploadProjectModal.tsx` | Analise automatica pos-upload |
+| `src/components/sites/ProjectConflictsSummary.tsx` | Expandir com lista detalhada ou link |
 
 ---
 
-## 4. Detalhes de Implementacao
+## Detalhes Tecnicos
 
-### SiteProjectsTab - Layout
+### Prompt de Analise (ai-analyze-project)
 
-A tab tera dois modos:
-
-**Modo Grid (vista inicial):**
-- Grid de 9 cards, um por especialidade
-- Cada card mostra: icone da especialidade, nome, contagem de documentos, estado da ultima versao
-- Icones: Topografia (Map), Arquitectura (Building2), Estruturas (Columns3), Aguas (Droplets), AVAC (Wind), Electricidade (Zap), Gas (Flame), Telecom (Radio), Outros (FileStack)
-- Card clicavel abre lista filtrada por essa especialidade
-
-**Modo Lista (ao clicar numa especialidade):**
-- Breadcrumb: Projectos > {Especialidade}
-- Tabela com colunas: Nome, Piso/Zona, Versao (badge "Actual" se is_current_version), Data upload, Estado analise (badge colorido), Conflitos (badge count)
-- Accoes por linha: Ver, Download, Eliminar
-- Botao "+ Carregar Projecto" (pre-selecciona a especialidade)
-
-### UploadProjectModal
-
-- Select de especialidade (obrigatorio, pre-seleccionado se vem de uma especialidade)
-- Select de piso/zona com opcoes: Geral, Cave, Piso 0 a Piso 10, Cobertura, e input livre "Outro"
-- Input de versao (texto livre)
-- Checkbox "Marcar como versao actual"
-- Textarea de descricao (opcional)
-- DropZone reutilizando o padrao existente, aceita PDF/PNG/JPG, max 50MB
-- Ao submeter: upload para bucket `documents` na pasta `organizations/{orgId}/sites/{siteId}/projects/{specialty}/`, cria registo na tabela `projects`
-
-### ProjectViewer
-
-- Dialog fullscreen (ou overlay) ao clicar num projecto
-- Se PDF: usa `<iframe>` com o URL do ficheiro
-- Se imagem: componente com zoom/pan (CSS transform)
-- Painel lateral direito (colapsavel): metadados do projecto, estado da analise, lista de elementos detectados (se existirem), lista de conflitos relacionados
-- Botoes: Download, Fechar
-
-### ProjectConflictsSummary
-
-- Card destacado no topo da tab se existem conflitos com status != 'resolved' e != 'dismissed'
-- Mostra: "X incompatibilidades detectadas"
-- Breakdown visual por severidade (badges critical/high/medium/low com contagem)
-- Cada badge e clicavel e filtra a lista
-
-### Fluxo de Upload
+O prompt e adaptado pela especialidade do projecto. Exemplo para arquitectura detecta paredes, portas, janelas, escadas. Para estruturas detecta pilares, vigas, lajes, paredes estruturais. O output e forcado via tool calling com schema:
 
 ```text
-1. User clica "+ Carregar Projecto"
-2. Preenche modal (especialidade, piso, versao, ficheiro)
-3. Se "versao actual" marcado -> UPDATE projects SET is_current_version = false WHERE site_id AND specialty AND is_current_version = true
-4. Upload ficheiro para storage bucket "documents"
-5. INSERT na tabela projects com file_url, file_type, file_size
-6. Fecha modal e invalida queries
+{
+  metadata: { escala, titulo, notas },
+  elementos: [{ tipo, codigo, localizacao, propriedades, confianca }],
+  observacoes: []
+}
 ```
 
-### Integracao com SiteDetail
+### Prompt de Comparacao (ai-compare-projects)
 
-- Adicionar import de SiteProjectsTab
-- Adicionar TabsTrigger "projects" com texto traduzido
-- Adicionar TabsContent com `<SiteProjectsTab siteId={siteId!} orgId={site.org_id} />`
-- Alterar grid-cols-5 para grid-cols-6
+Envia duas imagens ao Gemini com contexto das especialidades. Output forcado via tool calling:
+
+```text
+{
+  compatibilidade: "boa" | "moderada" | "problematica",
+  resumo: string,
+  conflitos: [{ tipo, severidade, titulo, descricao, localizacao, confianca }],
+  verificacoes_ok: [string]
+}
+```
+
+### Fluxo de Criacao de NC a partir de Conflito
+
+```text
+1. User clica "Criar NC" num conflito
+2. INSERT em nonconformities com:
+   - title: conflito.title
+   - description: conflito.description
+   - severity: mapeamento (critical->critical, high->major, etc.)
+   - site_id: conflito.site_id
+   - status: open
+3. UPDATE project_conflicts SET status = 'nc_created', related_nc_id = nc.id
+4. Toast de sucesso com link para NC
+```
+
+### Mapeamento de Especialidades para Comparacao Automatica
+
+```text
+structure -> [architecture, plumbing, hvac, electrical]
+architecture -> [structure]
+plumbing -> [structure, electrical]
+electrical -> [structure, plumbing]
+hvac -> [structure]
+gas -> [structure]
+telecom -> [structure, electrical]
+```
