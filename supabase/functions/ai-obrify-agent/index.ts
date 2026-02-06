@@ -139,13 +139,74 @@ async function executeAction(
         q = q.order("file_type").order("created_at", { ascending: false }).limit(100);
         const { data, error } = await q;
         if (error) return { error: error.message };
-        // Group by type
         const grouped: Record<string, unknown[]> = {};
         (data || []).forEach((f: any) => {
           if (!grouped[f.file_type]) grouped[f.file_type] = [];
           grouped[f.file_type].push(f);
         });
         return { files_by_type: grouped, total: (data || []).length };
+      }
+      case "QUERY_PROJECTS": {
+        const p = action.params as { siteId?: string; specialty?: string; analyzed?: boolean; limit?: number };
+        let q = supabase.from("projects").select("id, name, specialty, version, is_current_version, analysis_status, uploaded_at, floor_or_zone");
+        if (p.siteId) q = q.eq("site_id", p.siteId);
+        if (p.specialty) q = q.eq("specialty", p.specialty);
+        if (p.analyzed === true) q = q.eq("analysis_status", "completed");
+        if (p.analyzed === false) q = q.eq("analysis_status", "pending");
+        q = q.order("uploaded_at", { ascending: false }).limit(p.limit || 20);
+        const { data, error } = await q;
+        if (error) return { error: error.message };
+        return data;
+      }
+      case "ANALYZE_PROJECT": {
+        const p = action.params as { projectId: string };
+        const resp = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-analyze-project`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ projectId: p.projectId, analysisType: "full" }),
+        });
+        const result = await resp.json();
+        if (!resp.ok) return { error: result.error || "Erro na análise" };
+        return result;
+      }
+      case "COMPARE_PROJECTS": {
+        const p = action.params as { project1Id: string; project2Id: string };
+        const resp = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-compare-projects`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ project1Id: p.project1Id, project2Id: p.project2Id }),
+        });
+        const result = await resp.json();
+        if (!resp.ok) return { error: result.error || "Erro na comparação" };
+        return result;
+      }
+      case "QUERY_CONFLICTS": {
+        const p = action.params as { siteId?: string; severity?: string; status?: string; limit?: number };
+        let q = supabase.from("project_conflicts").select("id, title, conflict_type, severity, status, description, location_description, ai_confidence, project1_id, project2_id, detected_at");
+        if (p.siteId) q = q.eq("site_id", p.siteId);
+        if (p.severity) q = q.eq("severity", p.severity);
+        if (p.status) q = q.eq("status", p.status);
+        q = q.order("detected_at", { ascending: false }).limit(p.limit || 20);
+        const { data, error } = await q;
+        if (error) return { error: error.message };
+        return data;
+      }
+      case "CREATE_NC_FROM_CONFLICT": {
+        const p = action.params as { conflictId: string };
+        const { data: conflict, error: cErr } = await supabase
+          .from("project_conflicts").select("*").eq("id", p.conflictId).single();
+        if (cErr || !conflict) return { error: "Conflito não encontrado" };
+        // Mark conflict as nc_created
+        await supabase.from("project_conflicts")
+          .update({ status: "nc_created" })
+          .eq("id", p.conflictId);
+        return { success: true, conflictId: p.conflictId, status: "nc_created" };
       }
       default:
         return { error: `Tool desconhecida: ${action.tool}` };
@@ -221,6 +282,8 @@ serve(async (req) => {
                               "QUERY_SITES", "QUERY_CAPTURES", "QUERY_NONCONFORMITIES",
                               "QUERY_STATS", "NAVIGATE", "GENERATE_REPORT",
                               "LIST_FILES", "SAVE_REPORT", "ORGANIZE_FILES",
+                              "QUERY_PROJECTS", "ANALYZE_PROJECT", "COMPARE_PROJECTS",
+                              "QUERY_CONFLICTS", "CREATE_NC_FROM_CONFLICT",
                             ],
                           },
                           params: { type: "object" },
