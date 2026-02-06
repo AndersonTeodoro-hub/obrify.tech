@@ -1246,3 +1246,340 @@ export async function generateMeasurementAuto(
 
   return doc.output('blob');
 }
+
+/**
+ * Generate Compatibilization Report PDF
+ */
+export async function generateCompatibilizationReport({
+  siteId,
+  orgId,
+  includeResolved = false,
+  includeImages = false,
+}: {
+  siteId: string;
+  orgId: string;
+  includeResolved?: boolean;
+  includeImages?: boolean;
+}): Promise<Blob> {
+  // Fetch site
+  const { data: site, error: siteError } = await supabase
+    .from('sites')
+    .select('id, name, address')
+    .eq('id', siteId)
+    .single();
+  if (siteError || !site) throw new Error('Obra não encontrada');
+
+  // Fetch projects
+  const { data: projects } = await supabase
+    .from('projects')
+    .select('id, name, specialty, version, is_current_version, analysis_status, uploaded_at, floor_or_zone')
+    .eq('site_id', siteId)
+    .order('specialty');
+
+  // Fetch conflicts
+  let conflictQuery = supabase
+    .from('project_conflicts')
+    .select('*')
+    .eq('site_id', siteId)
+    .order('severity');
+  if (!includeResolved) {
+    conflictQuery = conflictQuery.not('status', 'in', '("resolved","dismissed")');
+  }
+  const { data: conflicts } = await conflictQuery;
+
+  const allConflicts = conflicts || [];
+  const projectsList = projects || [];
+
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+  // === COVER PAGE ===
+  // Logo placeholder
+  doc.setFillColor(...COLORS.lightGray);
+  doc.rect(MARGIN, MARGIN, 40, 20, 'F');
+  doc.setFontSize(10);
+  doc.setTextColor(...COLORS.secondary);
+  doc.text('LOGO', MARGIN + 20, MARGIN + 12, { align: 'center' });
+
+  // Title
+  doc.setFontSize(24);
+  doc.setTextColor(...COLORS.primary);
+  doc.setFont('helvetica', 'bold');
+  doc.text('RELATÓRIO DE', PAGE_WIDTH / 2, 100, { align: 'center' });
+  doc.text('COMPATIBILIZAÇÃO', PAGE_WIDTH / 2, 115, { align: 'center' });
+
+  // Site name
+  doc.setFontSize(16);
+  doc.setTextColor(...COLORS.text);
+  doc.setFont('helvetica', 'normal');
+  doc.text(site.name, PAGE_WIDTH / 2, 140, { align: 'center' });
+  if (site.address) {
+    doc.setFontSize(11);
+    doc.setTextColor(...COLORS.secondary);
+    doc.text(site.address, PAGE_WIDTH / 2, 150, { align: 'center' });
+  }
+
+  // Date
+  doc.setFontSize(12);
+  doc.setTextColor(...COLORS.text);
+  doc.text(format(new Date(), "dd 'de' MMMM 'de' yyyy", { locale: pt }), PAGE_WIDTH / 2, 170, { align: 'center' });
+
+  // Separator
+  doc.setDrawColor(...COLORS.primary);
+  doc.setLineWidth(1);
+  doc.line(60, 125, PAGE_WIDTH - 60, 125);
+
+  // === PAGE 2: EXECUTIVE SUMMARY ===
+  doc.addPage();
+  let currentY = addHeader(doc, 'SUMÁRIO EXECUTIVO');
+  currentY += 5;
+
+  const totalConflicts = allConflicts.length;
+  const bySeverity = { critical: 0, high: 0, medium: 0, low: 0 };
+  const resolved = allConflicts.filter(c => c.status === 'resolved' || c.status === 'dismissed').length;
+
+  allConflicts.forEach(c => {
+    if (c.severity in bySeverity) bySeverity[c.severity as keyof typeof bySeverity]++;
+  });
+
+  const resolutionRate = totalConflicts > 0 ? Math.round((resolved / totalConflicts) * 100) : 100;
+
+  currentY = addInfoRow(doc, 'Total de Conflitos', String(totalConflicts), currentY);
+  currentY = addInfoRow(doc, 'Taxa de Resolução', `${resolutionRate}%`, currentY);
+  currentY += 5;
+
+  // Severity breakdown table
+  autoTable(doc, {
+    startY: currentY,
+    head: [['Severidade', 'Quantidade', '%']],
+    body: [
+      ['Crítico', String(bySeverity.critical), totalConflicts ? `${Math.round((bySeverity.critical / totalConflicts) * 100)}%` : '0%'],
+      ['Alto', String(bySeverity.high), totalConflicts ? `${Math.round((bySeverity.high / totalConflicts) * 100)}%` : '0%'],
+      ['Médio', String(bySeverity.medium), totalConflicts ? `${Math.round((bySeverity.medium / totalConflicts) * 100)}%` : '0%'],
+      ['Baixo', String(bySeverity.low), totalConflicts ? `${Math.round((bySeverity.low / totalConflicts) * 100)}%` : '0%'],
+    ],
+    margin: { left: MARGIN, right: MARGIN },
+    headStyles: { fillColor: COLORS.primary, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
+    bodyStyles: { fontSize: 9, textColor: COLORS.text },
+    columnStyles: { 0: { cellWidth: 50 }, 1: { cellWidth: 30, halign: 'center' }, 2: { cellWidth: 30, halign: 'center' } },
+    didParseCell: (data) => {
+      if (data.section === 'body' && data.column.index === 0) {
+        const row = data.row.index;
+        const colors = [COLORS.danger, [234, 179, 8], COLORS.primary, COLORS.secondary];
+        data.cell.styles.textColor = colors[row] as [number, number, number];
+        data.cell.styles.fontStyle = 'bold';
+      }
+    },
+  });
+
+  currentY = (doc as any).lastAutoTable.finalY + 10;
+
+  // === PROJECTS ANALYZED ===
+  currentY = addSectionTitle(doc, 'PROJECTOS ANALISADOS', currentY);
+
+  const SPECIALTY_LABELS: Record<string, string> = {
+    topography: 'Topografia', architecture: 'Arquitectura', structure: 'Estruturas',
+    plumbing: 'Águas e Esgotos', electrical: 'Electricidade', hvac: 'AVAC',
+    gas: 'Gás', telecom: 'Telecomunicações', other: 'Outros',
+  };
+
+  const ANALYSIS_LABELS: Record<string, string> = {
+    pending: 'Pendente', analyzing: 'A analisar', completed: 'Concluída', failed: 'Falhou',
+  };
+
+  if (projectsList.length > 0) {
+    autoTable(doc, {
+      startY: currentY,
+      head: [['Especialidade', 'Nome', 'Versão', 'Data Upload', 'Análise']],
+      body: projectsList.map(p => [
+        SPECIALTY_LABELS[p.specialty] || p.specialty,
+        p.name,
+        `v${p.version || 1}`,
+        format(new Date(p.uploaded_at), 'dd/MM/yyyy', { locale: pt }),
+        ANALYSIS_LABELS[p.analysis_status] || p.analysis_status,
+      ]),
+      margin: { left: MARGIN, right: MARGIN },
+      headStyles: { fillColor: COLORS.primary, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+      bodyStyles: { fontSize: 8, textColor: COLORS.text },
+    });
+    currentY = (doc as any).lastAutoTable.finalY + 10;
+  }
+
+  // === CONFLICTS ===
+  if (currentY > PAGE_HEIGHT - 50) { doc.addPage(); currentY = MARGIN; }
+  currentY = addSectionTitle(doc, 'CONFLITOS DETECTADOS', currentY);
+
+  const CONFLICT_TYPE_LABELS: Record<string, string> = {
+    spatial_overlap: 'Sobreposição Espacial', dimension_mismatch: 'Cotas Diferentes',
+    missing_provision: 'Provisão em Falta', code_violation: 'Violação de Norma',
+  };
+
+  const CONFLICT_STATUS_LABELS: Record<string, string> = {
+    detected: 'Detectado', confirmed: 'Confirmado', dismissed: 'Descartado',
+    resolved: 'Resolvido', nc_created: 'NC Criada',
+  };
+
+  const CONFLICT_SEV_LABELS: Record<string, string> = {
+    critical: 'Crítico', high: 'Alto', medium: 'Médio', low: 'Baixo',
+  };
+
+  const getProjectName = (id: string) => projectsList.find(p => p.id === id)?.name || '—';
+
+  if (allConflicts.length > 0) {
+    for (let i = 0; i < allConflicts.length; i++) {
+      const c = allConflicts[i];
+      if (currentY > PAGE_HEIGHT - 40) { doc.addPage(); currentY = MARGIN; }
+
+      // Conflict header
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      const sevColor = c.severity === 'critical' ? COLORS.danger :
+        c.severity === 'high' ? [234, 179, 8] as [number, number, number] :
+        c.severity === 'medium' ? COLORS.primary : COLORS.secondary;
+      doc.setTextColor(...(sevColor as [number, number, number]));
+      doc.text(`[${CONFLICT_SEV_LABELS[c.severity] || c.severity}]`, MARGIN, currentY);
+
+      doc.setTextColor(...COLORS.text);
+      const sevWidth = doc.getTextWidth(`[${CONFLICT_SEV_LABELS[c.severity] || c.severity}] `);
+      doc.text(c.title, MARGIN + sevWidth, currentY);
+      currentY += 5;
+
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...COLORS.secondary);
+      doc.text(`Tipo: ${CONFLICT_TYPE_LABELS[c.conflict_type] || c.conflict_type} | Estado: ${CONFLICT_STATUS_LABELS[c.status] || c.status}`, MARGIN, currentY);
+      currentY += 4;
+      doc.text(`Projectos: ${getProjectName(c.project1_id)} ↔ ${getProjectName(c.project2_id)}`, MARGIN, currentY);
+      currentY += 4;
+
+      if (c.description) {
+        doc.setTextColor(...COLORS.text);
+        const lines = doc.splitTextToSize(c.description, CONTENT_WIDTH);
+        doc.text(lines, MARGIN, currentY);
+        currentY += lines.length * 3.5;
+      }
+
+      if (c.location_description) {
+        doc.setTextColor(...COLORS.secondary);
+        doc.text(`📍 ${c.location_description}`, MARGIN, currentY);
+        currentY += 4;
+      }
+
+      currentY += 4;
+    }
+  } else {
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...COLORS.success);
+    doc.text('✓ Sem incompatibilidades detectadas', MARGIN, currentY);
+    currentY += 8;
+  }
+
+  // === STANDARD CHECKLIST ===
+  if (currentY > PAGE_HEIGHT - 60) { doc.addPage(); currentY = MARGIN; }
+  currentY = addSectionTitle(doc, 'CHECKLIST DE VERIFICAÇÕES PADRÃO', currentY);
+
+  const checklist = [
+    'Verificação de sobreposições espaciais entre especialidades',
+    'Conferência de cotas e dimensões entre projectos',
+    'Verificação de provisões para passagens de tubagens e condutas',
+    'Conformidade com normas e regulamentos aplicáveis',
+    'Verificação de coordenação de altimetria entre pisos',
+    'Verificação de acessos para manutenção de equipamentos',
+    'Conferência de cargas previstas vs. capacidade estrutural',
+  ];
+
+  checklist.forEach(item => {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...COLORS.text);
+    doc.text(`☐  ${item}`, MARGIN, currentY);
+    currentY += 5;
+  });
+
+  currentY += 5;
+
+  // === RECOMMENDATIONS ===
+  if (currentY > PAGE_HEIGHT - 60) { doc.addPage(); currentY = MARGIN; }
+  currentY = addSectionTitle(doc, 'RECOMENDAÇÕES', currentY);
+
+  // Auto-generate recommendations based on conflicts
+  const recommendations: string[] = [];
+  const specialtiesInvolved = new Set<string>();
+  allConflicts.forEach(c => {
+    const p1 = projectsList.find(p => p.id === c.project1_id);
+    const p2 = projectsList.find(p => p.id === c.project2_id);
+    if (p1) specialtiesInvolved.add(SPECIALTY_LABELS[p1.specialty] || p1.specialty);
+    if (p2) specialtiesInvolved.add(SPECIALTY_LABELS[p2.specialty] || p2.specialty);
+  });
+
+  if (bySeverity.critical > 0) {
+    recommendations.push(`Resolver urgentemente os ${bySeverity.critical} conflito(s) de severidade CRÍTICA antes de avançar com a execução.`);
+  }
+  if (specialtiesInvolved.size > 1) {
+    const specs = Array.from(specialtiesInvolved).join(', ');
+    recommendations.push(`Rever coordenação entre as especialidades: ${specs}.`);
+  }
+  if (allConflicts.some(c => c.conflict_type === 'dimension_mismatch')) {
+    recommendations.push('Conferir e uniformizar cotas entre projectos de diferentes especialidades.');
+  }
+  if (allConflicts.some(c => c.conflict_type === 'missing_provision')) {
+    recommendations.push('Verificar provisões em falta para passagens técnicas e equipamentos.');
+  }
+  if (recommendations.length === 0) {
+    recommendations.push('Sem recomendações específicas. Os projectos aparentam estar compatibilizados.');
+  }
+
+  recommendations.forEach((rec, i) => {
+    if (currentY > PAGE_HEIGHT - 20) { doc.addPage(); currentY = MARGIN; }
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...COLORS.text);
+    const lines = doc.splitTextToSize(`${i + 1}. ${rec}`, CONTENT_WIDTH);
+    doc.text(lines, MARGIN, currentY);
+    currentY += lines.length * 4 + 2;
+  });
+
+  // === SIGNATURE ===
+  if (currentY > PAGE_HEIGHT - 45) { doc.addPage(); currentY = MARGIN; }
+  currentY += 10;
+  currentY = addSectionTitle(doc, 'ASSINATURA', currentY);
+  currentY += 5;
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...COLORS.text);
+  doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy', { locale: pt })}`, MARGIN, currentY);
+  currentY += 15;
+  doc.setDrawColor(...COLORS.text);
+  doc.setLineWidth(0.3);
+  doc.line(MARGIN, currentY, MARGIN + 70, currentY);
+  doc.setFontSize(8);
+  doc.setTextColor(...COLORS.secondary);
+  doc.text('(Assinatura)', MARGIN + 35, currentY + 4, { align: 'center' });
+
+  // === FOOTERS ===
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    addFooter(doc, i, totalPages);
+  }
+
+  // Persist document
+  try {
+    const blob = doc.output('blob');
+    const fileName = `Compatibilizacao_${site.name.replace(/\s+/g, '_')}_${format(new Date(), 'yyyyMMdd')}.pdf`;
+    const filePath = `organizations/${orgId}/sites/${siteId}/reports/${fileName}`;
+
+    await supabase.storage.from('documents').upload(filePath, blob, { contentType: 'application/pdf', upsert: true });
+    await supabase.from('documents').insert({
+      name: `Relatório de Compatibilização - ${site.name}`,
+      doc_type: 'compatibilization_report',
+      file_path: filePath,
+      site_id: siteId,
+      org_id: orgId,
+    });
+  } catch (e) {
+    console.warn('Could not persist report:', e);
+  }
+
+  return doc.output('blob');
+}

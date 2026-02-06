@@ -231,7 +231,7 @@ serve(async (req) => {
   }
 
   try {
-    const { message, context, conversationId, userId, expertMode } = await req.json();
+    const { message, context, conversationId, userId, expertMode, language } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
@@ -256,6 +256,10 @@ serve(async (req) => {
       ? `\nCONTEXTO ACTUAL: Página: ${context.page || "desconhecida"}${context.siteId ? `, Obra ID: ${context.siteId}` : ""}`
       : "";
 
+    const languageInstruction = language && language !== 'pt'
+      ? `\n\nIMPORTANTE: Responde SEMPRE no idioma: ${language === 'en' ? 'Inglês' : language === 'es' ? 'Espanhol' : language === 'fr' ? 'Francês' : language}.`
+      : "";
+
     const aiResponse = await fetch(
       "https://ai.gateway.lovable.dev/v1/chat/completions",
       {
@@ -267,7 +271,7 @@ serve(async (req) => {
         body: JSON.stringify({
           model: "google/gemini-3-flash-preview",
           messages: [
-            { role: "system", content: SYSTEM_PROMPT + (expertMode ? EXPERT_PROMPT : "") + contextInfo },
+            { role: "system", content: SYSTEM_PROMPT + (expertMode ? EXPERT_PROMPT : "") + contextInfo + languageInstruction },
             { role: "user", content: message },
           ],
           tools: [
@@ -369,7 +373,7 @@ serve(async (req) => {
           body: JSON.stringify({
             model: "google/gemini-3-flash-preview",
             messages: [
-              { role: "system", content: SYSTEM_PROMPT + (expertMode ? EXPERT_PROMPT : "") + contextInfo },
+              { role: "system", content: SYSTEM_PROMPT + (expertMode ? EXPERT_PROMPT : "") + contextInfo + languageInstruction },
               { role: "user", content: message },
               { role: "assistant", content: `Pensei: ${thought}. Resultados: ${JSON.stringify(actionResults)}` },
               { role: "user", content: "Com base nos resultados, formula uma resposta clara em português. Responde apenas com o texto." },

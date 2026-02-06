@@ -7,9 +7,10 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
   AlertTriangle, CheckCircle2, XCircle, FileWarning, Eye,
-  ChevronDown, ChevronUp,
+  ChevronDown, ChevronUp, FileText,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { GenerateCompatReportModal } from './GenerateCompatReportModal';
 
 interface Conflict {
   id: string;
@@ -62,6 +63,7 @@ export function ProjectConflictsDetail({
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
 
   const active = conflicts.filter(c => !['resolved', 'dismissed'].includes(c.status));
 
@@ -85,16 +87,11 @@ export function ProjectConflictsDetail({
 
   const createNCMutation = useMutation({
     mutationFn: async (conflict: Conflict) => {
-      const sevMap: Record<string, string> = { critical: 'critical', high: 'major', medium: 'moderate', low: 'minor' };
-
-      // We need an inspection_id and inspection_item_id for NCs - create a placeholder
-      // For now just update conflict status since NCs require inspection context
       const { error } = await supabase
         .from('project_conflicts')
         .update({ status: 'nc_created' })
         .eq('id', conflict.id);
       if (error) throw error;
-
       return { conflictId: conflict.id };
     },
     onSuccess: () => {
@@ -106,21 +103,44 @@ export function ProjectConflictsDetail({
 
   const getProjectName = (id: string) => projects.find(p => p.id === id)?.name || '—';
 
-  if (active.length === 0) return null;
+  // Empty state
+  if (active.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-8 text-center animate-fade-in">
+        <CheckCircle2 className="h-12 w-12 text-success mb-3" />
+        <p className="text-sm font-medium text-foreground">Sem incompatibilidades detectadas</p>
+        <p className="text-xs text-muted-foreground mt-1">Todos os projectos estão compatibilizados</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3">
-      <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
-        <AlertTriangle className="h-4 w-4 text-destructive" />
-        Conflitos Detectados ({active.length})
-      </h4>
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 text-destructive" />
+          Conflitos Detectados ({active.length})
+        </h4>
+        <Button variant="outline" size="sm" onClick={() => setReportOpen(true)}>
+          <FileText className="mr-1.5 h-3.5 w-3.5" />
+          Gerar Relatório
+        </Button>
+      </div>
 
-      {active.map(conflict => {
+      <GenerateCompatReportModal
+        open={reportOpen}
+        onOpenChange={setReportOpen}
+        siteId={siteId}
+        orgId={orgId}
+      />
+
+      {active.map((conflict, idx) => {
         const sev = SEVERITY_CONFIG[conflict.severity];
         const isExpanded = expandedId === conflict.id;
 
         return (
-          <Card key={conflict.id} className="border-l-4" style={{
+          <Card key={conflict.id} className="border-l-4 animate-fade-in" style={{
+            animationDelay: `${idx * 50}ms`,
             borderLeftColor: conflict.severity === 'critical' ? 'hsl(var(--destructive))' :
               conflict.severity === 'high' ? '#f59e0b' :
               conflict.severity === 'medium' ? 'hsl(var(--info, 210 100% 50%))' : 'hsl(var(--muted-foreground))',

@@ -773,5 +773,40 @@
     "version": "Version",
     "releaseNotes": "Release notes",
     "discoverSitePulse": "Discover SitePulse"
+  },
+  "agent": {
+    "greeting": "Hello! I'm Obrify, your inspection assistant. I can help you check sites, view non-conformities, generate reports and more. What do you need?",
+    "thinking": "Thinking...",
+    "error": "An error occurred. Please try again.",
+    "tooManyRequests": "Too many requests. Please try again shortly.",
+    "creditsExhausted": "Credits exhausted.",
+    "clear": "Clear",
+    "recording": "Listening...",
+    "inputPlaceholder": "Type your question...",
+    "speaking": "Speaking...",
+    "voiceOn": "Voice on",
+    "voiceOff": "Voice off",
+    "expertMode": "Eng. Silva Mode",
+    "backToCurrent": "Back to current conversation",
+    "navigation": "Navigation",
+    "navigatingTo": "Navigating to {{path}}",
+    "history": "History",
+    "historyEmpty": "No conversations yet",
+    "historyEmptyDesc": "Start talking to Obrify!",
+    "suggestions": {
+      "openNCs": "View open NCs",
+      "siteSummary": "Sites summary",
+      "generateReport": "Generate report",
+      "daySummary": "Day summary",
+      "urgentNCs": "Urgent NCs",
+      "recentActivity": "Recent activity",
+      "siteOverview": "Site overview",
+      "siteNCs": "Open NCs here",
+      "projectConflicts": "Project conflicts",
+      "filterCritical": "Filter critical",
+      "exportList": "Export list",
+      "analyzePending": "Analyze pending",
+      "viewConflicts": "View conflicts"
+    }
   }
 }
