@@ -1600,18 +1600,21 @@ export type Database = {
       organizations: {
         Row: {
           created_at: string
+          description: string | null
           id: string
           name: string
           updated_at: string
         }
         Insert: {
           created_at?: string
+          description?: string | null
           id?: string
           name: string
           updated_at?: string
         }
         Update: {
           created_at?: string
+          description?: string | null
           id?: string
           name?: string
           updated_at?: string
@@ -2049,6 +2052,7 @@ export type Database = {
           address: string | null
           created_at: string
           id: string
+          image_url: string | null
           name: string
           org_id: string
           status: string
@@ -2058,6 +2062,7 @@ export type Database = {
           address?: string | null
           created_at?: string
           id?: string
+          image_url?: string | null
           name: string
           org_id: string
           status?: string
@@ -2067,6 +2072,7 @@ export type Database = {
           address?: string | null
           created_at?: string
           id?: string
+          image_url?: string | null
           name?: string
           org_id?: string
           status?: string
