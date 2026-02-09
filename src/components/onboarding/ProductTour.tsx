@@ -80,10 +80,10 @@ export function startProductTour(onComplete?: () => void) {
     overlayColor: 'rgba(0, 0, 0, 0.75)',
     stagePadding: 8,
     stageRadius: 12,
-    popoverClass: 'sitepulse-tour-popover',
+    popoverClass: 'obrify-tour-popover',
     steps: tourSteps,
     onDestroyed: () => {
-      localStorage.setItem('sitepulse_onboarding_completed', 'true');
+      localStorage.setItem('obrify_onboarding_completed', 'true');
       onComplete?.();
     },
   });

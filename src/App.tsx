@@ -33,7 +33,7 @@ const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <ThemeProvider defaultTheme="dark" storageKey="sitepulse-theme">
+    <ThemeProvider defaultTheme="dark" storageKey="obrify-theme">
       <TooltipProvider>
         <Toaster />
         <Sonner />

@@ -40,7 +40,7 @@
     "welcomeBack": "Welcome back",
     "createAccount": "Create new account",
     "enterCredentials": "Enter your credentials to access the platform",
-    "fillDataToStart": "Fill in the details to start using SitePulse",
+    "fillDataToStart": "Fill in the details to start using Obrify",
     "email": "Email",
     "emailPlaceholder": "your@email.com",
     "password": "Password",
@@ -101,7 +101,7 @@
     "socialLoginError": "Error signing in with Google"
   },
   "brand": {
-    "name": "SitePulse",
+    "name": "Obrify",
     "tagline": "Smart Inspection",
     "heroTitle": "Transform the way you",
     "heroTitleHighlight": "inspect your sites",
@@ -133,7 +133,7 @@
   },
   "dashboard": {
     "title": "Dashboard",
-    "welcome": "Welcome to SitePulse",
+    "welcome": "Welcome to Obrify",
     "welcomeDesc": "Here you will have an overview of all your sites and activities.",
     "noOrganization": "You don't belong to any organization yet",
     "createFirstOrg": "Create First Organization",
@@ -774,7 +774,7 @@
     }
   },
   "onboarding": {
-    "welcomeTitle": "Welcome to SitePulse",
+    "welcomeTitle": "Welcome to Obrify",
     "welcomeDesc": "The smart construction inspection platform",
     "stat1Value": "94%",
     "stat1Label": "Less time on reports",
@@ -796,7 +796,7 @@
     "keyboardShortcutsDesc": "Be more productive",
     "version": "Version",
     "releaseNotes": "Release notes",
-    "discoverSitePulse": "Discover SitePulse"
+    "discoverSitePulse": "Discover Obrify"
   },
   "agent": {
     "greeting": "Hello! I'm Obrify, your inspection assistant. I can help you check sites, view non-conformities, generate reports and more. What do you need?",

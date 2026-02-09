@@ -35,7 +35,7 @@
     "welcomeBack": "Bienvenido de nuevo",
     "createAccount": "Crear nueva cuenta",
     "enterCredentials": "Introduzca sus credenciales para acceder a la plataforma",
-    "fillDataToStart": "Complete los datos para empezar a usar SitePulse",
+    "fillDataToStart": "Complete los datos para empezar a usar Obrify",
     "email": "Email",
     "emailPlaceholder": "su@email.com",
     "password": "Contraseña",
@@ -92,7 +92,7 @@
     "socialLoginError": "Error al iniciar sesión con Google"
   },
   "brand": {
-    "name": "SitePulse",
+    "name": "Obrify",
     "tagline": "Inspección Inteligente",
     "heroTitle": "Transforme la forma en que",
     "heroTitleHighlight": "inspecciona sus obras",
@@ -123,7 +123,7 @@
   },
   "dashboard": {
     "title": "Dashboard",
-    "welcome": "Bienvenido a SitePulse",
+    "welcome": "Bienvenido a Obrify",
     "welcomeDesc": "Aquí tendrá una visión general de todas sus obras y actividades.",
     "noOrganization": "Aún no pertenece a ninguna organización",
     "createFirstOrg": "Crear Primera Organización",

@@ -24,7 +24,7 @@ export function AppLayout() {
   });
 
   useEffect(() => {
-    const completed = localStorage.getItem('sitepulse_onboarding_completed');
+    const completed = localStorage.getItem('obrify_onboarding_completed');
     if (!completed) {
       setShowWelcome(true);
       setShowPulse(true);
@@ -40,7 +40,7 @@ export function AppLayout() {
 
   const handleExplore = () => {
     setShowWelcome(false);
-    localStorage.setItem('sitepulse_onboarding_completed', 'true');
+    localStorage.setItem('obrify_onboarding_completed', 'true');
     setShowPulse(false);
   };
 

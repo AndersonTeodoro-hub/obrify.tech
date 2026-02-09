@@ -40,7 +40,7 @@
     "welcomeBack": "Bem-vindo de volta",
     "createAccount": "Criar nova conta",
     "enterCredentials": "Introduza as suas credenciais para aceder à plataforma",
-    "fillDataToStart": "Preencha os dados para começar a usar o SitePulse",
+    "fillDataToStart": "Preencha os dados para começar a usar o Obrify",
     "email": "Email",
     "emailPlaceholder": "seu@email.com",
     "password": "Password",
@@ -101,7 +101,7 @@
     "socialLoginError": "Erro ao fazer login com Google"
   },
   "brand": {
-    "name": "SitePulse",
+    "name": "Obrify",
     "tagline": "Fiscalização Inteligente",
     "heroTitle": "Transforme a forma como",
     "heroTitleHighlight": "fiscaliza as suas obras",
@@ -133,7 +133,7 @@
   },
   "dashboard": {
     "title": "Dashboard",
-    "welcome": "Bem-vindo ao SitePulse",
+    "welcome": "Bem-vindo ao Obrify",
     "welcomeDesc": "Aqui terá uma visão geral de todas as suas obras e atividades.",
     "noOrganization": "Ainda não pertence a nenhuma organização",
     "createFirstOrg": "Criar Primeira Organização",
@@ -774,7 +774,7 @@
     }
   },
   "onboarding": {
-    "welcomeTitle": "Bem-vindo ao SitePulse",
+    "welcomeTitle": "Bem-vindo ao Obrify",
     "welcomeDesc": "A plataforma inteligente de fiscalização de obras",
     "stat1Value": "94%",
     "stat1Label": "Menos tempo em relatórios",
@@ -796,7 +796,7 @@
     "keyboardShortcutsDesc": "Seja mais produtivo",
     "version": "Versão",
     "releaseNotes": "Notas de versão",
-    "discoverSitePulse": "Descobrir SitePulse"
+    "discoverSitePulse": "Descobrir Obrify"
   },
   "agent": {
     "greeting": "Olá! Sou o Obrify, o teu assistente de fiscalização. Posso ajudar-te a consultar obras, ver não-conformidades, gerar relatórios e muito mais. O que precisas?",
