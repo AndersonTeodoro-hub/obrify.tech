@@ -8,6 +8,7 @@ import { lovable } from "@/integrations/lovable/index";
 import { Loader2, Eye, EyeOff } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { ShareButton } from "@/components/ShareButton";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -140,6 +141,7 @@ export default function AuthPage() {
       {/* Left - Form */}
       <div className="flex-1 lg:w-[40%] lg:max-w-none flex flex-col bg-white dark:bg-slate-950 relative">
         <div className="absolute top-4 right-4 flex gap-1 z-10">
+          <ShareButton />
           <LanguageSwitcher />
           <ThemeToggle />
         </div>

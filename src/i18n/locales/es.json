@@ -342,5 +342,11 @@
       "completed": "Completada",
       "failed": "Fallida"
     }
+  },
+  "share": {
+    "title": "Obrify - Inspección de Obras Inteligente",
+    "text": "Conoce Obrify - Plataforma de Inspección de Obras Inteligente",
+    "copied": "¡Enlace copiado al portapapeles!",
+    "button": "Compartir"
   }
 }

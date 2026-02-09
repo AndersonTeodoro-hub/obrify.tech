@@ -890,5 +890,11 @@
       "completed": "Completed",
       "failed": "Failed"
     }
+  },
+  "share": {
+    "title": "Obrify - Smart Construction Inspection",
+    "text": "Check out Obrify - Smart Construction Inspection Platform",
+    "copied": "Link copied to clipboard!",
+    "button": "Share"
   }
 }
