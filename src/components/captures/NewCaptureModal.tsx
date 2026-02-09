@@ -26,6 +26,8 @@ import {
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { DropZone } from './DropZone';
 import { FilePreviewGrid } from './FilePreviewGrid';
+import { SmartCaptureButtons } from './SmartCaptureButtons';
+import { useIsMobile } from '@/hooks/use-mobile';
 import type { CaptureCategory, CaptureSource, FileWithPreview } from '@/types/captures';
 
 interface NewCaptureModalProps {
@@ -45,6 +47,7 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const isMobile = useIsMobile();
 
   // Selection state
   const [selectedSite, setSelectedSite] = useState<string>('');
@@ -506,9 +509,20 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             </RadioGroup>
           </div>
 
+          {/* Smart capture buttons for mobile */}
+          {isMobile && (
+            <div className="space-y-2">
+              <Label>{t('captures.captureType')}</Label>
+              <SmartCaptureButtons
+                onFilesSelected={handleFilesSelected}
+                disabled={isUploading}
+              />
+            </div>
+          )}
+
           {/* Drop zone */}
           <div className="space-y-2">
-            <Label>{t('captures.upload')} *</Label>
+            <Label>{isMobile ? t('captures.upload') : `${t('captures.upload')} *`}</Label>
             <DropZone
               onFilesSelected={handleFilesSelected}
               maxFiles={MAX_FILES}

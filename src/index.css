@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* SitePulse Design System - Premium Slate & Copper */
+/* Obrify Design System - Premium Slate & Copper */
 
 @layer base {
   :root {
@@ -213,41 +213,41 @@
 }
 
 /* Driver.js Tour Popover Styling */
-.sitepulse-tour-popover {
+.obrify-tour-popover {
   background: hsl(var(--card)) !important;
   border-radius: 16px !important;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
   border: 1px solid hsl(var(--border)) !important;
 }
 
-.sitepulse-tour-popover .driver-popover-title {
+.obrify-tour-popover .driver-popover-title {
   font-size: 1.125rem !important;
   font-weight: 600 !important;
   color: hsl(var(--foreground)) !important;
 }
 
-.sitepulse-tour-popover .driver-popover-description {
+.obrify-tour-popover .driver-popover-description {
   color: hsl(var(--muted-foreground)) !important;
   line-height: 1.6 !important;
 }
 
-.sitepulse-tour-popover .driver-popover-progress-text {
+.obrify-tour-popover .driver-popover-progress-text {
   color: hsl(var(--muted-foreground)) !important;
   font-size: 0.75rem !important;
 }
 
-.sitepulse-tour-popover button {
+.obrify-tour-popover button {
   border-radius: 8px !important;
   font-weight: 500 !important;
   padding: 8px 16px !important;
 }
 
-.sitepulse-tour-popover .driver-popover-next-btn {
+.obrify-tour-popover .driver-popover-next-btn {
   background: hsl(var(--primary)) !important;
   color: hsl(var(--primary-foreground)) !important;
 }
 
-.sitepulse-tour-popover .driver-popover-prev-btn {
+.obrify-tour-popover .driver-popover-prev-btn {
   background: transparent !important;
   border: 1px solid hsl(var(--border)) !important;
   color: hsl(var(--foreground)) !important;
