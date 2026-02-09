@@ -37,10 +37,51 @@ export default function AuthPage() {
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotLoading, setForgotLoading] = useState(false);
 
-  const { signIn, signUp } = useAuth();
+  const { user, loading, signIn, signUp } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const { t } = useTranslation();
+
+  const isCustomDomain = !window.location.hostname.includes("lovable.app")
+    && !window.location.hostname.includes("lovableproject.com")
+    && window.location.hostname !== "localhost";
+
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (!loading && user) {
+      navigate("/app");
+    }
+  }, [user, loading, navigate]);
+
+  const handleGoogleSignIn = async () => {
+    try {
+      if (isCustomDomain) {
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider: "google",
+          options: {
+            redirectTo: `${window.location.origin}/app`,
+            skipBrowserRedirect: true,
+          },
+        });
+        if (error) throw error;
+        if (data?.url) {
+          const oauthUrl = new URL(data.url);
+          const allowedHosts = ["accounts.google.com"];
+          if (!allowedHosts.some(h => oauthUrl.hostname === h)) {
+            throw new Error("Invalid OAuth redirect URL");
+          }
+          window.location.href = data.url;
+        }
+      } else {
+        const { error } = await lovable.auth.signInWithOAuth("google", {
+          redirect_uri: window.location.origin,
+        });
+        if (error) throw error;
+      }
+    } catch (error: any) {
+      toast({ title: t("auth.socialLoginError"), description: error.message, variant: "destructive" });
+    }
+  };
 
   // Remember me: load saved email
   useEffect(() => {
@@ -218,14 +259,7 @@ export default function AuthPage() {
 
                 <button
                   type="button"
-                  onClick={async () => {
-                    const { error } = await lovable.auth.signInWithOAuth("google", {
-                      redirect_uri: window.location.origin,
-                    });
-                    if (error) {
-                      toast({ title: t("auth.socialLoginError"), description: error.message, variant: "destructive" });
-                    }
-                  }}
+                  onClick={handleGoogleSignIn}
                   className="w-full h-11 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-foreground font-medium flex items-center justify-center gap-3 hover:shadow-md transition-all duration-200"
                 >
                   <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
@@ -280,14 +314,7 @@ export default function AuthPage() {
 
                 <button
                   type="button"
-                  onClick={async () => {
-                    const { error } = await lovable.auth.signInWithOAuth("google", {
-                      redirect_uri: window.location.origin,
-                    });
-                    if (error) {
-                      toast({ title: t("auth.socialLoginError"), description: error.message, variant: "destructive" });
-                    }
-                  }}
+                  onClick={handleGoogleSignIn}
                   className="w-full h-11 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-foreground font-medium flex items-center justify-center gap-3 hover:shadow-md transition-all duration-200"
                 >
                   <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
