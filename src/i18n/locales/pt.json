@@ -890,5 +890,11 @@
       "completed": "Concluída",
       "failed": "Falhou"
     }
+  },
+  "share": {
+    "title": "Obrify - Fiscalização de Obras Inteligente",
+    "text": "Conhece o Obrify - Plataforma de Fiscalização de Obras Inteligente",
+    "copied": "Link copiado para a área de transferência!",
+    "button": "Partilhar"
   }
 }

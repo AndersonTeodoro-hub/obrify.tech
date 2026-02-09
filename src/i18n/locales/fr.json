@@ -342,5 +342,11 @@
       "completed": "Terminée",
       "failed": "Échouée"
     }
+  },
+  "share": {
+    "title": "Obrify - Inspection de Chantiers Intelligente",
+    "text": "Découvrez Obrify - Plateforme d'Inspection de Chantiers Intelligente",
+    "copied": "Lien copié dans le presse-papiers !",
+    "button": "Partager"
   }
 }
