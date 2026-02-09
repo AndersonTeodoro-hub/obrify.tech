@@ -1,10 +1,10 @@
 import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router-dom';
-import { Search } from 'lucide-react';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 import { AlertBell } from '@/components/layout/AlertBell';
+import { GlobalSearch } from '@/components/layout/GlobalSearch';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -91,16 +91,7 @@ export function AppHeader() {
       </div>
 
       {/* Search Bar */}
-      <div className="hidden md:flex items-center flex-1 max-w-md mx-8">
-        <div className="relative w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder={t('common.search') || 'Pesquisar...'}
-            className="w-full h-9 pl-10 pr-4 rounded-full bg-slate-100 dark:bg-slate-900 border-0 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-accent-500 transition-all"
-          />
-        </div>
-      </div>
+      <GlobalSearch />
 
       <div className="flex items-center gap-1">
         <AlertBell />

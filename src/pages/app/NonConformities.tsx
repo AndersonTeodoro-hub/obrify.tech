@@ -220,6 +220,7 @@ export default function NonConformities() {
                 <SelectItem value="critical">{t('nc.severityCritical')}</SelectItem>
                 <SelectItem value="high">{t('nc.severityHigh')}</SelectItem>
                 <SelectItem value="medium">{t('nc.severityMedium')}</SelectItem>
+                <SelectItem value="low">{t('nc.severityLow')}</SelectItem>
               </SelectContent>
             </Select>
 
