@@ -17,6 +17,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
+import { DeleteConfirmDialog } from '@/components/sites/DeleteConfirmDialog';
 
 export default function Organizations() {
   const { t } = useTranslation();
@@ -29,6 +30,7 @@ export default function Organizations() {
   const [editingOrg, setEditingOrg] = useState<{ id: string; name: string; description?: string | null } | null>(null);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [deletingOrgId, setDeletingOrgId] = useState<string | null>(null);
 
   const { data: memberships, isLoading } = useQuery({
     queryKey: ['user-memberships', user?.id],
@@ -184,7 +186,7 @@ export default function Organizations() {
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         className="text-destructive"
-                        onClick={() => deleteOrgMutation.mutate(membership.org_id)}
+                        onClick={() => setDeletingOrgId(membership.org_id)}
                       >
                         <Trash2 className="w-4 h-4 mr-2" />
                         {t('common.delete')}
@@ -269,6 +271,16 @@ export default function Organizations() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation */}
+      <DeleteConfirmDialog
+        open={!!deletingOrgId}
+        onOpenChange={(open) => !open && setDeletingOrgId(null)}
+        title={t('organizations.deleteConfirmTitle', 'Eliminar organização?')}
+        description={t('organizations.deleteConfirmDesc', 'Esta ação é irreversível. Todos os dados, obras e membros associados serão eliminados permanentemente.')}
+        onConfirm={() => { if (deletingOrgId) { deleteOrgMutation.mutate(deletingOrgId); setDeletingOrgId(null); } }}
+        isPending={deleteOrgMutation.isPending}
+      />
     </div>
   );
 }

@@ -41,14 +41,32 @@ export default function Dashboard() {
   const hasOrganizations = memberships && memberships.length > 0;
   const orgIds = memberships?.map(m => m.org_id) || [];
 
-  const { data: stats } = useQuery({
-    queryKey: ['dashboard-stats', orgIds],
+  // Get site IDs for org-scoped queries
+  const { data: siteIds } = useQuery({
+    queryKey: ['site-ids-for-stats', orgIds],
     queryFn: async () => {
+      const { data, error } = await supabase.from('sites').select('id').in('org_id', orgIds);
+      if (error) throw error;
+      return data?.map(s => s.id) || [];
+    },
+    enabled: hasOrganizations,
+  });
+
+  const { data: stats } = useQuery({
+    queryKey: ['dashboard-stats', orgIds, siteIds],
+    queryFn: async () => {
+      const ids = siteIds || [];
       const [sitesRes, capturesRes, inspectionsRes, nonconformitiesRes] = await Promise.all([
         supabase.from('sites').select('id', { count: 'exact' }).in('org_id', orgIds),
-        supabase.from('captures').select('id', { count: 'exact' }),
-        supabase.from('inspections').select('id', { count: 'exact' }),
-        supabase.from('nonconformities').select('id', { count: 'exact' }),
+        ids.length > 0
+          ? supabase.from('captures').select('id, capture_points!inner(area_id, areas!inner(floor_id, floors!inner(site_id)))', { count: 'exact' }).in('capture_points.areas.floors.site_id', ids)
+          : Promise.resolve({ count: 0 }),
+        ids.length > 0
+          ? supabase.from('inspections').select('id', { count: 'exact' }).in('site_id', ids)
+          : Promise.resolve({ count: 0 }),
+        ids.length > 0
+          ? supabase.from('nonconformities').select('id', { count: 'exact' }).in('site_id', ids)
+          : Promise.resolve({ count: 0 }),
       ]);
 
       return {
@@ -58,7 +76,7 @@ export default function Dashboard() {
         nonconformities: nonconformitiesRes.count || 0,
       };
     },
-    enabled: hasOrganizations,
+    enabled: hasOrganizations && !!siteIds,
   });
 
   const { data: recentSites } = useQuery({

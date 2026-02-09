@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, HardHat, MapPin, MoreVertical, Pencil, Trash2, Upload } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { DeleteConfirmDialog } from '@/components/sites/DeleteConfirmDialog';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { usePermissions } from '@/hooks/use-permissions';
@@ -39,6 +40,7 @@ export default function Sites() {
   const [newSiteImage, setNewSiteImage] = useState<File | null>(null);
   const [newSiteImagePreview, setNewSiteImagePreview] = useState<string | null>(null);
   const [editingSite, setEditingSite] = useState<any>(null);
+  const [deletingSiteId, setDeletingSiteId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: memberships } = useQuery({
@@ -186,7 +188,7 @@ export default function Sites() {
                         </DropdownMenuItem>
                       )}
                       {canDeleteSite && (
-                        <DropdownMenuItem className="text-destructive" onClick={(e) => { e.stopPropagation(); deleteSiteMutation.mutate(site.id); }}>
+                        <DropdownMenuItem className="text-destructive" onClick={(e) => { e.stopPropagation(); setDeletingSiteId(site.id); }}>
                           <Trash2 className="w-4 h-4 mr-2" />{t('common.delete')}
                         </DropdownMenuItem>
                       )}
@@ -286,6 +288,16 @@ export default function Sites() {
           onSuccess={() => { queryClient.invalidateQueries({ queryKey: ['sites'] }); setEditingSite(null); }}
         />
       )}
+
+      {/* Delete Confirmation */}
+      <DeleteConfirmDialog
+        open={!!deletingSiteId}
+        onOpenChange={(open) => !open && setDeletingSiteId(null)}
+        title={t('sites.deleteConfirmTitle', 'Eliminar obra?')}
+        description={t('sites.deleteConfirmDesc', 'Esta ação é irreversível. Todos os dados associados a esta obra serão eliminados permanentemente.')}
+        onConfirm={() => { if (deletingSiteId) { deleteSiteMutation.mutate(deletingSiteId); setDeletingSiteId(null); } }}
+        isPending={deleteSiteMutation.isPending}
+      />
     </div>
   );
 }
