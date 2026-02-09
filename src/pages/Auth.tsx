@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
-import { Activity, Loader2, Eye, EyeOff } from "lucide-react";
+import { Loader2, Eye, EyeOff } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -148,9 +148,7 @@ export default function AuthPage() {
           <div className="w-full max-w-[400px]">
             {/* Logo */}
             <div className="flex items-center gap-3 mb-10">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 dark:from-slate-600 dark:to-slate-800 flex items-center justify-center shadow-lg">
-                <Activity className="w-5 h-5 text-white" />
-              </div>
+              <img src="/images/obrify-logo.jpeg" alt="Obrify" className="w-10 h-10 rounded-xl shadow-lg object-cover" />
               <span className="text-xl font-bold text-foreground">Obrify</span>
             </div>
 
