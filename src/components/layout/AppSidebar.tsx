@@ -60,9 +60,7 @@ export function AppSidebar() {
     <Sidebar collapsible="icon" className="border-r border-border/50 transition-all duration-300" data-tour="sidebar">
       <SidebarHeader className="border-b border-border/50 p-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center shadow-sm flex-shrink-0">
-            <span className="text-white font-bold text-lg">S</span>
-          </div>
+          <img src="/images/obrify-logo.jpeg" alt="Obrify" className="w-10 h-10 rounded-xl shadow-sm flex-shrink-0 object-cover" />
           {!isCollapsed && (
             <div className="flex flex-col">
               <span className="font-bold text-foreground">{t('brand.name')}</span>
