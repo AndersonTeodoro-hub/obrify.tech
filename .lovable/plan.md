@@ -1,40 +1,48 @@
 
-# Adicionar Ecra de Identificacao da Obra ao IncompatiCheck
+# Correcao UX + Responsividade do IncompatiCheck
 
 ## Resumo
 
-Adicionar um ecra inicial de setup ("Identificacao do Pedido de Analise") que recolhe nome da obra, cidade e fiscal antes de mostrar o modulo principal. Os dados ficam visiveis no header e sao incluidos nas mensagens de partilha.
+Remover o ecra bloqueante `ObraSetupScreen`, substituindo-o por um modal (`ObraRegistModal`) acessivel via botao no header. Adicionar responsividade ao layout para ecras menores.
 
-## Alteracoes
+## Alteracoes no ficheiro `src/pages/app/IncompatiCheck.tsx`
 
-### 1. Base de dados -- 3 novas colunas
+### 1. Remover ObraSetupScreen
 
-Adicionar via migracao SQL a `incompaticheck_analyses`:
-- `obra_nome TEXT`
-- `obra_cidade TEXT`  
-- `obra_fiscal TEXT`
+Apagar o componente `ObraSetupScreen` (linhas 424-476) e o bloco condicional `if (showObraSetup)` (linhas 514-516), e o state `showObraSetup` (linha 480).
 
-### 2. Ficheiro `src/pages/app/IncompatiCheck.tsx`
+### 2. Adicionar ObraRegistModal
 
-**Novos estados** (linhas 423-430): adicionar `obraInfo` e `showObraSetup`.
+Novo componente antes do `export default`, no mesmo local onde estava o `ObraSetupScreen`. Modal overlay com 3 campos (Nome da Obra obrigatorio, Cidade, Fiscal), botoes Cancelar e "Registar e Iniciar".
 
-**Novo componente** `ObraSetupScreen` antes do `export default function IncompatiCheck()` (antes da linha 422):
-- Ecra fullscreen com fundo escuro e grid decorativo
-- 3 campos: Nome da Obra (obrigatorio), Cidade, Fiscal
-- Botao "Iniciar Analise de Incompatibilidades" (desactivado sem nome)
-- Nota informativa sobre uso dos dados nos relatorios
+### 3. Adicionar state `showObraModal`
 
-**Condicao no return** do `IncompatiCheck`: se `showObraSetup` e true, renderiza `ObraSetupScreen` em vez do layout principal.
+Junto ao state `obraInfo` existente (linha 479), adicionar:
+- `const [showObraModal, setShowObraModal] = useState(false);`
 
-**Header**: depois do badge "Modulo v2.4", mostrar `obraInfo` (nome, cidade, fiscal) separado por borda vertical.
+### 4. Alterar Header
 
-**ShareModal**: receber `obraInfo` como prop e incluir os dados nos textos de email e WhatsApp:
-- Subject email: `Relatorio de Incompatibilidades -- {nome da obra}`
-- Body WhatsApp: inclui obra, cidade e fiscal
+Na zona dos botoes a direita (linha 536-539):
+- Adicionar botoes mobile (📁 e 🏗️) visiveis apenas em `lg:hidden`
+- Adicionar botao "Registar Analise" (gradiente laranja) ou info da obra com botao de edicao, antes dos botoes Upload e Partilhar
 
-### Ficheiros modificados
+### 5. Adicionar modal no return
+
+Junto aos outros modais (linha 648-649), adicionar `ObraRegistModal`.
+
+### 6. Responsividade
+
+- **Stats grid** (linha 585): `repeat(4, 1fr)` para mobile usa classes Tailwind `grid-cols-2 sm:grid-cols-4` em vez de inline style
+- **Sidebar** (linha 544): esconder em `max-lg:hidden`
+- **Agent Panel**: esconder em `max-lg:hidden`
+- **Header**: ajustar padding e gap para mobile
+
+### 7. Exportar ObraRegistModal
+
+Adicionar ao export na linha 660.
+
+## Ficheiros modificados
 
 | Ficheiro | Alteracao |
 |---|---|
-| `src/pages/app/IncompatiCheck.tsx` | Adicionar ObraSetupScreen, estados, header info, ShareModal com obraInfo |
-| Migracao SQL | 3 colunas em incompaticheck_analyses |
+| `src/pages/app/IncompatiCheck.tsx` | Remover ObraSetupScreen, adicionar ObraRegistModal, responsividade, botao header |
