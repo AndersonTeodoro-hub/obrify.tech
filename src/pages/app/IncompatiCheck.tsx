@@ -40,6 +40,15 @@ interface ChatMessage {
   content: string;
 }
 
+interface Obra {
+  id: string;
+  nome: string;
+  cidade: string;
+  fiscal: string;
+  created_at: string;
+  project_count: number;
+}
+
 const MOCK_PROJECTS: Project[] = [
   { id: "1", name: "Fundações — Bloco A", type: "fundacoes", format: "dwg", file_size: 2400000, created_at: "2026-02-10" },
   { id: "2", name: "Rede Hidrossanitária", type: "rede_enterrada", format: "pdf", file_size: 1800000, created_at: "2026-02-10" },
@@ -222,9 +231,9 @@ function UploadModal({ isOpen, onClose, onUpload }: { isOpen: boolean; onClose: 
   if (!isOpen) return null;
 
   const handleFile = (file: File) => {
-    if (file.size > FILE_SIZE_LIMIT) { alert("Ficheiro excede 500MB."); return; }
+    if (file.size > FILE_SIZE_LIMIT) { alert("Ficheiro excede 500MB. Para projetos maiores, divida em múltiplos ZIPs."); return; }
     const ext = file.name.split(".").pop()?.toLowerCase() || "";
-    if (!["pdf", "dwg", "dwf", "ifc"].includes(ext)) { alert("Formato não suportado."); return; }
+    if (!["pdf", "dwg", "dwf", "ifc", "zip", "rar", "7z"].includes(ext)) { alert("Formato não suportado."); return; }
     onUpload({ name: file.name, type: selectedType, format: ext, file_size: file.size, file });
     onClose();
   };
@@ -245,7 +254,7 @@ function UploadModal({ isOpen, onClose, onUpload }: { isOpen: boolean; onClose: 
         }}
       >
         <h3 style={{ color: "#fff", fontSize: "18px", fontWeight: 700, marginBottom: "8px" }}>Upload de Projeto</h3>
-        <p style={{ color: "#888", fontSize: "13px", marginBottom: "20px" }}>Carregue o ficheiro. Limite: 500MB. Formatos: PDF, DWG, DWF, IFC.</p>
+        <p style={{ color: "#888", fontSize: "13px", marginBottom: "20px" }}>Carregue o ficheiro. Limite: 500MB. Formatos: PDF · DWG · DWF · IFC · ZIP.</p>
 
         <div
           onClick={() => fileRef.current?.click()}
@@ -261,8 +270,14 @@ function UploadModal({ isOpen, onClose, onUpload }: { isOpen: boolean; onClose: 
         >
           <div style={{ fontSize: "32px", marginBottom: "8px" }}>📁</div>
           <div style={{ color: "#ccc", fontSize: "14px", fontWeight: 600 }}>Arraste o ficheiro para aqui</div>
-          <div style={{ color: "#666", fontSize: "12px", marginTop: "4px" }}>PDF, DWG, DWF, IFC — máx. 500MB</div>
-          <input ref={fileRef} type="file" accept=".pdf,.dwg,.dwf,.ifc" style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])} />
+          <div style={{ color: "#666", fontSize: "12px", marginTop: "4px" }}>PDF · DWG · DWF · IFC · ZIP — máx. 500MB</div>
+          <input ref={fileRef} type="file" accept=".pdf,.dwg,.dwf,.ifc,.zip,.rar,.7z" style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])} />
+        </div>
+
+        <div className="rounded-xl border border-white/5 p-3 mb-4" style={{ background: "rgba(255,255,255,0.02)" }}>
+          <div className="text-[10px] text-gray-500 font-mono leading-relaxed">
+            📦 <strong className="text-gray-300">Ficheiros ZIP:</strong> O agente extrai automaticamente todos os projetos contidos no ZIP e identifica cada ficheiro (PDF, DWG, DWF, IFC). Ideal para pastas com múltiplas plantas.
+          </div>
         </div>
 
         <div style={{ color: "#aaa", fontSize: "13px", fontWeight: 600, marginBottom: "10px" }}>Tipo de projeto</div>
@@ -523,9 +538,93 @@ function ProjectPreviewModal({ project, onClose, onDelete }: { project: Project 
   );
 }
 
+function ObraListModal({ isOpen, onClose, obras, obraAtiva, onSelect, onDelete, onNew }: {
+  isOpen: boolean; onClose: () => void; obras: Obra[]; obraAtiva: Obra | null;
+  onSelect: (obra: Obra) => void; onDelete: (id: string) => void; onNew: () => void;
+}) {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }} onClick={onClose}>
+      <div className="rounded-2xl border border-white/5 p-6 w-full max-w-lg max-h-[80vh] flex flex-col" style={{ background: "#181c26" }} onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-white">Obras Registadas</h2>
+            <p className="text-xs text-gray-400 mt-0.5">{obras.length} obra{obras.length !== 1 ? "s" : ""} · Selecione para carregar projetos</p>
+          </div>
+          <button onClick={onNew}
+            className="px-3 py-2 rounded-lg text-xs font-semibold text-white transition-all hover:-translate-y-0.5"
+            style={{ background: "linear-gradient(135deg, #ff6b35, #ff8c5a)" }}>
+            + Nova Obra
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto space-y-2 mb-4 pr-1" style={{ scrollbarWidth: "thin" }}>
+          {obras.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="text-3xl mb-3">🏗️</div>
+              <div className="text-sm text-gray-400 mb-1">Nenhuma obra registada</div>
+              <div className="text-xs text-gray-500">Clique em "Nova Obra" para começar</div>
+            </div>
+          ) : (
+            obras.map(obra => {
+              const isActive = obraAtiva?.id === obra.id;
+              return (
+                <div key={obra.id}
+                  className={`group relative rounded-xl border p-4 cursor-pointer transition-all ${isActive ? "border-orange-500/30 bg-orange-500/5" : "border-white/5 hover:border-white/10"}`}
+                  style={{ background: isActive ? "rgba(255,107,53,0.05)" : "#12151c" }}
+                  onClick={() => { onSelect(obra); onClose(); }}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="text-sm font-semibold text-white truncate">{obra.nome}</h3>
+                        {isActive && (
+                          <span className="text-[8px] px-1.5 py-0.5 rounded-full font-mono uppercase tracking-wider" style={{ background: "rgba(255,107,53,0.15)", color: "#ff6b35", border: "1px solid rgba(255,107,53,0.25)" }}>
+                            Ativa
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                        {obra.cidade && <span>📍 {obra.cidade}</span>}
+                        {obra.fiscal && <span>👷 {obra.fiscal}</span>}
+                      </div>
+                      <div className="flex items-center gap-3 mt-2 text-[10px] text-gray-500">
+                        <span>📁 {obra.project_count} projeto{obra.project_count !== 1 ? "s" : ""}</span>
+                        <span>📅 {obra.created_at}</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (window.confirm(`Remover a obra "${obra.nome}" e todos os seus projetos associados?`)) {
+                          onDelete(obra.id);
+                        }
+                      }}
+                      className="opacity-0 group-hover:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-[11px] border border-white/5 text-gray-500 hover:text-red-400 hover:border-red-500/30 transition-all"
+                      style={{ background: "rgba(255,255,255,0.03)" }}
+                      title="Remover obra"
+                    >
+                      🗑
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+        <button onClick={onClose} className="w-full px-4 py-2.5 rounded-xl border border-white/5 text-gray-400 text-xs font-semibold hover:border-white/10 transition-all">
+          Fechar
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function IncompatiCheck() {
-  const [obraInfo, setObraInfo] = useState<{ nome: string; cidade: string; fiscal: string } | null>(null);
+  const [obras, setObras] = useState<Obra[]>([]);
+  const [obraAtiva, setObraAtiva] = useState<Obra | null>(null);
   const [showObraModal, setShowObraModal] = useState(false);
+  const [showObraList, setShowObraList] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [previewProject, setPreviewProject] = useState<Project | null>(null);
   const [projects, setProjects] = useState<Project[]>(MOCK_PROJECTS);
   const [filter, setFilter] = useState("all");
@@ -547,10 +646,58 @@ export default function IncompatiCheck() {
   }, []);
 
   const handleUpload = useCallback((project: any) => {
-    setProjects(prev => [...prev, { id: String(Date.now()), name: project.name, type: project.type, format: project.format, file_size: project.file_size, created_at: new Date().toISOString().slice(0, 10) }]);
-    addMessage(`Projeto "${project.name}" carregado. A analisar...`, "agent");
-    setTimeout(() => addMessage("Análise concluída. **2 novas interferências** detectadas. Deseja detalhes?", "agent"), 2000);
-  }, [addMessage]);
+    const isZip = ["zip", "rar", "7z"].includes(project.format);
+    
+    if (isZip) {
+      setUploadProgress("A extrair ficheiros do ZIP...");
+      addMessage(`A processar ficheiro ZIP "${project.name}"... A extrair e identificar projetos contidos.`, "agent");
+      
+      setTimeout(() => {
+        const extractedFiles = [
+          { name: project.name.replace(/\.(zip|rar|7z)$/i, "") + " - Planta 01.pdf", format: "pdf", file_size: Math.floor(project.file_size * 0.15) },
+          { name: project.name.replace(/\.(zip|rar|7z)$/i, "") + " - Planta 02.pdf", format: "pdf", file_size: Math.floor(project.file_size * 0.12) },
+          { name: project.name.replace(/\.(zip|rar|7z)$/i, "") + " - Planta 03.dwg", format: "dwg", file_size: Math.floor(project.file_size * 0.2) },
+          { name: project.name.replace(/\.(zip|rar|7z)$/i, "") + " - Planta 04.dwg", format: "dwg", file_size: Math.floor(project.file_size * 0.18) },
+          { name: project.name.replace(/\.(zip|rar|7z)$/i, "") + " - Planta 05.pdf", format: "pdf", file_size: Math.floor(project.file_size * 0.1) },
+        ];
+        
+        const newProjects = extractedFiles.map((f, i) => ({
+          id: String(Date.now() + i),
+          name: f.name,
+          type: project.type,
+          format: f.format,
+          file_size: f.file_size,
+          created_at: new Date().toISOString().slice(0, 10),
+        }));
+        
+        setProjects(prev => [...prev, ...newProjects]);
+        setUploadProgress(null);
+        
+        if (obraAtiva) {
+          setObras(prev => prev.map(o => o.id === obraAtiva.id ? { ...o, project_count: o.project_count + newProjects.length } : o));
+        }
+        
+        addMessage(`ZIP extraído com sucesso! **${newProjects.length} projetos** identificados e carregados:\n\n${newProjects.map((p, i) => `${i + 1}. ${p.name} (${p.format.toUpperCase()}, ${p.file_size >= 1048576 ? (p.file_size / 1048576).toFixed(1) + " MB" : (p.file_size / 1024).toFixed(0) + " KB"})`).join("\n")}\n\nTodos associados à disciplina **${PROJECT_TYPES[project.type]?.label}**. Pode alterar individualmente se necessário. Deseja executar a análise?`, "agent");
+      }, 2500);
+    } else {
+      const newProject = {
+        id: String(Date.now()),
+        name: project.name,
+        type: project.type,
+        format: project.format,
+        file_size: project.file_size,
+        created_at: new Date().toISOString().slice(0, 10),
+      };
+      setProjects(prev => [...prev, newProject]);
+      
+      if (obraAtiva) {
+        setObras(prev => prev.map(o => o.id === obraAtiva.id ? { ...o, project_count: o.project_count + 1 } : o));
+      }
+      
+      addMessage(`Projeto "${project.name}" carregado. A analisar...`, "agent");
+      setTimeout(() => addMessage("Análise concluída. **2 novas interferências** detectadas. Deseja detalhes?", "agent"), 2000);
+    }
+  }, [addMessage, obraAtiva]);
 
   const runAnalysis = useCallback(() => {
     setIsAnalyzing(true);
@@ -571,11 +718,11 @@ export default function IncompatiCheck() {
             <span style={{ color: "#fff", fontWeight: 700, fontSize: "15px" }}>Obrify IncompatiCheck</span>
             <span style={{ color: "#555", fontSize: "10px", marginLeft: "8px" }}>Módulo v2.4</span>
           </div>
-          {obraInfo && (
+          {obraAtiva && (
             <div className="flex items-center gap-2 ml-4 pl-4 border-l border-white/10">
-              <span className="text-xs text-gray-400">{obraInfo.nome}</span>
-              {obraInfo.cidade && <span className="text-[10px] text-gray-500">· {obraInfo.cidade}</span>}
-              {obraInfo.fiscal && <span className="text-[10px] text-gray-500">· {obraInfo.fiscal}</span>}
+              <span className="text-xs text-gray-400">{obraAtiva.nome}</span>
+              {obraAtiva.cidade && <span className="text-[10px] text-gray-500">· {obraAtiva.cidade}</span>}
+              {obraAtiva.fiscal && <span className="text-[10px] text-gray-500">· {obraAtiva.fiscal}</span>}
             </div>
           )}
         </div>
@@ -584,17 +731,19 @@ export default function IncompatiCheck() {
             <button className="px-3 py-2 rounded-lg border border-white/5 text-gray-400 text-xs" style={{ background: "#181c26" }}>📁</button>
             <button className="px-3 py-2 rounded-lg border border-white/5 text-gray-400 text-xs" style={{ background: "#181c26" }}>🏗️</button>
           </div>
-          {obraInfo ? (
-            <div className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-lg border border-orange-500/20" style={{ background: "rgba(255,107,53,0.05)" }}>
-              <span className="text-xs text-orange-400 font-semibold">{obraInfo.nome}</span>
-              {obraInfo.cidade && <span className="text-[10px] text-gray-500">· {obraInfo.cidade}</span>}
-              <button onClick={() => setShowObraModal(true)} className="text-[10px] text-gray-500 hover:text-orange-400 ml-1 transition-all">✏️</button>
-            </div>
+          {obraAtiva ? (
+            <button onClick={() => setShowObraList(true)}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-orange-500/20 hover:border-orange-500/40 transition-all"
+              style={{ background: "rgba(255,107,53,0.05)" }}>
+              <span className="text-xs text-orange-400 font-semibold truncate max-w-[180px]">{obraAtiva.nome}</span>
+              {obraAtiva.cidade && <span className="hidden sm:inline text-[10px] text-gray-500">· {obraAtiva.cidade}</span>}
+              <span className="text-[10px] text-gray-500">▼</span>
+            </button>
           ) : (
             <button onClick={() => setShowObraModal(true)}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-xs font-semibold transition-all hover:-translate-y-0.5"
               style={{ background: "linear-gradient(135deg, #ff6b35, #ff8c5a)", boxShadow: "0 2px 12px rgba(255,107,53,0.3)" }}>
-              📋 Registar Análise
+              📋 Registar Obra
             </button>
           )}
           <button onClick={() => setShowUpload(true)} className="hidden sm:flex" style={{ display: undefined, alignItems: "center", gap: "6px", padding: "8px 16px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.05)", background: "#181c26", color: "#888", fontSize: "12px", cursor: "pointer" }}>📁 Upload</button>
@@ -645,10 +794,18 @@ export default function IncompatiCheck() {
               );
             })}
           </div>
+          {uploadProgress && (
+            <div className="rounded-xl border border-orange-500/20 p-3 mb-3" style={{ background: "rgba(255,107,53,0.05)" }}>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 border-2 border-orange-500/30 border-t-orange-500 rounded-full animate-spin" />
+                <span className="text-[11px] text-orange-400">{uploadProgress}</span>
+              </div>
+            </div>
+          )}
           <button onClick={() => setShowUpload(true)} style={{ width: "100%", border: "2px dashed rgba(255,165,0,0.15)", borderRadius: "12px", padding: "24px", textAlign: "center", background: "transparent", cursor: "pointer", color: "#888" }}>
             <div style={{ fontSize: "24px", marginBottom: "4px" }}>📁</div>
             <div style={{ fontSize: "12px", fontWeight: 600 }}>Carregar Projeto</div>
-            <div style={{ fontSize: "10px", color: "#555", marginTop: "2px" }}>PDF · DWG · DWF · IFC</div>
+            <div style={{ fontSize: "10px", color: "#555", marginTop: "2px" }}>PDF · DWG · DWF · IFC · ZIP</div>
           </button>
         </div>
 
@@ -738,8 +895,38 @@ export default function IncompatiCheck() {
       </div>
 
       <UploadModal isOpen={showUpload} onClose={() => setShowUpload(false)} onUpload={handleUpload} />
-      <ShareModal isOpen={showShare} onClose={() => setShowShare(false)} obraInfo={obraInfo} />
-      <ObraRegistModal isOpen={showObraModal} onClose={() => setShowObraModal(false)} onConfirm={(info) => { setObraInfo(info); setShowObraModal(false); }} />
+      <ShareModal isOpen={showShare} onClose={() => setShowShare(false)} obraInfo={obraAtiva} />
+      <ObraRegistModal isOpen={showObraModal} onClose={() => setShowObraModal(false)} onConfirm={(info) => {
+        const novaObra: Obra = {
+          id: String(Date.now()),
+          nome: info.nome,
+          cidade: info.cidade,
+          fiscal: info.fiscal,
+          created_at: new Date().toISOString().slice(0, 10),
+          project_count: 0,
+        };
+        setObras(prev => [...prev, novaObra]);
+        setObraAtiva(novaObra);
+        setShowObraModal(false);
+        addMessage(`Obra **"${info.nome}"** registada com sucesso.${info.cidade ? ` Localização: ${info.cidade}.` : ""}${info.fiscal ? ` Fiscal: ${info.fiscal}.` : ""} Pode agora carregar os projetos para análise.`, "agent");
+      }} />
+      <ObraListModal
+        isOpen={showObraList}
+        onClose={() => setShowObraList(false)}
+        obras={obras}
+        obraAtiva={obraAtiva}
+        onSelect={(obra) => {
+          setObraAtiva(obra);
+          addMessage(`Obra **"${obra.nome}"** selecionada. ${obra.project_count} projetos carregados. Pode adicionar mais projetos ou executar a análise.`, "agent");
+        }}
+        onDelete={(id) => {
+          const removed = obras.find(o => o.id === id);
+          setObras(prev => prev.filter(o => o.id !== id));
+          if (obraAtiva?.id === id) setObraAtiva(null);
+          if (removed) addMessage(`Obra "${removed.nome}" removida com todos os projetos associados.`, "agent");
+        }}
+        onNew={() => { setShowObraList(false); setShowObraModal(true); }}
+      />
       <ProjectPreviewModal
         project={previewProject}
         onClose={() => setPreviewProject(null)}
@@ -759,5 +946,5 @@ export default function IncompatiCheck() {
   );
 }
 
-export { MOCK_PROJECTS, MOCK_INCOMPATIBILITIES, SEVERITY_CONFIG, PROJECT_TYPES, FILE_SIZE_LIMIT, StatCard, CrossSectionSVG, ProjectTypeBadge, UploadModal, ShareModal, ObraRegistModal, ProjectPreviewModal };
-export type { Project, Incompatibility, ChatMessage };
+export { MOCK_PROJECTS, MOCK_INCOMPATIBILITIES, SEVERITY_CONFIG, PROJECT_TYPES, FILE_SIZE_LIMIT, StatCard, CrossSectionSVG, ProjectTypeBadge, UploadModal, ShareModal, ObraRegistModal, ProjectPreviewModal, ObraListModal };
+export type { Project, Incompatibility, ChatMessage, Obra };
