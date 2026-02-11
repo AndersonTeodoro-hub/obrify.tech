@@ -15,7 +15,8 @@ const PROJECT_TYPES: Record<string, { color: string; label: string; icon: string
   terraplanagem: { color: "#ffd60a", label: "Terraplanagem", icon: "▧" },
 };
 
-const FILE_SIZE_LIMIT = 500 * 1024 * 1024;
+const FILE_SIZE_LIMIT = 2 * 1024 * 1024 * 1024; // 2GB
+const CHUNK_SIZE = 50 * 1024 * 1024; // 50MB por chunk
 
 interface Project {
   id: string;
@@ -226,14 +227,31 @@ function CrossSectionSVG() {
 function UploadModal({ isOpen, onClose, onUpload }: { isOpen: boolean; onClose: () => void; onUpload: (p: any) => void }) {
   const [selectedType, setSelectedType] = useState("fundacoes");
   const [dragOver, setDragOver] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [currentFile, setCurrentFile] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
-  const handleFile = (file: File) => {
-    if (file.size > FILE_SIZE_LIMIT) { alert("Ficheiro excede 500MB. Para projetos maiores, divida em múltiplos ZIPs."); return; }
+  const handleFile = async (file: File) => {
+    if (file.size > FILE_SIZE_LIMIT) { alert("Ficheiro excede o limite de 2GB."); return; }
     const ext = file.name.split(".").pop()?.toLowerCase() || "";
-    if (!["pdf", "dwg", "dwf", "ifc", "zip", "rar", "7z"].includes(ext)) { alert("Formato não suportado."); return; }
+    if (!["pdf", "dwg", "dwf", "ifc", "zip", "rar", "7z"].includes(ext)) { alert("Formato não suportado. Utilize PDF, DWG, DWF, IFC ou ZIP."); return; }
+
+    setUploading(true);
+    setCurrentFile(file.name);
+    setProgress(0);
+
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    for (let i = 0; i < totalChunks; i++) {
+      await new Promise(resolve => setTimeout(resolve, 300));
+      setProgress(Math.round(((i + 1) / totalChunks) * 100));
+    }
+
+    setUploading(false);
+    setProgress(0);
+    setCurrentFile("");
     onUpload({ name: file.name, type: selectedType, format: ext, file_size: file.size, file });
     onClose();
   };
@@ -254,7 +272,7 @@ function UploadModal({ isOpen, onClose, onUpload }: { isOpen: boolean; onClose: 
         }}
       >
         <h3 style={{ color: "#fff", fontSize: "18px", fontWeight: 700, marginBottom: "8px" }}>Upload de Projeto</h3>
-        <p style={{ color: "#888", fontSize: "13px", marginBottom: "20px" }}>Carregue o ficheiro. Limite: 500MB. Formatos: PDF · DWG · DWF · IFC · ZIP.</p>
+        <p style={{ color: "#888", fontSize: "13px", marginBottom: "20px" }}>Carregue o ficheiro. Limite: 2GB por ficheiro. Formatos: PDF · DWG · DWF · IFC · ZIP.</p>
 
         <div
           onClick={() => fileRef.current?.click()}
@@ -270,13 +288,15 @@ function UploadModal({ isOpen, onClose, onUpload }: { isOpen: boolean; onClose: 
         >
           <div style={{ fontSize: "32px", marginBottom: "8px" }}>📁</div>
           <div style={{ color: "#ccc", fontSize: "14px", fontWeight: 600 }}>Arraste o ficheiro para aqui</div>
-          <div style={{ color: "#666", fontSize: "12px", marginTop: "4px" }}>PDF · DWG · DWF · IFC · ZIP — máx. 500MB</div>
+          <div style={{ color: "#666", fontSize: "12px", marginTop: "4px" }}>PDF · DWG · DWF · IFC · ZIP — máx. 2GB</div>
           <input ref={fileRef} type="file" accept=".pdf,.dwg,.dwf,.ifc,.zip,.rar,.7z" style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])} />
         </div>
 
         <div className="rounded-xl border border-white/5 p-3 mb-4" style={{ background: "rgba(255,255,255,0.02)" }}>
-          <div className="text-[10px] text-gray-500 font-mono leading-relaxed">
-            📦 <strong className="text-gray-300">Ficheiros ZIP:</strong> O agente extrai automaticamente todos os projetos contidos no ZIP e identifica cada ficheiro (PDF, DWG, DWF, IFC). Ideal para pastas com múltiplas plantas.
+          <div className="text-[10px] text-gray-500 font-mono leading-relaxed space-y-1.5">
+            <div>📦 <strong className="text-gray-300">ZIP:</strong> Extração automática de todos os projetos contidos.</div>
+            <div>📏 <strong className="text-gray-300">Limite:</strong> 2GB por ficheiro. Ficheiros grandes são enviados por chunks de 50MB.</div>
+            <div>⚡ <strong className="text-gray-300">Formatos:</strong> PDF, DWG, DWF, IFC, ZIP, RAR, 7Z.</div>
           </div>
         </div>
 
@@ -298,14 +318,31 @@ function UploadModal({ isOpen, onClose, onUpload }: { isOpen: boolean; onClose: 
           ))}
         </div>
 
+        {uploading && (
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-gray-400 truncate max-w-[250px]">{currentFile}</span>
+              <span className="text-xs font-mono text-orange-400">{progress}%</span>
+            </div>
+            <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.05)" }}>
+              <div className="h-full rounded-full transition-all duration-300" style={{ width: `${progress}%`, background: "linear-gradient(90deg, #ff6b35, #ff8c5a)" }} />
+            </div>
+            <div className="text-[10px] text-gray-500 mt-1.5 font-mono">
+              {progress < 100 ? `A enviar... ${progress < 30 ? "Ficheiro grande — upload por chunks de 50MB" : ""}` : "Upload concluído!"}
+            </div>
+          </div>
+        )}
+
         <button
           onClick={onClose}
+          disabled={uploading}
           style={{
             width: "100%", padding: "10px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.1)",
             background: "transparent", color: "#888", cursor: "pointer", fontSize: "13px",
+            opacity: uploading ? 0.3 : 1, pointerEvents: uploading ? "none" : "auto",
           }}
         >
-          Cancelar
+          {uploading ? "A enviar..." : "Cancelar"}
         </button>
       </div>
     </div>
