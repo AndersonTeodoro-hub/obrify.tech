@@ -56,7 +56,7 @@ export default function AgentPanel({ chatMessages, onSendMessage }: AgentPanelPr
     rec.onresult = (e: any) => {
       let interim = '';
       let final = '';
-      for (let i = 0; i < e.results.length; i++) {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
         const transcript = e.results[i][0].transcript;
         if (e.results[i].isFinal) {
           final += transcript;

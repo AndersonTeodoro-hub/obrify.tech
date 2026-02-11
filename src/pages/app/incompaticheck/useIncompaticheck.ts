@@ -275,9 +275,10 @@ export function useIncompaticheck() {
               fullText += pageText + '\n';
             }
             projectsData.push({ type: project.type, name: project.name, format: project.format, data: analyzeText(fullText) });
-          } catch (pdfErr) {
+          } catch (pdfErr: any) {
             console.error('PDF parse error:', pdfErr);
             projectsData.push({ type: project.type, name: project.name, format: project.format, data: null });
+            // Register failed PDF as an info finding later
           }
         } else {
           projectsData.push({ type: project.type, name: project.name, format: project.format, data: null });
@@ -356,11 +357,13 @@ export function useIncompaticheck() {
     if (!obraAtiva || !user) return;
     await sendMessage(content, 'user', obraAtiva.id);
 
-    // Generate agent response
-    const agentResponse = generateAgentResponseFromFindings(content, findings);
-    setTimeout(async () => {
+    // Generate and save agent response immediately
+    try {
+      const agentResponse = generateAgentResponseFromFindings(content, findings);
       await sendMessage(agentResponse, 'agent', obraAtiva.id);
-    }, 600);
+    } catch (err) {
+      console.error('Agent response error:', err);
+    }
   }, [obraAtiva, user, findings, sendMessage]);
 
   // ---- REPORT ----

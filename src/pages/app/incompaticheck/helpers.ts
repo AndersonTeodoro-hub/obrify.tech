@@ -148,7 +148,7 @@ export function crossAnalyze(
 
   // If no real findings from PDFs, add discipline-based warnings
   const realFindings = findings.filter(f => f.severity !== 'info');
-  if (realFindings.length === 0 && types.length >= 2) {
+  if (realFindings.length === 0) {
     if (types.includes('fundacoes') && types.includes('rede_enterrada')) {
       findings.push({
         severity: 'warning',
@@ -179,10 +179,30 @@ export function crossAnalyze(
         resolved: false,
       });
     }
+    if (types.includes('terraplanagem') && types.includes('estrutural')) {
+      findings.push({
+        severity: 'warning',
+        title: 'Verificar níveis terraplanagem × estrutural',
+        description: 'Verificar compatibilidade entre cotas de terraplanagem e cotas estruturais (vigas, sapatas, muros de suporte). Ref: EN 1997-1.',
+        location: 'Geral',
+        tags: ['terraplanagem', 'estrutural'],
+        resolved: false,
+      });
+    }
+  }
+
+  // Always add a summary finding
+  if (findings.filter(f => f.severity !== 'info').length === 0) {
+    // Fallback: even with single type, generate info
+    const typeCounts = types.map(t => {
+      const count = projectsData.filter(p => p.type === t).length;
+      const label = t === 'fundacoes' ? 'fundações' : t === 'rede_enterrada' ? 'rede enterrada' : t === 'terraplanagem' ? 'terraplanagem' : 'estrutural';
+      return `${count} de ${label}`;
+    });
     findings.push({
       severity: 'info',
-      title: 'Análise cruzada concluída',
-      description: 'Análise cruzada entre as disciplinas carregadas foi concluída. Recomenda-se verificação visual complementar dos projetos.',
+      title: 'Análise concluída — verificação visual recomendada',
+      description: `Foram analisados ${projectsData.length} projetos (${typeCounts.join(', ')}). Recomenda-se verificação visual complementar, especialmente para ficheiros DWG/DWF.`,
       location: 'Geral',
       tags: types,
       resolved: false,
