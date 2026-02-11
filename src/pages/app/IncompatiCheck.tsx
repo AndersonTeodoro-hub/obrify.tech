@@ -1,987 +1,334 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import AgentPanel from "./incompaticheck/AgentPanel";
-import { generateAgentResponse, formatFileSize } from "./incompaticheck/helpers";
-
-const SEVERITY_CONFIG: Record<string, { color: string; bg: string; label: string; border: string }> = {
-  critical: { color: "#ff3b5c", bg: "rgba(255,59,92,0.1)", label: "Crítica", border: "rgba(255,59,92,0.25)" },
-  warning: { color: "#ffd60a", bg: "rgba(255,214,10,0.1)", label: "Alerta", border: "rgba(255,214,10,0.25)" },
-  info: { color: "#00c9a7", bg: "rgba(0,201,167,0.1)", label: "Observação", border: "rgba(0,201,167,0.25)" },
-};
-
-const PROJECT_TYPES: Record<string, { color: string; label: string; icon: string }> = {
-  fundacoes: { color: "#ff6b35", label: "Fundações", icon: "⬡" },
-  estrutural: { color: "#8b5cf6", label: "Estrutural", icon: "▦" },
-  rede_enterrada: { color: "#00c9a7", label: "Rede Enterrada", icon: "◎" },
-  terraplanagem: { color: "#ffd60a", label: "Terraplanagem", icon: "▧" },
-};
-
-const FILE_SIZE_LIMIT = 2 * 1024 * 1024 * 1024; // 2GB
-const CHUNK_SIZE = 50 * 1024 * 1024; // 50MB por chunk
-
-interface Project {
-  id: string;
-  name: string;
-  type: string;
-  format: string;
-  file_size: number;
-  created_at: string;
-}
-
-interface Incompatibility {
-  id: string;
-  severity: string;
-  title: string;
-  description: string;
-  location: string;
-  tags: string[];
-}
-
-interface ChatMessage {
-  role: "user" | "agent";
-  content: string;
-}
-
-interface Obra {
-  id: string;
-  nome: string;
-  cidade: string;
-  fiscal: string;
-  created_at: string;
-  project_count: number;
-}
-
-const MOCK_PROJECTS: Project[] = [
-  { id: "1", name: "Fundações — Bloco A", type: "fundacoes", format: "dwg", file_size: 2400000, created_at: "2026-02-10" },
-  { id: "2", name: "Rede Hidrossanitária", type: "rede_enterrada", format: "pdf", file_size: 1800000, created_at: "2026-02-10" },
-  { id: "3", name: "Terraplanagem — Platô 01", type: "terraplanagem", format: "dwg", file_size: 3100000, created_at: "2026-02-09" },
-  { id: "4", name: "Estrutural — Concreto Armado", type: "estrutural", format: "pdf", file_size: 4200000, created_at: "2026-02-09" },
-  { id: "5", name: "Rede Elétrica Subterrânea", type: "rede_enterrada", format: "dwf", file_size: 1200000, created_at: "2026-02-08" },
-];
-
-const MOCK_INCOMPATIBILITIES: Incompatibility[] = [
-  {
-    id: "inc1", severity: "critical",
-    title: "Colisão: Rede hidráulica DN150 × Bloco de fundação B2",
-    description: "Tubulação hidráulica Ø150mm na cota -1.80m intercepta o bloco de coroamento B2 (cota fundo -2.00m). Conforme EN 1997-1 (Eurocódigo 7) e especificações do LNEC, o desvio mínimo necessário é de 0.45m lateral ou rebaixamento de 0.60m.",
-    location: "Eixo 3 / P7", tags: ["rede_enterrada", "fundacoes"],
-  },
-  {
-    id: "inc2", severity: "critical",
-    title: "Divergência de cotas: Terraplanagem × Fundação Bloco A",
-    description: "Cota de arrasamento do bloco B5 definida em -0.95m no projeto estrutural, porém a terraplanagem indica cota de plataforma acabada em -0.80m. Diferença de 0.15m pode expor o topo do bloco, violando NP EN 1992-1-1.",
-    location: "Eixo 5 / B5", tags: ["terraplanagem", "fundacoes"],
-  },
-  {
-    id: "inc3", severity: "critical",
-    title: "Rede de esgoto sob sapata corrida SC-02",
-    description: "Coletor de esgoto DN200 passa sob a sapata corrida SC-02 sem detalhe de travessia. A carga da fundação pode comprometer a tubulação — necessário caixa de passagem ou desvio conforme DR 23/95.",
-    location: "Eixo 1-2 / SC-02", tags: ["rede_enterrada", "fundacoes"],
-  },
-  {
-    id: "inc4", severity: "critical",
-    title: "Estaca hélice contínua intercepta duto elétrico subterrâneo",
-    description: "Estaca EHC-12 (Ø60cm) coincide com o traçado do eletroduto enterrado de média tensão. Reposicionamento necessário conforme RTIEBT.",
-    location: "Eixo 8 / EHC-12", tags: ["fundacoes", "rede_enterrada"],
-  },
-  {
-    id: "inc5", severity: "warning",
-    title: "Viga baldrame VB-04 com cota incompatível com rede de gás",
-    description: "Viga baldrame VB-04 (fundo -0.60m) cruza com tubulação de gás (-0.55m). Folga de 0.05m — Portaria 361/98 exige mínimo de 0.30m de separação vertical.",
-    location: "Eixo 4 / VB-04", tags: ["estrutural", "rede_enterrada"],
-  },
-  {
-    id: "inc6", severity: "warning",
-    title: "Pilar P12 deslocado 0.10m em relação à fundação",
-    description: "Centro geométrico do pilar P12 deslocado 10cm em X em relação ao eixo do bloco. Pode gerar momento fletor adicional não previsto (Eurocódigo 2, Secção 5.2).",
-    location: "Eixo 6 / P12", tags: ["estrutural", "fundacoes"],
-  },
-  {
-    id: "inc7", severity: "warning",
-    title: "Nível de terraplanagem incompatível com viga de equilíbrio",
-    description: "VE-01 entre B3 e B4 tem topo a -0.40m, mas terraplanagem indica aterro até -0.25m. Viga parcialmente exposta, comprometendo proteção conforme NP EN 206.",
-    location: "Eixo 3-4 / VE-01", tags: ["terraplanagem", "estrutural"],
-  },
-  {
-    id: "inc8", severity: "warning",
-    title: "Caixa de visita CV-03 conflitua com bloco de fundação B6",
-    description: "CV-03 da rede de drenagem sobrepõe-se ao bloco B6. Coordenadas coincidentes. Necessário reposicionar.",
-    location: "Eixo 7 / B6-CV03", tags: ["rede_enterrada", "fundacoes"],
-  },
-  {
-    id: "inc9", severity: "warning",
-    title: "Passagem de tubagem não prevista na laje de piso",
-    description: "DN100 pluviais necessita atravessar laje térreo junto ao P9, mas projeto estrutural não prevê negativo. Coordenar conforme NP EN 1992-1-1.",
-    location: "Eixo 5 / P9", tags: ["estrutural", "rede_enterrada"],
-  },
-  {
-    id: "inc10", severity: "warning",
-    title: "Rampa de acesso interfere com muro de suporte MS-01",
-    description: "Terraplanagem da rampa indica -2.80m junto ao MS-01, mas fundação do muro está a -2.50m. Risco de descalçamento (EN 1997-1, Secção 9).",
-    location: "Eixo 2 / MS-01", tags: ["terraplanagem", "estrutural"],
-  },
-  {
-    id: "inc11", severity: "warning",
-    title: "Espaçamento insuficiente entre estacas e rede de abastecimento",
-    description: "Estacas B10 a 0.20m da rede DN200. Cravação pode danificar tubulação. Mínimo recomendado: 0.50m.",
-    location: "Eixo 10 / B10", tags: ["fundacoes", "rede_enterrada"],
-  },
-  {
-    id: "inc12", severity: "info",
-    title: "Profundidade de estaca próxima ao nível freático",
-    description: "Estacas B8 com ponta a -8.50m. NA a -7.00m. Verificar método executivo conforme EN 1536.",
-    location: "Eixo 9 / B8", tags: ["fundacoes", "terraplanagem"],
-  },
-  {
-    id: "inc13", severity: "info",
-    title: "Classe de exposição do betão pode necessitar revisão",
-    description: "Fundações próximas à rede de drenagem. Verificar classe XA conforme NP EN 206, Quadro NA.2.",
-    location: "Eixo 1-3 / Geral", tags: ["estrutural", "rede_enterrada"],
-  },
-  {
-    id: "inc14", severity: "info",
-    title: "Sondagens desatualizadas para zona de expansão",
-    description: "Zona Eixos 11-14 referencia sondagens de 2023. LNEC recomenda atualizar quando superiores a 2 anos.",
-    location: "Eixo 11-14 / Geral", tags: ["fundacoes", "terraplanagem"],
-  },
-];
+import { useState } from 'react';
+import { useIncompaticheck } from './incompaticheck/useIncompaticheck';
+import { PROJECT_TYPES, SEVERITY_CONFIG } from './incompaticheck/types';
+import type { Project } from './incompaticheck/types';
+import { formatFileSize } from './incompaticheck/helpers';
+import AgentPanel from './incompaticheck/AgentPanel';
+import StatCard from './incompaticheck/StatCard';
+import CrossSectionSVG from './incompaticheck/CrossSectionSVG';
+import UploadModal from './incompaticheck/UploadModal';
+import ShareModal from './incompaticheck/ShareModal';
+import ObraRegistModal from './incompaticheck/ObraRegistModal';
+import ObraListModal from './incompaticheck/ObraListModal';
+import ProjectPreviewModal from './incompaticheck/ProjectPreviewModal';
 
 function ProjectTypeBadge({ type }: { type: string }) {
   const config = PROJECT_TYPES[type];
   if (!config) return null;
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "4px",
-        padding: "2px 8px",
-        borderRadius: "6px",
-        fontSize: "11px",
-        fontWeight: 600,
-        color: config.color,
-        background: `${config.color}15`,
-        border: `1px solid ${config.color}30`,
-      }}
-    >
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
+      borderRadius: '6px', fontSize: '11px', fontWeight: 600, color: config.color,
+      background: `${config.color}15`, border: `1px solid ${config.color}30`,
+    }}>
       {config.icon} {config.label}
     </span>
   );
 }
 
-function StatCard({ number, label, type }: { number: string | number; label: string; type: string }) {
-  const colors: Record<string, string> = { critical: "#ff3b5c", warning: "#ffd60a", info: "#00c9a7", ok: "#4ade80" };
-  const color = colors[type] || "#888";
-  return (
-    <div
-      style={{
-        background: "rgba(255,255,255,0.03)",
-        border: "1px solid rgba(255,255,255,0.06)",
-        borderRadius: "16px",
-        padding: "20px",
-        textAlign: "center",
-      }}
-    >
-      <div style={{ fontSize: "32px", fontWeight: 800, color, lineHeight: 1 }}>{number}</div>
-      <div style={{ fontSize: "12px", color: "#888", marginTop: "6px", fontWeight: 500 }}>{label}</div>
-    </div>
-  );
-}
+export default function IncompatiCheck() {
+  const ic = useIncompaticheck();
+  const [showObraModal, setShowObraModal] = useState(false);
+  const [showObraList, setShowObraList] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
+  const [showShare, setShowShare] = useState(false);
+  const [previewProject, setPreviewProject] = useState<Project | null>(null);
+  const [filter, setFilter] = useState('all');
 
-function CrossSectionSVG() {
-  return (
-    <svg viewBox="0 0 600 300" style={{ width: "100%", height: "auto", borderRadius: "12px", background: "#0a0a0a" }}>
-      {/* Ground level */}
-      <line x1="0" y1="100" x2="600" y2="100" stroke="#333" strokeWidth="1" strokeDasharray="4" />
-      <text x="10" y="95" fill="#666" fontSize="10">NTN ±0.00</text>
+  const filteredFindings = filter === 'all' ? ic.findings : ic.findings.filter(f => f.severity === filter);
 
-      {/* Foundation block 1 */}
-      <rect x="80" y="120" width="120" height="100" fill="rgba(139,92,246,0.15)" stroke="#8b5cf6" strokeWidth="1.5" rx="4" />
-      <text x="105" y="175" fill="#8b5cf6" fontSize="11" fontWeight="600">B1 - 120×100</text>
-
-      {/* Foundation block 2 */}
-      <rect x="350" y="110" width="140" height="120" fill="rgba(139,92,246,0.15)" stroke="#8b5cf6" strokeWidth="1.5" rx="4" />
-      <text x="370" y="175" fill="#8b5cf6" fontSize="11" fontWeight="600">B2 - 140×120</text>
-
-      {/* Pillars */}
-      <rect x="125" y="70" width="30" height="50" fill="rgba(255,107,53,0.2)" stroke="#ff6b35" strokeWidth="1.5" rx="2" />
-      <text x="128" y="65" fill="#ff6b35" fontSize="10" fontWeight="600">P3</text>
-
-      <rect x="400" y="60" width="30" height="50" fill="rgba(255,107,53,0.2)" stroke="#ff6b35" strokeWidth="1.5" rx="2" />
-      <text x="403" y="55" fill="#ff6b35" fontSize="10" fontWeight="600">P7</text>
-
-      {/* Pipe - collision */}
-      <line x1="50" y1="180" x2="550" y2="180" stroke="#00c9a7" strokeWidth="3" />
-      <circle cx="420" cy="180" r="12" fill="none" stroke="#ff3b5c" strokeWidth="2">
-        <animate attributeName="r" values="12;18;12" dur="2s" repeatCount="indefinite" />
-      </circle>
-      <text x="440" y="185" fill="#ff3b5c" fontSize="11" fontWeight="700">⚠ COLISÃO</text>
-
-      {/* Dimensions */}
-      <text x="110" y="240" fill="#666" fontSize="9">1.20m</text>
-      <text x="390" y="250" fill="#666" fontSize="9">1.40m</text>
-      <text x="270" y="290" fill="#555" fontSize="10">3.00m</text>
-    </svg>
-  );
-}
-
-function UploadModal({ isOpen, onClose, onUpload }: { isOpen: boolean; onClose: () => void; onUpload: (p: any) => void }) {
-  const [selectedType, setSelectedType] = useState("fundacoes");
-  const [dragOver, setDragOver] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [currentFile, setCurrentFile] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  if (!isOpen) return null;
-
-  const handleFile = async (file: File) => {
-    if (file.size > FILE_SIZE_LIMIT) { alert("Ficheiro excede o limite de 2GB."); return; }
-    const ext = file.name.split(".").pop()?.toLowerCase() || "";
-    if (!["pdf", "dwg", "dwf", "ifc", "zip", "rar", "7z"].includes(ext)) { alert("Formato não suportado. Utilize PDF, DWG, DWF, IFC ou ZIP."); return; }
-
-    setUploading(true);
-    setCurrentFile(file.name);
-    setProgress(0);
-
-    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-    for (let i = 0; i < totalChunks; i++) {
-      await new Promise(resolve => setTimeout(resolve, 300));
-      setProgress(Math.round(((i + 1) / totalChunks) * 100));
+  const handleCreateObra = async (info: { nome: string; cidade: string; fiscal: string }) => {
+    const obra = await ic.createObra(info.nome, info.cidade, info.fiscal);
+    if (obra) {
+      await ic.selectObra(obra);
+      setShowObraModal(false);
     }
-
-    setUploading(false);
-    setProgress(0);
-    setCurrentFile("");
-    onUpload({ name: file.name, type: selectedType, format: ext, file_size: file.size, file });
-    onClose();
   };
 
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)",
-        display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: "#111", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "20px",
-          padding: "32px", width: "90%", maxWidth: "480px",
-        }}
-      >
-        <h3 style={{ color: "#fff", fontSize: "18px", fontWeight: 700, marginBottom: "8px" }}>Upload de Projeto</h3>
-        <p style={{ color: "#888", fontSize: "13px", marginBottom: "20px" }}>Carregue o ficheiro. Limite: 2GB por ficheiro. Formatos: PDF · DWG · DWF · IFC · ZIP.</p>
-
-        <div
-          onClick={() => fileRef.current?.click()}
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer?.files?.[0]) handleFile(e.dataTransfer.files[0]); }}
-          style={{
-            border: `2px dashed ${dragOver ? "rgba(255,165,0,0.6)" : "rgba(255,165,0,0.2)"}`,
-            borderRadius: "12px", padding: "40px", textAlign: "center", cursor: "pointer",
-            marginBottom: "24px", background: dragOver ? "rgba(255,165,0,0.05)" : "transparent",
-            transition: "all 0.2s",
-          }}
-        >
-          <div style={{ fontSize: "32px", marginBottom: "8px" }}>📁</div>
-          <div style={{ color: "#ccc", fontSize: "14px", fontWeight: 600 }}>Arraste o ficheiro para aqui</div>
-          <div style={{ color: "#666", fontSize: "12px", marginTop: "4px" }}>PDF · DWG · DWF · IFC · ZIP — máx. 2GB</div>
-          <input ref={fileRef} type="file" accept=".pdf,.dwg,.dwf,.ifc,.zip,.rar,.7z" style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])} />
-        </div>
-
-        <div className="rounded-xl border border-white/5 p-3 mb-4" style={{ background: "rgba(255,255,255,0.02)" }}>
-          <div className="text-[10px] text-gray-500 font-mono leading-relaxed space-y-1.5">
-            <div>📦 <strong className="text-gray-300">ZIP:</strong> Extração automática de todos os projetos contidos.</div>
-            <div>📏 <strong className="text-gray-300">Limite:</strong> 2GB por ficheiro. Ficheiros grandes são enviados por chunks de 50MB.</div>
-            <div>⚡ <strong className="text-gray-300">Formatos:</strong> PDF, DWG, DWF, IFC, ZIP, RAR, 7Z.</div>
-          </div>
-        </div>
-
-        <div style={{ color: "#aaa", fontSize: "13px", fontWeight: 600, marginBottom: "10px" }}>Tipo de projeto</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "24px" }}>
-          {Object.entries(PROJECT_TYPES).map(([key, val]) => (
-            <button
-              key={key}
-              onClick={() => setSelectedType(key)}
-              style={{
-                padding: "12px", borderRadius: "12px", textAlign: "left", cursor: "pointer",
-                background: selectedType === key ? "rgba(255,165,0,0.08)" : "transparent",
-                border: `1px solid ${selectedType === key ? "rgba(255,165,0,0.3)" : "rgba(255,255,255,0.05)"}`,
-                color: "#ccc", fontSize: "13px", fontWeight: 500, transition: "all 0.2s",
-              }}
-            >
-              {val.icon} {val.label}
-            </button>
-          ))}
-        </div>
-
-        {uploading && (
-          <div className="mb-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-gray-400 truncate max-w-[250px]">{currentFile}</span>
-              <span className="text-xs font-mono text-orange-400">{progress}%</span>
-            </div>
-            <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.05)" }}>
-              <div className="h-full rounded-full transition-all duration-300" style={{ width: `${progress}%`, background: "linear-gradient(90deg, #ff6b35, #ff8c5a)" }} />
-            </div>
-            <div className="text-[10px] text-gray-500 mt-1.5 font-mono">
-              {progress < 100 ? `A enviar... ${progress < 30 ? "Ficheiro grande — upload por chunks de 50MB" : ""}` : "Upload concluído!"}
-            </div>
-          </div>
-        )}
-
-        <button
-          onClick={onClose}
-          disabled={uploading}
-          style={{
-            width: "100%", padding: "10px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.1)",
-            background: "transparent", color: "#888", cursor: "pointer", fontSize: "13px",
-            opacity: uploading ? 0.3 : 1, pointerEvents: uploading ? "none" : "auto",
-          }}
-        >
-          {uploading ? "A enviar..." : "Cancelar"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ShareModal({ isOpen, onClose, obraInfo }: { isOpen: boolean; onClose: () => void; obraInfo?: { nome: string; cidade: string; fiscal: string } | null }) {
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [shareType, setShareType] = useState("email");
-
-  if (!isOpen) return null;
-
-  const obraNome = obraInfo?.nome || "Obrify IncompatiCheck";
-
-  const handleShare = () => {
-    if (shareType === "email" && email) {
-      window.open(`mailto:${email}?subject=${encodeURIComponent(`Relatório de Incompatibilidades — ${obraNome}`)}&body=${encodeURIComponent(`Segue em anexo o relatório de análise de incompatibilidades.\n\n🏗️ Obra: ${obraNome}${obraInfo?.cidade ? `\n📍 Localização: ${obraInfo.cidade}` : ""}${obraInfo?.fiscal ? `\n👷 Fiscal: ${obraInfo.fiscal}` : ""}\n\nGerado pela plataforma Obrify IncompatiCheck.`)}`);
-    } else if (shareType === "whatsapp" && phone) {
-      window.open(`https://wa.me/${phone.replace(/\D/g, "")}?text=${encodeURIComponent(`📋 Relatório de Incompatibilidades\n🏗️ Obra: ${obraNome}${obraInfo?.cidade ? `\n📍 ${obraInfo.cidade}` : ""}${obraInfo?.fiscal ? `\n👷 Fiscal: ${obraInfo.fiscal}` : ""}\n\n4 Incompatibilidades Críticas detectadas.\n\nGerado pela plataforma Obrify.`)}`);
-    }
-    onClose();
+  const handleUpload = async (file: File, type: string) => {
+    if (!ic.obraAtiva) return;
+    await ic.uploadProject(file, type, ic.obraAtiva.id);
   };
 
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)",
-        display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: "#111", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "20px",
-          padding: "32px", width: "90%", maxWidth: "480px",
-        }}
-      >
-        <h3 style={{ color: "#fff", fontSize: "18px", fontWeight: 700, marginBottom: "8px" }}>Partilhar Relatório</h3>
-        <p style={{ color: "#888", fontSize: "13px", marginBottom: "20px" }}>Envie o relatório em formato profissional (PT-PT).</p>
+  const handleRunAnalysis = async () => {
+    if (!ic.obraAtiva) return;
+    await ic.runAnalysis(ic.obraAtiva.id);
+  };
 
-        <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
-          <button
-            onClick={() => setShareType("email")}
-            style={{
-              flex: 1, padding: "12px", borderRadius: "12px", fontSize: "13px", fontWeight: 600,
-              cursor: "pointer", transition: "all 0.2s",
-              border: `1px solid ${shareType === "email" ? "rgba(255,165,0,0.4)" : "rgba(255,255,255,0.05)"}`,
-              background: shareType === "email" ? "rgba(255,165,0,0.08)" : "transparent",
-              color: shareType === "email" ? "#f59e0b" : "#888",
-            }}
-          >
-            📧 Email
-          </button>
-          <button
-            onClick={() => setShareType("whatsapp")}
-            style={{
-              flex: 1, padding: "12px", borderRadius: "12px", fontSize: "13px", fontWeight: 600,
-              cursor: "pointer", transition: "all 0.2s",
-              border: `1px solid ${shareType === "whatsapp" ? "rgba(34,197,94,0.4)" : "rgba(255,255,255,0.05)"}`,
-              background: shareType === "whatsapp" ? "rgba(34,197,94,0.08)" : "transparent",
-              color: shareType === "whatsapp" ? "#22c55e" : "#888",
-            }}
-          >
-            📱 WhatsApp
-          </button>
-        </div>
-
-        {shareType === "email" ? (
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="engenheiro@empresa.pt"
-            style={{
-              width: "100%", padding: "12px 16px", borderRadius: "12px",
-              border: "1px solid rgba(255,255,255,0.05)", color: "#fff", fontSize: "13px",
-              outline: "none", background: "rgba(255,255,255,0.03)", marginBottom: "24px",
-            }}
-          />
-        ) : (
-          <input
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="+351 912 345 678"
-            style={{
-              width: "100%", padding: "12px 16px", borderRadius: "12px",
-              border: "1px solid rgba(255,255,255,0.05)", color: "#fff", fontSize: "13px",
-              outline: "none", background: "rgba(255,255,255,0.03)", marginBottom: "24px",
-            }}
-          />
-        )}
-
-        <div style={{ marginBottom: "24px" }}>
-          <div style={{ color: "#aaa", fontSize: "12px", fontWeight: 600, marginBottom: "8px" }}>Conteúdo</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-            <div style={{ color: "#666", fontSize: "12px" }}>✓ Resumo executivo — 14 incompatibilidades</div>
-            <div style={{ color: "#666", fontSize: "12px" }}>✓ Fichas técnicas detalhadas</div>
-            <div style={{ color: "#666", fontSize: "12px" }}>✓ Referências normativas (NP EN, Eurocódigos)</div>
-            <div style={{ color: "#666", fontSize: "12px" }}>✓ Recomendações de solução</div>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button
-            onClick={onClose}
-            style={{
-              flex: 1, padding: "10px", borderRadius: "10px",
-              border: "1px solid rgba(255,255,255,0.1)", background: "transparent",
-              color: "#888", cursor: "pointer", fontSize: "13px",
-            }}
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={handleShare}
-            style={{
-              flex: 1, padding: "10px", borderRadius: "10px", border: "none",
-              background: "linear-gradient(135deg, #f59e0b, #ea580c)", color: "#fff",
-              cursor: "pointer", fontSize: "13px", fontWeight: 600,
-            }}
-          >
-            Enviar
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ObraRegistModal({ isOpen, onClose, onConfirm }: { isOpen: boolean; onClose: () => void; onConfirm: (info: { nome: string; cidade: string; fiscal: string }) => void }) {
-  const [nome, setNome] = useState("");
-  const [cidade, setCidade] = useState("");
-  const [fiscal, setFiscal] = useState("");
-
-  if (!isOpen) return null;
-
-  const canSubmit = nome.trim().length > 0;
+  // ---- Determine page state ----
+  const hasObra = !!ic.obraAtiva;
+  const hasProjects = ic.projects.length > 0;
+  const hasAnalysis = !!ic.analysis;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }} onClick={onClose}>
-      <div className="rounded-2xl border border-white/5 p-6 sm:p-8 w-full max-w-md" style={{ background: "#181c26" }} onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-3 mb-1">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-xs" style={{ background: "linear-gradient(135deg, #ff6b35, #ff8c5a)" }}>O</div>
-          <h2 className="text-lg font-bold text-white">Registar Análise</h2>
+    <div style={{ display: 'flex', height: '100vh', background: '#0a0c10', fontFamily: "'DM Sans', sans-serif", color: '#fff', overflow: 'hidden' }}>
+      {/* Sidebar: Projects */}
+      <div className="max-lg:hidden" style={{ width: '280px', minWidth: '280px', background: '#0d1117', borderRight: '1px solid rgba(255,255,255,0.04)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '20px', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+          <div style={{ fontSize: '13px', fontWeight: 700, color: '#fff', marginBottom: '4px' }}>Projetos</div>
+          <div style={{ fontSize: '11px', color: '#666' }}>{ic.projects.length} ficheiro{ic.projects.length !== 1 ? 's' : ''} carregado{ic.projects.length !== 1 ? 's' : ''}</div>
         </div>
-        <p className="text-xs text-gray-400 mb-6">Identifique a obra para associar aos relatórios.</p>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-[10px] text-gray-500 uppercase tracking-widest font-mono mb-2">Nome da Obra *</label>
-            <input type="text" value={nome} onChange={e => setNome(e.target.value)} placeholder="Ex: Edifício Residencial Tejo Park"
-              className="w-full px-4 py-3 rounded-xl border border-white/5 text-white text-sm outline-none focus:border-orange-500/30 placeholder:text-gray-600 transition-all" style={{ background: "rgba(255,255,255,0.03)" }} />
-          </div>
-          <div>
-            <label className="block text-[10px] text-gray-500 uppercase tracking-widest font-mono mb-2">Cidade / Localização</label>
-            <input type="text" value={cidade} onChange={e => setCidade(e.target.value)} placeholder="Ex: Lisboa, Parque das Nações"
-              className="w-full px-4 py-3 rounded-xl border border-white/5 text-white text-sm outline-none focus:border-orange-500/30 placeholder:text-gray-600 transition-all" style={{ background: "rgba(255,255,255,0.03)" }} />
-          </div>
-          <div>
-            <label className="block text-[10px] text-gray-500 uppercase tracking-widest font-mono mb-2">Fiscal / Analisador</label>
-            <input type="text" value={fiscal} onChange={e => setFiscal(e.target.value)} placeholder="Ex: Eng. João Silva"
-              className="w-full px-4 py-3 rounded-xl border border-white/5 text-white text-sm outline-none focus:border-orange-500/30 placeholder:text-gray-600 transition-all" style={{ background: "rgba(255,255,255,0.03)" }} />
-          </div>
-        </div>
-        <div className="flex gap-3 mt-6">
-          <button onClick={onClose} className="flex-1 px-4 py-3 rounded-xl border border-white/5 text-gray-400 text-sm font-semibold hover:border-white/10 transition-all">Cancelar</button>
-          <button onClick={() => { if (canSubmit) { onConfirm({ nome: nome.trim(), cidade: cidade.trim(), fiscal: fiscal.trim() }); } }}
-            disabled={!canSubmit}
-            className="flex-1 px-4 py-3 rounded-xl text-white text-sm font-semibold transition-all disabled:opacity-30"
-            style={{ background: "linear-gradient(135deg, #ff6b35, #ff8c5a)" }}>
-            Registar e Iniciar
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ProjectPreviewModal({ project, onClose, onDelete }: { project: Project | null; onClose: () => void; onDelete: (id: string) => void }) {
-  if (!project) return null;
-  const typeConfig = PROJECT_TYPES[project.type];
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }} onClick={onClose}>
-      <div className="rounded-2xl border border-white/5 p-6 w-full max-w-sm" style={{ background: "#181c26" }} onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg" style={{ background: `${typeConfig?.color}15`, border: `1px solid ${typeConfig?.color}30` }}>
-            {typeConfig?.icon}
-          </div>
-          <div className="flex-1 min-w-0">
-            <h3 className="text-sm font-bold text-white truncate">{project.name}</h3>
-            <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: typeConfig?.color }}>{typeConfig?.label}</span>
-          </div>
-        </div>
-        <div className="space-y-3 mb-6">
-          <div className="flex justify-between items-center py-2 border-b border-white/5">
-            <span className="text-[11px] text-gray-500">Formato</span>
-            <span className="font-mono text-xs text-white uppercase">{project.format}</span>
-          </div>
-          <div className="flex justify-between items-center py-2 border-b border-white/5">
-            <span className="text-[11px] text-gray-500">Tamanho</span>
-            <span className="text-xs text-white">{project.file_size >= 1048576 ? `${(project.file_size / 1048576).toFixed(1)} MB` : `${(project.file_size / 1024).toFixed(0)} KB`}</span>
-          </div>
-          <div className="flex justify-between items-center py-2 border-b border-white/5">
-            <span className="text-[11px] text-gray-500">Carregado em</span>
-            <span className="text-xs text-white">{project.created_at}</span>
-          </div>
-          <div className="flex justify-between items-center py-2">
-            <span className="text-[11px] text-gray-500">ID</span>
-            <span className="font-mono text-[10px] text-gray-400">{project.id}</span>
-          </div>
-        </div>
-        <div className="flex gap-3">
-          <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-xl border border-white/5 text-gray-400 text-xs font-semibold hover:border-white/10 transition-all">
-            Fechar
-          </button>
-          <button
-            onClick={() => {
-              if (window.confirm(`Remover "${project.name}"?`)) {
-                onDelete(project.id);
-                onClose();
-              }
-            }}
-            className="flex-1 px-4 py-2.5 rounded-xl border border-red-500/20 text-red-400 text-xs font-semibold hover:bg-red-500/10 hover:border-red-500/30 transition-all"
-          >
-            🗑 Remover
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ObraListModal({ isOpen, onClose, obras, obraAtiva, onSelect, onDelete, onNew }: {
-  isOpen: boolean; onClose: () => void; obras: Obra[]; obraAtiva: Obra | null;
-  onSelect: (obra: Obra) => void; onDelete: (id: string) => void; onNew: () => void;
-}) {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }} onClick={onClose}>
-      <div className="rounded-2xl border border-white/5 p-6 w-full max-w-lg max-h-[80vh] flex flex-col" style={{ background: "#181c26" }} onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="text-lg font-bold text-white">Obras Registadas</h2>
-            <p className="text-xs text-gray-400 mt-0.5">{obras.length} obra{obras.length !== 1 ? "s" : ""} · Selecione para carregar projetos</p>
-          </div>
-          <button onClick={onNew}
-            className="px-3 py-2 rounded-lg text-xs font-semibold text-white transition-all hover:-translate-y-0.5"
-            style={{ background: "linear-gradient(135deg, #ff6b35, #ff8c5a)" }}>
-            + Nova Obra
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto space-y-2 mb-4 pr-1" style={{ scrollbarWidth: "thin" }}>
-          {obras.length === 0 ? (
-            <div className="text-center py-12">
-              <div className="text-3xl mb-3">🏗️</div>
-              <div className="text-sm text-gray-400 mb-1">Nenhuma obra registada</div>
-              <div className="text-xs text-gray-500">Clique em "Nova Obra" para começar</div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '12px' }}>
+          {ic.projects.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '30px 10px', color: '#555', fontSize: '12px' }}>
+              {hasObra ? 'Nenhum projeto carregado. Use o botão Upload.' : 'Selecione uma obra primeiro.'}
             </div>
           ) : (
-            obras.map(obra => {
-              const isActive = obraAtiva?.id === obra.id;
+            ic.projects.map(project => {
+              const typeConfig = PROJECT_TYPES[project.type];
               return (
-                <div key={obra.id}
-                  className={`group relative rounded-xl border p-4 cursor-pointer transition-all ${isActive ? "border-orange-500/30 bg-orange-500/5" : "border-white/5 hover:border-white/10"}`}
-                  style={{ background: isActive ? "rgba(255,107,53,0.05)" : "#12151c" }}
-                  onClick={() => { onSelect(obra); onClose(); }}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="text-sm font-semibold text-white truncate">{obra.nome}</h3>
-                        {isActive && (
-                          <span className="text-[8px] px-1.5 py-0.5 rounded-full font-mono uppercase tracking-wider" style={{ background: "rgba(255,107,53,0.15)", color: "#ff6b35", border: "1px solid rgba(255,107,53,0.25)" }}>
-                            Ativa
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 text-[11px] text-gray-500">
-                        {obra.cidade && <span>📍 {obra.cidade}</span>}
-                        {obra.fiscal && <span>👷 {obra.fiscal}</span>}
-                      </div>
-                      <div className="flex items-center gap-3 mt-2 text-[10px] text-gray-500">
-                        <span>📁 {obra.project_count} projeto{obra.project_count !== 1 ? "s" : ""}</span>
-                        <span>📅 {obra.created_at}</span>
+                <div key={project.id} className="group" style={{
+                  padding: '12px', borderRadius: '12px', marginBottom: '6px', cursor: 'pointer',
+                  background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)',
+                  transition: 'all 0.2s',
+                }} onClick={() => setPreviewProject(project)}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      width: '32px', height: '32px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px',
+                      background: `${typeConfig?.color}15`, border: `1px solid ${typeConfig?.color}25`,
+                    }}>
+                      {typeConfig?.icon}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '12px', fontWeight: 600, color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{project.name}</div>
+                      <div style={{ fontSize: '10px', color: '#666', marginTop: '2px' }}>
+                        {project.format.toUpperCase()} · {formatFileSize(project.file_size)}
+                        {project.from_zip && ' · ZIP'}
                       </div>
                     </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (window.confirm(`Remover a obra "${obra.nome}" e todos os seus projetos associados?`)) {
-                          onDelete(obra.id);
-                        }
-                      }}
-                      className="opacity-0 group-hover:opacity-100 w-7 h-7 rounded-md flex items-center justify-center text-[11px] border border-white/5 text-gray-500 hover:text-red-400 hover:border-red-500/30 transition-all"
-                      style={{ background: "rgba(255,255,255,0.03)" }}
-                      title="Remover obra"
-                    >
-                      🗑
-                    </button>
                   </div>
                 </div>
               );
             })
           )}
         </div>
-        <button onClick={onClose} className="w-full px-4 py-2.5 rounded-xl border border-white/5 text-gray-400 text-xs font-semibold hover:border-white/10 transition-all">
-          Fechar
-        </button>
-      </div>
-    </div>
-  );
-}
-
-export default function IncompatiCheck() {
-  const [obras, setObras] = useState<Obra[]>([]);
-  const [obraAtiva, setObraAtiva] = useState<Obra | null>(null);
-  const [showObraModal, setShowObraModal] = useState(false);
-  const [showObraList, setShowObraList] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
-  const [previewProject, setPreviewProject] = useState<Project | null>(null);
-  const [projects, setProjects] = useState<Project[]>(MOCK_PROJECTS);
-  const [filter, setFilter] = useState("all");
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    { role: "agent", content: `Olá! Sou o **Eng. Marcos**, especialista em compatibilização com +10 anos de experiência em fundações, estruturas de betão armado e redes enterradas, com foco na regulamentação europeia e portuguesa (Eurocódigos, NP EN 206, DR 23/95, RTIEBT).\n\nIdentifiquei **4 incompatibilidades críticas**. A mais urgente: colisão da rede hidráulica DN150 com o bloco B2 no Eixo 3.\n\nPode falar por voz ou digitar. Estou à disposição.` },
-  ]);
-  const [showUpload, setShowUpload] = useState(false);
-  const [showShare, setShowShare] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-
-  const incompatibilities = MOCK_INCOMPATIBILITIES;
-  const filteredIncomp = filter === "all" ? incompatibilities : incompatibilities.filter(i => i.severity === filter);
-  const criticalCount = incompatibilities.filter(i => i.severity === "critical").length;
-  const warningCount = incompatibilities.filter(i => i.severity === "warning").length;
-  const infoCount = incompatibilities.filter(i => i.severity === "info").length;
-
-  const addMessage = useCallback((content: string, role: "user" | "agent") => {
-    setChatMessages(prev => [...prev, { role, content }]);
-  }, []);
-
-  const handleUpload = useCallback((project: any) => {
-    const isZip = ["zip", "rar", "7z"].includes(project.format);
-    
-    if (isZip) {
-      setUploadProgress("A extrair ficheiros do ZIP...");
-      addMessage(`A processar ficheiro ZIP "${project.name}"... A extrair e identificar projetos contidos.`, "agent");
-      
-      setTimeout(() => {
-        const extractedFiles = [
-          { name: project.name.replace(/\.(zip|rar|7z)$/i, "") + " - Planta 01.pdf", format: "pdf", file_size: Math.floor(project.file_size * 0.15) },
-          { name: project.name.replace(/\.(zip|rar|7z)$/i, "") + " - Planta 02.pdf", format: "pdf", file_size: Math.floor(project.file_size * 0.12) },
-          { name: project.name.replace(/\.(zip|rar|7z)$/i, "") + " - Planta 03.dwg", format: "dwg", file_size: Math.floor(project.file_size * 0.2) },
-          { name: project.name.replace(/\.(zip|rar|7z)$/i, "") + " - Planta 04.dwg", format: "dwg", file_size: Math.floor(project.file_size * 0.18) },
-          { name: project.name.replace(/\.(zip|rar|7z)$/i, "") + " - Planta 05.pdf", format: "pdf", file_size: Math.floor(project.file_size * 0.1) },
-        ];
-        
-        const newProjects = extractedFiles.map((f, i) => ({
-          id: String(Date.now() + i),
-          name: f.name,
-          type: project.type,
-          format: f.format,
-          file_size: f.file_size,
-          created_at: new Date().toISOString().slice(0, 10),
-        }));
-        
-        setProjects(prev => [...prev, ...newProjects]);
-        setUploadProgress(null);
-        
-        if (obraAtiva) {
-          setObras(prev => prev.map(o => o.id === obraAtiva.id ? { ...o, project_count: o.project_count + newProjects.length } : o));
-        }
-        
-        addMessage(`ZIP extraído com sucesso! **${newProjects.length} projetos** identificados e carregados:\n\n${newProjects.map((p, i) => `${i + 1}. ${p.name} (${p.format.toUpperCase()}, ${p.file_size >= 1048576 ? (p.file_size / 1048576).toFixed(1) + " MB" : (p.file_size / 1024).toFixed(0) + " KB"})`).join("\n")}\n\nTodos associados à disciplina **${PROJECT_TYPES[project.type]?.label}**. Pode alterar individualmente se necessário. Deseja executar a análise?`, "agent");
-      }, 2500);
-    } else {
-      const newProject = {
-        id: String(Date.now()),
-        name: project.name,
-        type: project.type,
-        format: project.format,
-        file_size: project.file_size,
-        created_at: new Date().toISOString().slice(0, 10),
-      };
-      setProjects(prev => [...prev, newProject]);
-      
-      if (obraAtiva) {
-        setObras(prev => prev.map(o => o.id === obraAtiva.id ? { ...o, project_count: o.project_count + 1 } : o));
-      }
-      
-      addMessage(`Projeto "${project.name}" carregado. A analisar...`, "agent");
-      setTimeout(() => addMessage("Análise concluída. **2 novas interferências** detectadas. Deseja detalhes?", "agent"), 2000);
-    }
-  }, [addMessage, obraAtiva]);
-
-  const runAnalysis = useCallback(() => {
-    setIsAnalyzing(true);
-    setTimeout(() => {
-      setIsAnalyzing(false);
-      addMessage(`Análise completa! **92 elementos estruturais**, **30 trechos de rede**, **6 secções de terraplanagem**. Total: **${incompatibilities.length} incompatibilidades** (${criticalCount} críticas, ${warningCount} alertas, ${infoCount} observações).`, "agent");
-    }, 3500);
-  }, [addMessage, incompatibilities.length, criticalCount, warningCount, infoCount]);
-
-
-  return (
-    <div style={{ height: "100vh", background: "#0a0a0a", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      {/* HEADER */}
-      <div className="flex items-center justify-between px-4 sm:px-6 gap-2" style={{ padding: "16px 0", paddingLeft: undefined, paddingRight: undefined, borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <div style={{ width: "32px", height: "32px", borderRadius: "8px", background: "linear-gradient(135deg, #f59e0b, #ea580c)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: "14px" }}>O</div>
-          <div>
-            <span style={{ color: "#fff", fontWeight: 700, fontSize: "15px" }}>Obrify IncompatiCheck</span>
-            <span style={{ color: "#555", fontSize: "10px", marginLeft: "8px" }}>Módulo v2.4</span>
-          </div>
-          {obraAtiva && (
-            <div className="flex items-center gap-2 ml-4 pl-4 border-l border-white/10">
-              <span className="text-xs text-gray-400">{obraAtiva.nome}</span>
-              {obraAtiva.cidade && <span className="text-[10px] text-gray-500">· {obraAtiva.cidade}</span>}
-              {obraAtiva.fiscal && <span className="text-[10px] text-gray-500">· {obraAtiva.fiscal}</span>}
-            </div>
-          )}
-        </div>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          <div className="flex lg:hidden gap-2">
-            <button className="px-3 py-2 rounded-lg border border-white/5 text-gray-400 text-xs" style={{ background: "#181c26" }}>📁</button>
-            <button className="px-3 py-2 rounded-lg border border-white/5 text-gray-400 text-xs" style={{ background: "#181c26" }}>🏗️</button>
-          </div>
-          {obraAtiva ? (
-            <button onClick={() => setShowObraList(true)}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-orange-500/20 hover:border-orange-500/40 transition-all"
-              style={{ background: "rgba(255,107,53,0.05)" }}>
-              <span className="text-xs text-orange-400 font-semibold truncate max-w-[180px]">{obraAtiva.nome}</span>
-              {obraAtiva.cidade && <span className="hidden sm:inline text-[10px] text-gray-500">· {obraAtiva.cidade}</span>}
-              <span className="text-[10px] text-gray-500">▼</span>
-            </button>
-          ) : (
-            <button onClick={() => setShowObraModal(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-xs font-semibold transition-all hover:-translate-y-0.5"
-              style={{ background: "linear-gradient(135deg, #ff6b35, #ff8c5a)", boxShadow: "0 2px 12px rgba(255,107,53,0.3)" }}>
-              📋 Registar Obra
-            </button>
-          )}
-          <button onClick={() => setShowUpload(true)} className="hidden sm:flex" style={{ display: undefined, alignItems: "center", gap: "6px", padding: "8px 16px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.05)", background: "#181c26", color: "#888", fontSize: "12px", cursor: "pointer" }}>📁 Upload</button>
-          <button onClick={() => setShowShare(true)} className="hidden sm:flex" style={{ display: undefined, alignItems: "center", gap: "6px", padding: "8px 16px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.05)", background: "#181c26", color: "#888", fontSize: "12px", cursor: "pointer" }}>📤 Partilhar</button>
-        </div>
       </div>
 
-      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        {/* SIDEBAR */}
-        <div className="max-lg:hidden" style={{ width: "260px", minWidth: "260px", borderRight: "1px solid rgba(255,255,255,0.04)", padding: "20px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "12px" }}>
-          <div style={{ color: "#888", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px" }}>Projetos ({projects.length})</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            {projects.map(p => {
-              const typeConfig = PROJECT_TYPES[p.type];
-              return (
-                <div key={p.id} className="group relative overflow-hidden rounded-xl border border-white/5 p-3 cursor-pointer hover:border-orange-500/20 transition-all" style={{ background: "#181c26" }}>
-                  <div className="absolute left-0 top-0 bottom-0 w-0.5 rounded-r" style={{ background: typeConfig?.color }} />
-                  <div className="flex items-start justify-between pl-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-semibold mb-1 text-white truncate">{p.name}</div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-[9px] px-1.5 py-0.5 rounded uppercase" style={{ background: "rgba(255,255,255,0.04)", color: "#8891a5" }}>{p.format}</span>
-                        <span className="text-[10px] text-gray-500">{formatFileSize(p.file_size)}</span>
-                      </div>
-                    </div>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setPreviewProject(p); }}
-                        className="w-6 h-6 rounded-md flex items-center justify-center text-[10px] border border-white/5 text-gray-400 hover:text-white hover:border-white/20 transition-all"
-                        style={{ background: "rgba(255,255,255,0.03)" }}
-                        title="Ver detalhes"
-                      >👁</button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (window.confirm(`Tem a certeza que deseja remover "${p.name}"?\n\nPoderá carregar uma versão atualizada posteriormente.`)) {
-                            setProjects(prev => prev.filter(proj => proj.id !== p.id));
-                            addMessage(`Projeto "${p.name}" removido. Pode carregar a versão atualizada a qualquer momento.`, "agent");
-                          }
-                        }}
-                        className="w-6 h-6 rounded-md flex items-center justify-center text-[10px] border border-white/5 text-gray-400 hover:text-red-400 hover:border-red-500/30 transition-all"
-                        style={{ background: "rgba(255,255,255,0.03)" }}
-                        title="Remover projeto"
-                      >🗑</button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          {uploadProgress && (
-            <div className="rounded-xl border border-orange-500/20 p-3 mb-3" style={{ background: "rgba(255,107,53,0.05)" }}>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 border-2 border-orange-500/30 border-t-orange-500 rounded-full animate-spin" />
-                <span className="text-[11px] text-orange-400">{uploadProgress}</span>
-              </div>
-            </div>
-          )}
-          <button onClick={() => setShowUpload(true)} style={{ width: "100%", border: "2px dashed rgba(255,165,0,0.15)", borderRadius: "12px", padding: "24px", textAlign: "center", background: "transparent", cursor: "pointer", color: "#888" }}>
-            <div style={{ fontSize: "24px", marginBottom: "4px" }}>📁</div>
-            <div style={{ fontSize: "12px", fontWeight: 600 }}>Carregar Projeto</div>
-            <div style={{ fontSize: "10px", color: "#555", marginTop: "2px" }}>PDF · DWG · DWF · IFC · ZIP</div>
-          </button>
-        </div>
-
-        {/* MAIN */}
-        <div className="p-4 sm:p-6" style={{ flex: 1, overflowY: "auto" }}>
-          {isAnalyzing && (
-            <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "16px", marginBottom: "20px", borderRadius: "12px", background: "rgba(255,165,0,0.05)", border: "1px solid rgba(255,165,0,0.15)" }}>
-              <div style={{ width: "20px", height: "20px", border: "2px solid #f59e0b", borderTop: "2px solid transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
-              <span style={{ color: "#f59e0b", fontSize: "13px" }}>A analisar incompatibilidades...</span>
-            </div>
-          )}
-
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" }}>
+      {/* Main Content */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Header */}
+        <div style={{ padding: '16px 24px', borderBottom: '1px solid rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'linear-gradient(135deg, #ff6b35, #ff8c5a)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>🔍</div>
             <div>
-              <h2 style={{ color: "#fff", fontSize: "20px", fontWeight: 700, margin: 0 }}>Análise de Incompatibilidades</h2>
-              <p style={{ color: "#555", fontSize: "12px", marginTop: "4px" }}>{projects.length} projetos · Última análise: 11 Fev 2026</p>
+              <div style={{ fontSize: '16px', fontWeight: 800, color: '#fff' }}>IncompatiCheck</div>
+              <div style={{ fontSize: '11px', color: '#888' }}>Análise de Incompatibilidades</div>
             </div>
-            <button onClick={runAnalysis} disabled={isAnalyzing} style={{ padding: "10px 20px", borderRadius: "12px", border: "none", background: "linear-gradient(135deg, #f59e0b, #ea580c)", color: "#fff", fontSize: "12px", fontWeight: 700, cursor: "pointer", opacity: isAnalyzing ? 0.5 : 1 }}>
-              ▶ Executar Análise
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            {/* Obra selector */}
+            <button onClick={() => ic.obras.length > 0 ? setShowObraList(true) : setShowObraModal(true)} style={{
+              padding: '8px 14px', borderRadius: '10px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+              border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)', color: '#ccc',
+            }}>
+              🏗️ {ic.obraAtiva?.nome || 'Selecionar Obra'}
             </button>
-          </div>
 
-          {/* Stats */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-            <StatCard number={criticalCount} label="Críticas" type="critical" />
-            <StatCard number={warningCount} label="Alertas" type="warning" />
-            <StatCard number={infoCount} label="Observações" type="info" />
-            <StatCard number={projects.length} label="Projetos" type="ok" />
+            {hasObra && (
+              <>
+                <button onClick={() => setShowUpload(true)} style={{
+                  padding: '8px 14px', borderRadius: '10px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                  border: '1px solid rgba(255,165,0,0.2)', background: 'rgba(255,165,0,0.05)', color: '#f59e0b',
+                }}>
+                  📁 Upload
+                </button>
+                {hasAnalysis && (
+                  <button onClick={() => setShowShare(true)} style={{
+                    padding: '8px 14px', borderRadius: '10px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                    border: '1px solid rgba(0,201,167,0.2)', background: 'rgba(0,201,167,0.05)', color: '#00c9a7',
+                  }}>
+                    📤 Relatório
+                  </button>
+                )}
+              </>
+            )}
           </div>
+        </div>
 
-          {/* Cross section */}
-          <div style={{ marginBottom: "24px", background: "rgba(255,255,255,0.02)", borderRadius: "16px", border: "1px solid rgba(255,255,255,0.04)", padding: "20px" }}>
-            <div style={{ color: "#888", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", marginBottom: "12px" }}>Secção Transversal — Eixo 3</div>
-            <CrossSectionSVG />
-            <div style={{ display: "flex", gap: "16px", marginTop: "12px", justifyContent: "center" }}>
-              {[{ c: "#00c9a7", l: "Hidráulica" }, { c: "#8b5cf6", l: "Esgoto" }, { c: "#ffd60a", l: "Gás" }, { c: "#ff3b5c", l: "Elétrica" }, { c: "#4a4a50", l: "Betão" }].map(x => (
-                <div key={x.l} style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "10px", color: "#666" }}>
-                  <div style={{ width: "8px", height: "8px", borderRadius: "2px", background: x.c }} />
-                  {x.l}
-                </div>
-              ))}
+        {/* Main scrollable area */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
+          {/* STATE: No obra */}
+          {!hasObra && (
+            <div style={{ textAlign: 'center', padding: '80px 20px' }}>
+              <div style={{ fontSize: '48px', marginBottom: '16px' }}>🏗️</div>
+              <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>Registe uma obra para começar</h2>
+              <p style={{ color: '#888', fontSize: '14px', marginBottom: '24px' }}>Crie uma obra para carregar projetos e analisar incompatibilidades.</p>
+              <button onClick={() => setShowObraModal(true)} style={{
+                padding: '12px 28px', borderRadius: '12px', border: 'none', cursor: 'pointer',
+                background: 'linear-gradient(135deg, #ff6b35, #ff8c5a)', color: '#fff', fontSize: '14px', fontWeight: 600,
+              }}>
+                + Registar Obra
+              </button>
             </div>
-          </div>
+          )}
 
-          {/* Incompatibilities list */}
-          <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: "16px", border: "1px solid rgba(255,255,255,0.04)", padding: "20px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-              <div style={{ color: "#888", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px" }}>Incompatibilidades ({filteredIncomp.length})</div>
-              <div style={{ display: "flex", gap: "6px" }}>
-                {[{ k: "all", l: "Todas" }, { k: "critical", l: "Críticas" }, { k: "warning", l: "Alertas" }, { k: "info", l: "Info" }].map(f => (
-                  <button key={f.k} onClick={() => setFilter(f.k)} style={{
-                    padding: "4px 12px", borderRadius: "20px", fontSize: "11px", cursor: "pointer",
-                    border: filter === f.k ? "1px solid rgba(255,165,0,0.3)" : "1px solid rgba(255,255,255,0.05)",
-                    background: filter === f.k ? "rgba(255,165,0,0.1)" : "transparent",
-                    color: filter === f.k ? "#f59e0b" : "#555",
-                  }}>{f.l}</button>
+          {/* STATE: Has obra, no projects */}
+          {hasObra && !hasProjects && !ic.analyzing && (
+            <div style={{ textAlign: 'center', padding: '80px 20px' }}>
+              <div style={{ fontSize: '48px', marginBottom: '16px' }}>📁</div>
+              <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>Carregue os projetos para análise</h2>
+              <p style={{ color: '#888', fontSize: '14px', marginBottom: '8px' }}>Obra: <strong style={{ color: '#ff6b35' }}>{ic.obraAtiva?.nome}</strong></p>
+              <p style={{ color: '#666', fontSize: '13px', marginBottom: '24px' }}>PDF · DWG · DWF · IFC · ZIP — até 2GB</p>
+              <button onClick={() => setShowUpload(true)} style={{
+                padding: '12px 28px', borderRadius: '12px', border: 'none', cursor: 'pointer',
+                background: 'linear-gradient(135deg, #ff6b35, #ff8c5a)', color: '#fff', fontSize: '14px', fontWeight: 600,
+              }}>
+                📁 Upload de Projeto
+              </button>
+            </div>
+          )}
+
+          {/* STATE: Has projects, no analysis */}
+          {hasObra && hasProjects && !hasAnalysis && !ic.analyzing && (
+            <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+              <div style={{ fontSize: '48px', marginBottom: '16px' }}>⚡</div>
+              <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>Execute a análise de incompatibilidades</h2>
+              <p style={{ color: '#888', fontSize: '14px', marginBottom: '8px' }}>
+                {ic.projects.length} projeto{ic.projects.length !== 1 ? 's' : ''} carregado{ic.projects.length !== 1 ? 's' : ''} na obra <strong style={{ color: '#ff6b35' }}>{ic.obraAtiva?.nome}</strong>
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'center', marginBottom: '24px' }}>
+                {ic.projects.map(p => (
+                  <ProjectTypeBadge key={p.id} type={p.type} />
                 ))}
               </div>
+              <button onClick={handleRunAnalysis} style={{
+                padding: '12px 28px', borderRadius: '12px', border: 'none', cursor: 'pointer',
+                background: 'linear-gradient(135deg, #ff6b35, #ff8c5a)', color: '#fff', fontSize: '14px', fontWeight: 600,
+              }}>
+                ⚡ Executar Análise
+              </button>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              {filteredIncomp.map(inc => {
-                const sev = SEVERITY_CONFIG[inc.severity];
-                return (
-                  <div key={inc.id} style={{ display: "flex", gap: "12px", padding: "14px", borderRadius: "12px", border: `1px solid ${sev?.border || "rgba(255,255,255,0.04)"}`, background: sev?.bg || "transparent" }}>
-                    <div style={{ width: "4px", borderRadius: "4px", background: sev?.color || "#555", flexShrink: 0 }} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "4px" }}>
-                        <div style={{ color: "#ddd", fontSize: "13px", fontWeight: 600 }}>{inc.title}</div>
-                        <span style={{ fontSize: "10px", color: "#555", flexShrink: 0 }}>{inc.location}</span>
-                      </div>
-                      <p style={{ color: "#888", fontSize: "11px", lineHeight: 1.5, margin: "0 0 8px 0" }}>{inc.description}</p>
-                      <div style={{ display: "flex", gap: "4px" }}>
-                        {inc.tags.map(t => <ProjectTypeBadge key={t} type={t} />)}
+          )}
+
+          {/* STATE: Analyzing */}
+          {ic.analyzing && (
+            <div style={{ textAlign: 'center', padding: '80px 20px' }}>
+              <div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-6" />
+              <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>A analisar incompatibilidades...</h2>
+              <p style={{ color: '#888', fontSize: '13px' }}>{ic.uploadProgress || 'A processar projetos...'}</p>
+            </div>
+          )}
+
+          {/* STATE: Has analysis results */}
+          {hasObra && hasAnalysis && !ic.analyzing && (
+            <>
+              {/* Stats */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', marginBottom: '24px' }}>
+                <StatCard number={ic.analysis!.critical_count} label="Críticas" type="critical" />
+                <StatCard number={ic.analysis!.warning_count} label="Alertas" type="warning" />
+                <StatCard number={ic.analysis!.info_count} label="Observações" type="info" />
+                <StatCard number={ic.analysis!.total_projects} label="Projetos" type="ok" />
+              </div>
+
+              {/* Cross section SVG */}
+              <div style={{ marginBottom: '24px' }}>
+                <CrossSectionSVG />
+              </div>
+
+              {/* Re-run analysis + upload more */}
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                <button onClick={() => setShowUpload(true)} style={{
+                  padding: '8px 14px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, cursor: 'pointer',
+                  border: '1px solid rgba(255,165,0,0.2)', background: 'rgba(255,165,0,0.05)', color: '#f59e0b',
+                }}>
+                  + Upload
+                </button>
+                <button onClick={handleRunAnalysis} style={{
+                  padding: '8px 14px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, cursor: 'pointer',
+                  border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)', color: '#ccc',
+                }}>
+                  ⚡ Re-analisar
+                </button>
+              </div>
+
+              {/* Filters */}
+              <div style={{ display: 'flex', gap: '6px', marginBottom: '16px' }}>
+                {[
+                  { key: 'all', label: 'Todas' },
+                  { key: 'critical', label: `Críticas (${ic.analysis!.critical_count})` },
+                  { key: 'warning', label: `Alertas (${ic.analysis!.warning_count})` },
+                  { key: 'info', label: `Info (${ic.analysis!.info_count})` },
+                ].map(f => (
+                  <button key={f.key} onClick={() => setFilter(f.key)} style={{
+                    padding: '6px 14px', borderRadius: '8px', fontSize: '11px', fontWeight: 600, cursor: 'pointer',
+                    background: filter === f.key ? 'rgba(255,165,0,0.1)' : 'transparent',
+                    border: `1px solid ${filter === f.key ? 'rgba(255,165,0,0.3)' : 'rgba(255,255,255,0.05)'}`,
+                    color: filter === f.key ? '#f59e0b' : '#888',
+                  }}>
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Findings list */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {filteredFindings.map(finding => {
+                  const sev = SEVERITY_CONFIG[finding.severity];
+                  return (
+                    <div key={finding.id} style={{
+                      padding: '16px', borderRadius: '14px',
+                      background: sev?.bg || 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${sev?.border || 'rgba(255,255,255,0.06)'}`,
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+                        <div style={{
+                          width: '8px', height: '8px', borderRadius: '50%', marginTop: '6px', flexShrink: 0,
+                          background: sev?.color || '#888',
+                        }} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                            <span style={{
+                              fontSize: '9px', padding: '2px 8px', borderRadius: '6px', fontWeight: 700,
+                              color: sev?.color, background: `${sev?.color}15`, border: `1px solid ${sev?.border}`,
+                            }}>
+                              {sev?.label}
+                            </span>
+                            {finding.location && (
+                              <span style={{ fontSize: '10px', color: '#666' }}>📍 {finding.location}</span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '13px', fontWeight: 600, color: '#eee', marginBottom: '4px' }}>{finding.title}</div>
+                          <div style={{ fontSize: '12px', color: '#999', lineHeight: 1.5 }}>{finding.description}</div>
+                          {finding.tags.length > 0 && (
+                            <div style={{ display: 'flex', gap: '4px', marginTop: '8px', flexWrap: 'wrap' }}>
+                              {finding.tags.map(tag => (
+                                <ProjectTypeBadge key={tag} type={tag} />
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
+                  );
+                })}
+                {filteredFindings.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: '40px', color: '#555', fontSize: '13px' }}>
+                    Nenhuma incompatibilidade encontrada com este filtro.
                   </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* AGENT PANEL */}
-        <div className="max-lg:hidden">
-          <AgentPanel chatMessages={chatMessages} onAddMessage={addMessage} />
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
-      <UploadModal isOpen={showUpload} onClose={() => setShowUpload(false)} onUpload={handleUpload} />
-      <ShareModal isOpen={showShare} onClose={() => setShowShare(false)} obraInfo={obraAtiva} />
-      <ObraRegistModal isOpen={showObraModal} onClose={() => setShowObraModal(false)} onConfirm={(info) => {
-        const novaObra: Obra = {
-          id: String(Date.now()),
-          nome: info.nome,
-          cidade: info.cidade,
-          fiscal: info.fiscal,
-          created_at: new Date().toISOString().slice(0, 10),
-          project_count: 0,
-        };
-        setObras(prev => [...prev, novaObra]);
-        setObraAtiva(novaObra);
-        setShowObraModal(false);
-        addMessage(`Obra **"${info.nome}"** registada com sucesso.${info.cidade ? ` Localização: ${info.cidade}.` : ""}${info.fiscal ? ` Fiscal: ${info.fiscal}.` : ""} Pode agora carregar os projetos para análise.`, "agent");
-      }} />
-      <ObraListModal
-        isOpen={showObraList}
-        onClose={() => setShowObraList(false)}
-        obras={obras}
-        obraAtiva={obraAtiva}
-        onSelect={(obra) => {
-          setObraAtiva(obra);
-          addMessage(`Obra **"${obra.nome}"** selecionada. ${obra.project_count} projetos carregados. Pode adicionar mais projetos ou executar a análise.`, "agent");
-        }}
-        onDelete={(id) => {
-          const removed = obras.find(o => o.id === id);
-          setObras(prev => prev.filter(o => o.id !== id));
-          if (obraAtiva?.id === id) setObraAtiva(null);
-          if (removed) addMessage(`Obra "${removed.nome}" removida com todos os projetos associados.`, "agent");
-        }}
-        onNew={() => { setShowObraList(false); setShowObraModal(true); }}
-      />
-      <ProjectPreviewModal
-        project={previewProject}
-        onClose={() => setPreviewProject(null)}
-        onDelete={(id) => {
-          const removed = projects.find(p => p.id === id);
-          setProjects(prev => prev.filter(p => p.id !== id));
-          if (removed) addMessage(`Projeto "${removed.name}" removido. Carregue a versão atualizada quando pretender.`, "agent");
-        }}
-      />
+      {/* Agent Panel */}
+      <div className="max-lg:hidden">
+        <AgentPanel chatMessages={ic.chatMessages} onSendMessage={ic.sendUserMessage} />
+      </div>
 
-      <style>{`
-        @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(255,107,53,0.5); } 70% { box-shadow: 0 0 0 20px rgba(255,107,53,0); } 100% { box-shadow: 0 0 0 0 rgba(255,107,53,0); } }
-        @keyframes wave { 0%, 100% { transform: scaleY(0.4); } 50% { transform: scaleY(1); } }
-        @keyframes spin { to { transform: rotate(360deg); } }
-      `}</style>
+      {/* Modals */}
+      <ObraRegistModal isOpen={showObraModal} onClose={() => setShowObraModal(false)} onConfirm={handleCreateObra} />
+      <ObraListModal isOpen={showObraList} onClose={() => setShowObraList(false)} obras={ic.obras} obraAtiva={ic.obraAtiva}
+        onSelect={obra => ic.selectObra(obra)} onDelete={id => ic.deleteObra(id)} onNew={() => { setShowObraList(false); setShowObraModal(true); }} />
+      <UploadModal isOpen={showUpload} onClose={() => setShowUpload(false)} onUpload={handleUpload}
+        obraNome={ic.obraAtiva?.nome} uploadProgress={ic.uploadProgress} />
+      <ShareModal isOpen={showShare} onClose={() => setShowShare(false)} obraAtiva={ic.obraAtiva}
+        findingsCount={{ critical: ic.analysis?.critical_count || 0, warning: ic.analysis?.warning_count || 0, info: ic.analysis?.info_count || 0 }}
+        onGenerateReport={ic.generateReport} />
+      <ProjectPreviewModal project={previewProject} onClose={() => setPreviewProject(null)}
+        onDelete={(id, path) => ic.deleteProject(id, path)} />
     </div>
   );
 }
-
-export { MOCK_PROJECTS, MOCK_INCOMPATIBILITIES, SEVERITY_CONFIG, PROJECT_TYPES, FILE_SIZE_LIMIT, StatCard, CrossSectionSVG, ProjectTypeBadge, UploadModal, ShareModal, ObraRegistModal, ProjectPreviewModal, ObraListModal };
-export type { Project, Incompatibility, ChatMessage, Obra };
