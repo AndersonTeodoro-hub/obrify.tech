@@ -27,6 +27,7 @@ import Settings from "./pages/app/Settings";
 import InspectionTemplates from "./pages/app/InspectionTemplates";
 import InspectionDetail from "./pages/app/InspectionDetail";
 import NonConformities from "./pages/app/NonConformities";
+import IncompatiCheck from "./pages/app/IncompatiCheck";
 import AcceptInvite from "./pages/AcceptInvite";
 
 const queryClient = new QueryClient();
@@ -60,6 +61,7 @@ const App = () => (
                 <Route path="inspections" element={<Inspections />} />
                 <Route path="inspections/:inspectionId" element={<InspectionDetail />} />
                 <Route path="nonconformities" element={<NonConformities />} />
+                <Route path="incompaticheck" element={<IncompatiCheck />} />
                 <Route path="reports" element={<Reports />} />
                 <Route path="drone" element={<Drone />} />
                 <Route path="settings" element={<Settings />} />

@@ -1116,6 +1116,180 @@ export type Database = {
           },
         ]
       }
+      incompaticheck_analyses: {
+        Row: {
+          created_at: string | null
+          id: string
+          project_ids: string[] | null
+          results: Json | null
+          status: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          project_ids?: string[] | null
+          results?: Json | null
+          status?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          project_ids?: string[] | null
+          results?: Json | null
+          status?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      incompaticheck_chat: {
+        Row: {
+          analysis_id: string | null
+          content: string
+          created_at: string | null
+          id: string
+          role: string | null
+          user_id: string
+        }
+        Insert: {
+          analysis_id?: string | null
+          content: string
+          created_at?: string | null
+          id?: string
+          role?: string | null
+          user_id: string
+        }
+        Update: {
+          analysis_id?: string | null
+          content?: string
+          created_at?: string | null
+          id?: string
+          role?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "incompaticheck_chat_analysis_id_fkey"
+            columns: ["analysis_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_analyses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      incompaticheck_findings: {
+        Row: {
+          analysis_id: string | null
+          created_at: string | null
+          description: string | null
+          id: string
+          location: string | null
+          resolved: boolean | null
+          severity: string | null
+          tags: string[] | null
+          title: string
+        }
+        Insert: {
+          analysis_id?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          location?: string | null
+          resolved?: boolean | null
+          severity?: string | null
+          tags?: string[] | null
+          title: string
+        }
+        Update: {
+          analysis_id?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          location?: string | null
+          resolved?: boolean | null
+          severity?: string | null
+          tags?: string[] | null
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "incompaticheck_findings_analysis_id_fkey"
+            columns: ["analysis_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_analyses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      incompaticheck_projects: {
+        Row: {
+          created_at: string | null
+          file_size: number | null
+          file_url: string | null
+          format: string
+          id: string
+          name: string
+          type: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          file_size?: number | null
+          file_url?: string | null
+          format: string
+          id?: string
+          name: string
+          type: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          file_size?: number | null
+          file_url?: string | null
+          format?: string
+          id?: string
+          name?: string
+          type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      incompaticheck_reports: {
+        Row: {
+          analysis_id: string | null
+          created_at: string | null
+          id: string
+          pdf_url: string | null
+          shared_via: string[] | null
+          user_id: string
+        }
+        Insert: {
+          analysis_id?: string | null
+          created_at?: string | null
+          id?: string
+          pdf_url?: string | null
+          shared_via?: string[] | null
+          user_id: string
+        }
+        Update: {
+          analysis_id?: string | null
+          created_at?: string | null
+          id?: string
+          pdf_url?: string | null
+          shared_via?: string[] | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "incompaticheck_reports_analysis_id_fkey"
+            columns: ["analysis_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_analyses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inspection_documents: {
         Row: {
           document_id: string
