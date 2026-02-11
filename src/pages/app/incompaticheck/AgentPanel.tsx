@@ -50,6 +50,14 @@ export default function AgentPanel({ onSendMessage, agentThinking, findings }: A
     }
   }, [agentThinking]);
 
+  // Pre-load TTS voices
+  useEffect(() => {
+    const loadVoices = () => { window.speechSynthesis.getVoices(); };
+    loadVoices();
+    window.speechSynthesis.addEventListener('voiceschanged', loadVoices);
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', loadVoices);
+  }, []);
+
   // Cleanup
   useEffect(() => {
     return () => {
@@ -109,7 +117,9 @@ export default function AgentPanel({ onSendMessage, agentThinking, findings }: A
         setLastResponse(response);
         speakText(response);
       } else {
-        setVoiceState('idle');
+        const fallback = 'Não consegui obter resposta. Tente novamente.';
+        setLastResponse(fallback);
+        speakText(fallback);
       }
     } catch {
       setVoiceState('idle');

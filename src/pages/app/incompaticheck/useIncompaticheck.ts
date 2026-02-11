@@ -356,7 +356,8 @@ export function useIncompaticheck() {
   const [agentThinking, setAgentThinking] = useState(false);
 
   const sendUserMessage = useCallback(async (content: string): Promise<string | undefined> => {
-    if (!obraAtiva || !user) return undefined;
+    if (!obraAtiva) return 'Selecione uma obra primeiro para que eu possa ajudar.';
+    if (!user) return 'Precisa de iniciar sessão primeiro.';
     await sendMessage(content, 'user', obraAtiva.id);
 
     setAgentThinking(true);
