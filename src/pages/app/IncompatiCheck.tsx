@@ -315,7 +315,7 @@ export default function IncompatiCheck() {
 
       {/* Agent Panel */}
       <div className="max-lg:hidden">
-        <AgentPanel chatMessages={ic.chatMessages} onSendMessage={ic.sendUserMessage} />
+        <AgentPanel onSendMessage={ic.sendUserMessage} agentThinking={ic.agentThinking} findings={ic.findings} />
       </div>
 
       {/* Modals */}

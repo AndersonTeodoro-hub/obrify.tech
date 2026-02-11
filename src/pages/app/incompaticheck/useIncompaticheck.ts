@@ -353,18 +353,47 @@ export function useIncompaticheck() {
     }
   }, [user]);
 
-  const sendUserMessage = useCallback(async (content: string) => {
-    if (!obraAtiva || !user) return;
+  const [agentThinking, setAgentThinking] = useState(false);
+
+  const sendUserMessage = useCallback(async (content: string): Promise<string | undefined> => {
+    if (!obraAtiva || !user) return undefined;
     await sendMessage(content, 'user', obraAtiva.id);
 
-    // Generate and save agent response immediately
+    setAgentThinking(true);
     try {
-      const agentResponse = generateAgentResponseFromFindings(content, findings);
-      await sendMessage(agentResponse, 'agent', obraAtiva.id);
+      const recentMessages = chatMessages.slice(-20).map(m => ({
+        role: m.role === 'user' ? 'user' : 'assistant',
+        content: m.content,
+      }));
+      recentMessages.push({ role: 'user', content });
+
+      const { data, error } = await supabase.functions.invoke('incompaticheck-agent', {
+        body: {
+          messages: recentMessages,
+          findings: findings.map(f => ({ severity: f.severity, title: f.title, description: f.description, location: f.location })),
+          obraName: obraAtiva.nome,
+        },
+      });
+
+      if (error) {
+        console.error('Agent function error:', error);
+        const errMsg = 'Desculpe, ocorreu um erro de comunicação. Tente novamente.';
+        await sendMessage(errMsg, 'agent', obraAtiva.id);
+        return errMsg;
+      }
+
+      const reply = data?.reply || data?.error || 'Sem resposta. Tente novamente.';
+      await sendMessage(reply, 'agent', obraAtiva.id);
+      return reply;
     } catch (err) {
       console.error('Agent response error:', err);
+      const errMsg = 'Erro de comunicação. Tente novamente.';
+      await sendMessage(errMsg, 'agent', obraAtiva.id);
+      return errMsg;
+    } finally {
+      setAgentThinking(false);
     }
-  }, [obraAtiva, user, findings, sendMessage]);
+  }, [obraAtiva, user, findings, chatMessages, sendMessage]);
 
   // ---- REPORT ----
   const generateReport = useCallback(async () => {
@@ -472,6 +501,7 @@ export function useIncompaticheck() {
     loading,
     analyzing,
     uploadProgress,
+    agentThinking,
     // Actions
     loadObras,
     createObra,
