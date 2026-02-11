@@ -1231,6 +1231,36 @@ export type Database = {
           },
         ]
       }
+      incompaticheck_obras: {
+        Row: {
+          cidade: string | null
+          created_at: string | null
+          fiscal: string | null
+          id: string
+          nome: string
+          project_count: number | null
+          user_id: string | null
+        }
+        Insert: {
+          cidade?: string | null
+          created_at?: string | null
+          fiscal?: string | null
+          id?: string
+          nome: string
+          project_count?: number | null
+          user_id?: string | null
+        }
+        Update: {
+          cidade?: string | null
+          created_at?: string | null
+          fiscal?: string | null
+          id?: string
+          nome?: string
+          project_count?: number | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       incompaticheck_projects: {
         Row: {
           created_at: string | null
@@ -1239,6 +1269,7 @@ export type Database = {
           format: string
           id: string
           name: string
+          obra_id: string | null
           type: string
           user_id: string
         }
@@ -1249,6 +1280,7 @@ export type Database = {
           format: string
           id?: string
           name: string
+          obra_id?: string | null
           type: string
           user_id: string
         }
@@ -1259,10 +1291,19 @@ export type Database = {
           format?: string
           id?: string
           name?: string
+          obra_id?: string | null
           type?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "incompaticheck_projects_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_obras"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       incompaticheck_reports: {
         Row: {
