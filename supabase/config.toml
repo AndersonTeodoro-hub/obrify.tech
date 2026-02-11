@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.elevenlabs-stt-token]
 verify_jwt = false
+
+[functions.incompaticheck-agent]
+verify_jwt = false
