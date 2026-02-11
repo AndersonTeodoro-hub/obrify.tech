@@ -1118,106 +1118,117 @@ export type Database = {
       }
       incompaticheck_analyses: {
         Row: {
+          completed_at: string | null
           created_at: string | null
+          critical_count: number | null
           id: string
-          obra_cidade: string | null
-          obra_fiscal: string | null
-          obra_nome: string | null
-          project_ids: string[] | null
-          results: Json | null
+          info_count: number | null
+          obra_id: string
           status: string | null
+          total_projects: number | null
           user_id: string
+          warning_count: number | null
         }
         Insert: {
+          completed_at?: string | null
           created_at?: string | null
+          critical_count?: number | null
           id?: string
-          obra_cidade?: string | null
-          obra_fiscal?: string | null
-          obra_nome?: string | null
-          project_ids?: string[] | null
-          results?: Json | null
+          info_count?: number | null
+          obra_id: string
           status?: string | null
+          total_projects?: number | null
           user_id: string
+          warning_count?: number | null
         }
         Update: {
+          completed_at?: string | null
           created_at?: string | null
+          critical_count?: number | null
           id?: string
-          obra_cidade?: string | null
-          obra_fiscal?: string | null
-          obra_nome?: string | null
-          project_ids?: string[] | null
-          results?: Json | null
+          info_count?: number | null
+          obra_id?: string
           status?: string | null
+          total_projects?: number | null
           user_id?: string
+          warning_count?: number | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "incompaticheck_analyses_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_obras"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       incompaticheck_chat: {
         Row: {
-          analysis_id: string | null
           content: string
           created_at: string | null
           id: string
-          role: string | null
+          obra_id: string | null
+          role: string
           user_id: string
         }
         Insert: {
-          analysis_id?: string | null
           content: string
           created_at?: string | null
           id?: string
-          role?: string | null
+          obra_id?: string | null
+          role: string
           user_id: string
         }
         Update: {
-          analysis_id?: string | null
           content?: string
           created_at?: string | null
           id?: string
-          role?: string | null
+          obra_id?: string | null
+          role?: string
           user_id?: string
         }
         Relationships: [
           {
-            foreignKeyName: "incompaticheck_chat_analysis_id_fkey"
-            columns: ["analysis_id"]
+            foreignKeyName: "incompaticheck_chat_obra_id_fkey"
+            columns: ["obra_id"]
             isOneToOne: false
-            referencedRelation: "incompaticheck_analyses"
+            referencedRelation: "incompaticheck_obras"
             referencedColumns: ["id"]
           },
         ]
       }
       incompaticheck_findings: {
         Row: {
-          analysis_id: string | null
+          analysis_id: string
           created_at: string | null
-          description: string | null
+          description: string
           id: string
           location: string | null
           resolved: boolean | null
-          severity: string | null
+          severity: string
           tags: string[] | null
           title: string
         }
         Insert: {
-          analysis_id?: string | null
+          analysis_id: string
           created_at?: string | null
-          description?: string | null
+          description: string
           id?: string
           location?: string | null
           resolved?: boolean | null
-          severity?: string | null
+          severity: string
           tags?: string[] | null
           title: string
         }
         Update: {
-          analysis_id?: string | null
+          analysis_id?: string
           created_at?: string | null
-          description?: string | null
+          description?: string
           id?: string
           location?: string | null
           resolved?: boolean | null
-          severity?: string | null
+          severity?: string
           tags?: string[] | null
           title?: string
         }
@@ -1238,8 +1249,8 @@ export type Database = {
           fiscal: string | null
           id: string
           nome: string
-          project_count: number | null
-          user_id: string | null
+          updated_at: string | null
+          user_id: string
         }
         Insert: {
           cidade?: string | null
@@ -1247,8 +1258,8 @@ export type Database = {
           fiscal?: string | null
           id?: string
           nome: string
-          project_count?: number | null
-          user_id?: string | null
+          updated_at?: string | null
+          user_id: string
         }
         Update: {
           cidade?: string | null
@@ -1256,42 +1267,45 @@ export type Database = {
           fiscal?: string | null
           id?: string
           nome?: string
-          project_count?: number | null
-          user_id?: string | null
+          updated_at?: string | null
+          user_id?: string
         }
         Relationships: []
       }
       incompaticheck_projects: {
         Row: {
           created_at: string | null
+          file_path: string
           file_size: number | null
-          file_url: string | null
           format: string
+          from_zip: boolean | null
           id: string
           name: string
-          obra_id: string | null
+          obra_id: string
           type: string
           user_id: string
         }
         Insert: {
           created_at?: string | null
+          file_path: string
           file_size?: number | null
-          file_url?: string | null
           format: string
+          from_zip?: boolean | null
           id?: string
           name: string
-          obra_id?: string | null
+          obra_id: string
           type: string
           user_id: string
         }
         Update: {
           created_at?: string | null
+          file_path?: string
           file_size?: number | null
-          file_url?: string | null
           format?: string
+          from_zip?: boolean | null
           id?: string
           name?: string
-          obra_id?: string | null
+          obra_id?: string
           type?: string
           user_id?: string
         }
@@ -1307,26 +1321,29 @@ export type Database = {
       }
       incompaticheck_reports: {
         Row: {
-          analysis_id: string | null
+          analysis_id: string
           created_at: string | null
           id: string
-          pdf_url: string | null
+          obra_id: string
+          pdf_path: string | null
           shared_via: string[] | null
           user_id: string
         }
         Insert: {
-          analysis_id?: string | null
+          analysis_id: string
           created_at?: string | null
           id?: string
-          pdf_url?: string | null
+          obra_id: string
+          pdf_path?: string | null
           shared_via?: string[] | null
           user_id: string
         }
         Update: {
-          analysis_id?: string | null
+          analysis_id?: string
           created_at?: string | null
           id?: string
-          pdf_url?: string | null
+          obra_id?: string
+          pdf_path?: string | null
           shared_via?: string[] | null
           user_id?: string
         }
@@ -1336,6 +1353,13 @@ export type Database = {
             columns: ["analysis_id"]
             isOneToOne: false
             referencedRelation: "incompaticheck_analyses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incompaticheck_reports_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_obras"
             referencedColumns: ["id"]
           },
         ]
