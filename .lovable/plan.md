@@ -1,89 +1,78 @@
 
 
-# Agente Eng. Marcos — Voz Dinamica com ElevenLabs
+# Modo Voz Maos-Livres — ElevenLabs Conversational AI
 
-## Problemas identificados
+## Resumo
 
-1. **Fluxo partido**: Tem de clicar para gravar, depois clicar para parar, depois esperar -- nao e natural
-2. **"Selecione uma obra"**: O agente recusa funcionar sem obra seleccionada -- deveria funcionar sempre e dar contexto quando houver obra
-3. **Voz feminina**: O browser Speech Synthesis escolhe a primeira voz portuguesa disponivel (geralmente feminina) -- o Eng. Marcos e um homem
-4. **Nao e conversacional**: Depois de responder, volta ao idle -- deveria ser como falar com o GPT, fluido
+Substituir o sistema actual (Web Speech API STT + Gemini edge function + ElevenLabs TTS separado) por uma unica conexao WebRTC do ElevenLabs usando o SDK `@elevenlabs/react`. Resultado: 1 clique para iniciar, conversa tipo chamada, barge-in nativo.
 
-## Solucao
+## Passo 1: Guardar o Agent ID como secret
 
-### 1. ElevenLabs TTS para voz masculina real
+Guardar `ELEVENLABS_AGENT_ID` = `agent_2301kh79q27dfv2apftgettavq4f` nas secrets do projecto.
 
-O projecto ja tem `ELEVENLABS_API_KEY` configurado e a edge function `elevenlabs-tts` criada. Vamos usar a voz **Daniel** (onwK4e9ZLuTAKqWW03F9) -- voz masculina portuguesa de alta qualidade -- em vez do Speech Synthesis do browser.
+## Passo 2: Criar edge function `elevenlabs-conversation-token`
 
-Fluxo TTS:
-- Resposta do agente chega como texto
-- Chama `elevenlabs-tts` edge function com o texto
-- Recebe audio MP3 binario
-- Reproduz com `new Audio(URL.createObjectURL(blob))`
+Nova edge function que gera token WebRTC de uso unico:
+- Chama `GET https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=AGENT_ID`
+- Header: `xi-api-key: ELEVENLABS_API_KEY`
+- Retorna `{ token }` ao frontend
+- API key nunca exposta no cliente
 
-### 2. Fluxo conversacional automatico (como GPT Voice)
+Registar em `supabase/config.toml` com `verify_jwt = false`.
 
-```text
-1. Utilizador clica microfone -> STT inicia
-2. Fala normalmente
-3. Silencio detectado -> STT para automaticamente (onend)
-4. Texto enviado AUTOMATICAMENTE a IA (sem clique extra)
-5. "A pensar..." com spinner
-6. Resposta chega -> ElevenLabs fala com voz masculina
-7. Apos falar -> volta ao idle, pronto para novo clique
-```
+## Passo 3: Reescrever AgentPanel.tsx
 
-Zero cliques extras. Um clique para falar, o resto e automatico.
+Substituir todo o sistema de Web Speech API + TTS separado pelo hook `useConversation` do `@elevenlabs/react`.
 
-### 3. Agente funciona SEMPRE (com ou sem obra)
+### Fluxo
 
-Remover a condicao que bloqueia quando nao ha obra. O agente responde sempre:
-- **Com obra**: Tem contexto dos findings e nome da obra
-- **Sem obra**: Responde como engenheiro civil generalista, sem dados especificos da obra
+1. Utilizador clica "Iniciar Conversa"
+2. Pede permissao do microfone
+3. Busca token via edge function
+4. `conversation.startSession({ conversationToken, connectionType: 'webrtc' })`
+5. A partir daqui: maos-livres total — falar, pausar, o Marcos responde automaticamente
+6. Barge-in nativo — interromper o Marcos falando
+7. "Terminar" chama `conversation.endSession()`
 
-### 4. Seleccao de voz masculina portuguesa
+### UI
 
-Na funcao `speakText` (fallback caso ElevenLabs falhe), procurar especificamente vozes masculinas portuguesas em vez de aceitar qualquer voz `pt`.
+- Botao grande "Iniciar Conversa" / "Terminar"
+- Indicador: "Desligado" | "A ligar..." | "A ouvir" | "A falar"
+- Toggle mute + slider volume
+- Historico de bolhas (ultimas 50 mensagens via `onMessage`)
+- Quick commands via `conversation.sendUserMessage(text)`
+- Avatar com glow animado conforme estado
 
-## Ficheiros a modificar
+### Permissao negada
 
-| Ficheiro | Alteracao |
+Instrucoes curtas + botao "Tentar novamente".
+
+### Desconexao
+
+Botao "Reconectar" que repete token + startSession sem recarregar pagina.
+
+## Passo 4: Simplificar IncompatiCheck.tsx
+
+AgentPanel passa a receber apenas `findings` e `obraName` (sem `onSendMessage` nem `agentThinking`). O fluxo de voz e 100% gerido internamente pelo AgentPanel via WebRTC.
+
+## Passo 5: Quick commands
+
+Os botoes de comandos rapidos usam `conversation.sendUserMessage(text)` para enviar texto ao agente. O agente responde por voz automaticamente.
+
+## Ficheiros
+
+| Ficheiro | Accao |
 |---|---|
-| `src/pages/app/incompaticheck/AgentPanel.tsx` | Substituir Speech Synthesis por ElevenLabs TTS, melhorar fluxo automatico |
-| `src/pages/app/incompaticheck/useIncompaticheck.ts` | Remover bloqueio sem obra, agente responde sempre |
+| `supabase/functions/elevenlabs-conversation-token/index.ts` | CRIAR |
+| `supabase/config.toml` | EDITAR — adicionar nova function |
+| `src/pages/app/incompaticheck/AgentPanel.tsx` | REESCREVER — useConversation SDK |
+| `src/pages/app/IncompatiCheck.tsx` | EDITAR — simplificar props |
 
-## Detalhes tecnicos
+## Checklist ElevenLabs Dashboard (accao do utilizador)
 
-### AgentPanel.tsx — ElevenLabs TTS
-
-Nova funcao `speakWithElevenLabs`:
-```text
-1. Recebe texto da resposta
-2. Chama fetch() ao endpoint elevenlabs-tts com voiceId "onwK4e9ZLuTAKqWW03F9" (Daniel)
-3. Recebe blob audio/mpeg
-4. Cria Audio object e reproduz
-5. onended -> volta ao idle
-6. Se ElevenLabs falhar -> fallback para Speech Synthesis com voz masculina
-```
-
-### AgentPanel.tsx — Fluxo automatico
-
-- `recognition.onend` envia automaticamente o texto acumulado (ja faz isto)
-- Apos `speakText` terminar, estado volta a idle (ja faz isto)
-- O que muda: remover qualquer espera por clique adicional entre gravar e enviar
-
-### useIncompaticheck.ts — Sem bloqueio
-
-Mudar de:
-```typescript
-if (!obraAtiva) return 'Selecione uma obra primeiro...';
-```
-Para:
-```typescript
-// Funciona sempre, com ou sem obra
-const obraContext = obraAtiva ? obraAtiva.nome : undefined;
-// Se nao ha obra, nao persiste no Supabase mas responde na mesma
-```
-
-Se nao ha obra, chama a edge function na mesma mas sem findings e sem obraName. O agente responde como generalista. Se nao ha user, tambem responde (sem persistir).
+No dashboard do agente "Marcos" no ElevenLabs:
+- Language: PT-PT
+- Interruption / Barge-in: ON
+- System prompt: persona Eng. Marcos (engenheiro senior, +10 anos, normas PT/EU)
+- Voz: masculina portuguesa
 
