@@ -297,18 +297,20 @@ function UploadModal({ isOpen, onClose, onUpload }: { isOpen: boolean; onClose: 
   );
 }
 
-function ShareModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+function ShareModal({ isOpen, onClose, obraInfo }: { isOpen: boolean; onClose: () => void; obraInfo?: { nome: string; cidade: string; fiscal: string } | null }) {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [shareType, setShareType] = useState("email");
 
   if (!isOpen) return null;
 
+  const obraNome = obraInfo?.nome || "Obrify IncompatiCheck";
+
   const handleShare = () => {
     if (shareType === "email" && email) {
-      window.open(`mailto:${email}?subject=${encodeURIComponent("Relatório de Incompatibilidades — Obrify IncompatiCheck")}&body=${encodeURIComponent("Segue em anexo o relatório de análise de incompatibilidades gerado pela plataforma Obrify IncompatiCheck.")}`);
+      window.open(`mailto:${email}?subject=${encodeURIComponent(`Relatório de Incompatibilidades — ${obraNome}`)}&body=${encodeURIComponent(`Segue em anexo o relatório de análise de incompatibilidades.\n\n🏗️ Obra: ${obraNome}${obraInfo?.cidade ? `\n📍 Localização: ${obraInfo.cidade}` : ""}${obraInfo?.fiscal ? `\n👷 Fiscal: ${obraInfo.fiscal}` : ""}\n\nGerado pela plataforma Obrify IncompatiCheck.`)}`);
     } else if (shareType === "whatsapp" && phone) {
-      window.open(`https://wa.me/${phone.replace(/\D/g, "")}?text=${encodeURIComponent("📋 Relatório de Incompatibilidades — Obrify IncompatiCheck\n\n4 Incompatibilidades Críticas detectadas.\n\nGerado pela plataforma Obrify.")}`);
+      window.open(`https://wa.me/${phone.replace(/\D/g, "")}?text=${encodeURIComponent(`📋 Relatório de Incompatibilidades\n🏗️ Obra: ${obraNome}${obraInfo?.cidade ? `\n📍 ${obraInfo.cidade}` : ""}${obraInfo?.fiscal ? `\n👷 Fiscal: ${obraInfo.fiscal}` : ""}\n\n4 Incompatibilidades Críticas detectadas.\n\nGerado pela plataforma Obrify.`)}`);
     }
     onClose();
   };
@@ -419,7 +421,63 @@ function ShareModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void 
   );
 }
 
+function ObraSetupScreen({ onConfirm }: { onConfirm: (info: { nome: string; cidade: string; fiscal: string }) => void }) {
+  const [nome, setNome] = useState("");
+  const [cidade, setCidade] = useState("");
+  const [fiscal, setFiscal] = useState("");
+  const canSubmit = nome.trim().length > 0;
+
+  return (
+    <div className="h-screen w-screen flex items-center justify-center" style={{ background: "#0a0c10", fontFamily: "'DM Sans', sans-serif" }}>
+      <div className="fixed inset-0 pointer-events-none" style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.012) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.012) 1px, transparent 1px)", backgroundSize: "60px 60px" }} />
+      <div className="fixed top-[-200px] right-[-100px] w-[600px] h-[600px] rounded-full pointer-events-none" style={{ background: "#ff6b35", filter: "blur(180px)", opacity: 0.06 }} />
+      <div className="relative z-10 w-full max-w-md mx-4">
+        <div className="text-center mb-8">
+          <div className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center text-white font-bold text-lg" style={{ background: "linear-gradient(135deg, #ff6b35, #ff8c5a)" }}>O</div>
+          <h1 className="text-2xl font-bold text-white mb-1">Obrify <span style={{ color: "#ff6b35" }}>IncompatiCheck</span></h1>
+          <p className="text-sm text-gray-400">Identificação do Pedido de Análise</p>
+        </div>
+        <div className="rounded-2xl border border-white/5 p-6" style={{ background: "#181c26" }}>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-[10px] text-gray-500 uppercase tracking-widest font-mono mb-2">Nome da Obra *</label>
+              <input type="text" value={nome} onChange={e => setNome(e.target.value)} placeholder="Ex: Edifício Residencial Tejo Park"
+                className="w-full px-4 py-3 rounded-xl border border-white/5 text-white text-sm outline-none focus:border-orange-500/30 placeholder:text-gray-600 transition-all"
+                style={{ background: "rgba(255,255,255,0.03)" }} />
+            </div>
+            <div>
+              <label className="block text-[10px] text-gray-500 uppercase tracking-widest font-mono mb-2">Cidade / Localização</label>
+              <input type="text" value={cidade} onChange={e => setCidade(e.target.value)} placeholder="Ex: Lisboa, Parque das Nações"
+                className="w-full px-4 py-3 rounded-xl border border-white/5 text-white text-sm outline-none focus:border-orange-500/30 placeholder:text-gray-600 transition-all"
+                style={{ background: "rgba(255,255,255,0.03)" }} />
+            </div>
+            <div>
+              <label className="block text-[10px] text-gray-500 uppercase tracking-widest font-mono mb-2">Fiscal / Analisador</label>
+              <input type="text" value={fiscal} onChange={e => setFiscal(e.target.value)} placeholder="Ex: Eng. João Silva"
+                className="w-full px-4 py-3 rounded-xl border border-white/5 text-white text-sm outline-none focus:border-orange-500/30 placeholder:text-gray-600 transition-all"
+                style={{ background: "rgba(255,255,255,0.03)" }} />
+            </div>
+          </div>
+          <div className="mt-4 p-3 rounded-xl border border-white/5" style={{ background: "rgba(255,255,255,0.02)" }}>
+            <div className="text-[10px] text-gray-500 font-mono">💡 Estes dados ficam associados à análise e são incluídos automaticamente nos relatórios. Os projetos já contêm as identificações técnicas detalhadas.</div>
+          </div>
+          <button
+            onClick={() => canSubmit && onConfirm({ nome: nome.trim(), cidade: cidade.trim(), fiscal: fiscal.trim() })}
+            disabled={!canSubmit}
+            className="w-full mt-6 px-4 py-3.5 rounded-xl text-white text-sm font-semibold transition-all disabled:opacity-30 disabled:cursor-not-allowed hover:-translate-y-0.5"
+            style={{ background: "linear-gradient(135deg, #ff6b35, #ff8c5a)", boxShadow: canSubmit ? "0 4px 20px rgba(255,107,53,0.3)" : "none" }}
+          >
+            Iniciar Análise de Incompatibilidades
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function IncompatiCheck() {
+  const [obraInfo, setObraInfo] = useState<{ nome: string; cidade: string; fiscal: string } | null>(null);
+  const [showObraSetup, setShowObraSetup] = useState(true);
   const [projects, setProjects] = useState<Project[]>(MOCK_PROJECTS);
   const [filter, setFilter] = useState("all");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -453,6 +511,10 @@ export default function IncompatiCheck() {
     }, 3500);
   }, [addMessage, incompatibilities.length, criticalCount, warningCount, infoCount]);
 
+  if (showObraSetup) {
+    return <ObraSetupScreen onConfirm={(info) => { setObraInfo(info); setShowObraSetup(false); }} />;
+  }
+
   return (
     <div style={{ height: "100vh", background: "#0a0a0a", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* HEADER */}
@@ -463,6 +525,13 @@ export default function IncompatiCheck() {
             <span style={{ color: "#fff", fontWeight: 700, fontSize: "15px" }}>Obrify IncompatiCheck</span>
             <span style={{ color: "#555", fontSize: "10px", marginLeft: "8px" }}>Módulo v2.4</span>
           </div>
+          {obraInfo && (
+            <div className="flex items-center gap-2 ml-4 pl-4 border-l border-white/10">
+              <span className="text-xs text-gray-400">{obraInfo.nome}</span>
+              {obraInfo.cidade && <span className="text-[10px] text-gray-500">· {obraInfo.cidade}</span>}
+              {obraInfo.fiscal && <span className="text-[10px] text-gray-500">· {obraInfo.fiscal}</span>}
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", gap: "8px" }}>
           <button onClick={() => setShowUpload(true)} style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 16px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.05)", background: "#181c26", color: "#888", fontSize: "12px", cursor: "pointer" }}>📁 Upload</button>
@@ -577,7 +646,7 @@ export default function IncompatiCheck() {
       </div>
 
       <UploadModal isOpen={showUpload} onClose={() => setShowUpload(false)} onUpload={handleUpload} />
-      <ShareModal isOpen={showShare} onClose={() => setShowShare(false)} />
+      <ShareModal isOpen={showShare} onClose={() => setShowShare(false)} obraInfo={obraInfo} />
 
       <style>{`
         @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(255,107,53,0.5); } 70% { box-shadow: 0 0 0 20px rgba(255,107,53,0); } 100% { box-shadow: 0 0 0 0 rgba(255,107,53,0); } }
