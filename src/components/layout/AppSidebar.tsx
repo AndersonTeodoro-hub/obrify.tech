@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  LayoutDashboard, Building2, HardHat, Camera, ClipboardCheck, BarChart3, Plane, Settings, LogOut, AlertTriangle,
+  LayoutDashboard, Building2, HardHat, Camera, ClipboardCheck, BarChart3, Plane, Settings, LogOut, AlertTriangle, Search,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { supabase } from '@/integrations/supabase/client';
@@ -45,6 +45,10 @@ export function AppSidebar() {
     { title: t('nav.reports'), url: '/app/reports', icon: BarChart3 },
   ];
 
+  const toolItems = [
+    { title: 'Análise de Incompatibilidades', url: '/app/incompaticheck', icon: Search, badge: 'Novo' },
+  ];
+
   const futureItems = [
     { title: t('nav.drone'), url: '/app/drone', icon: Plane, badge: t('nav.comingSoon') },
   ];
@@ -85,6 +89,26 @@ export function AppSidebar() {
                     >
                       <item.icon className="w-5 h-5 flex-shrink-0" />
                       {!isCollapsed && <span className="font-medium">{item.title}</span>}
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup className="mt-4">
+          <SidebarGroupLabel className="text-xs text-muted-foreground uppercase tracking-wider px-2">
+            {!isCollapsed && 'Ferramentas'}
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {toolItems.map((item) => (
+                <SidebarMenuItem key={item.url}>
+                  <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={isCollapsed ? item.title : undefined}>
+                    <NavLink to={item.url} className="flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 hover:bg-slate-100 dark:hover:bg-slate-800" activeClassName="bg-gradient-to-r from-accent-100 to-transparent dark:from-slate-800/50 text-accent-600 dark:text-accent-400">
+                      <item.icon className="w-5 h-5 flex-shrink-0" />
+                      {!isCollapsed && (<><span className="flex-1 font-medium">{item.title}</span><Badge className="text-[10px] px-1.5 py-0 bg-orange-500 text-white border-orange-500">{item.badge}</Badge></>)}
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
