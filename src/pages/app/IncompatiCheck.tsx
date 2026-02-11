@@ -1,4 +1,6 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import AgentPanel from "./incompaticheck/AgentPanel";
+import { generateAgentResponse, formatFileSize } from "./incompaticheck/helpers";
 
 const SEVERITY_CONFIG: Record<string, { color: string; bg: string; label: string; border: string }> = {
   critical: { color: "#ff3b5c", bg: "rgba(255,59,92,0.1)", label: "Crítica", border: "rgba(255,59,92,0.25)" },
@@ -417,21 +419,171 @@ function ShareModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void 
   );
 }
 
-// Placeholder default export — Part 2 will replace this with the full component
 export default function IncompatiCheck() {
+  const [projects, setProjects] = useState<Project[]>(MOCK_PROJECTS);
+  const [filter, setFilter] = useState("all");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    { role: "agent", content: `Olá! Sou o **Eng. Marcos**, especialista em compatibilização com +10 anos de experiência em fundações, estruturas de betão armado e redes enterradas, com foco na regulamentação europeia e portuguesa (Eurocódigos, NP EN 206, DR 23/95, RTIEBT).\n\nIdentifiquei **4 incompatibilidades críticas**. A mais urgente: colisão da rede hidráulica DN150 com o bloco B2 no Eixo 3.\n\nPode falar por voz ou digitar. Estou à disposição.` },
+  ]);
+  const [showUpload, setShowUpload] = useState(false);
+  const [showShare, setShowShare] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  const incompatibilities = MOCK_INCOMPATIBILITIES;
+  const filteredIncomp = filter === "all" ? incompatibilities : incompatibilities.filter(i => i.severity === filter);
+  const criticalCount = incompatibilities.filter(i => i.severity === "critical").length;
+  const warningCount = incompatibilities.filter(i => i.severity === "warning").length;
+  const infoCount = incompatibilities.filter(i => i.severity === "info").length;
+
+  const addMessage = useCallback((content: string, role: "user" | "agent") => {
+    setChatMessages(prev => [...prev, { role, content }]);
+  }, []);
+
+  const handleUpload = useCallback((project: any) => {
+    setProjects(prev => [...prev, { id: String(Date.now()), name: project.name, type: project.type, format: project.format, file_size: project.file_size, created_at: new Date().toISOString().slice(0, 10) }]);
+    addMessage(`Projeto "${project.name}" carregado. A analisar...`, "agent");
+    setTimeout(() => addMessage("Análise concluída. **2 novas interferências** detectadas. Deseja detalhes?", "agent"), 2000);
+  }, [addMessage]);
+
+  const runAnalysis = useCallback(() => {
+    setIsAnalyzing(true);
+    setTimeout(() => {
+      setIsAnalyzing(false);
+      addMessage(`Análise completa! **92 elementos estruturais**, **30 trechos de rede**, **6 secções de terraplanagem**. Total: **${incompatibilities.length} incompatibilidades** (${criticalCount} críticas, ${warningCount} alertas, ${infoCount} observações).`, "agent");
+    }, 3500);
+  }, [addMessage, incompatibilities.length, criticalCount, warningCount, infoCount]);
+
   return (
-    <div style={{ padding: "40px", color: "#fff" }}>
-      <h1 style={{ fontSize: "24px", fontWeight: 700, marginBottom: "8px" }}>🔍 IncompatiCheck</h1>
-      <p style={{ color: "#888" }}>Módulo de Análise de Incompatibilidades — aguardando Parte 2.</p>
-      <div style={{ marginTop: "24px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "16px" }}>
-        <StatCard number={4} label="Críticas" type="critical" />
-        <StatCard number={7} label="Alertas" type="warning" />
-        <StatCard number={3} label="Observações" type="info" />
-        <StatCard number={5} label="Projetos" type="ok" />
+    <div style={{ height: "100vh", background: "#0a0a0a", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      {/* HEADER */}
+      <div style={{ padding: "16px 24px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <div style={{ width: "32px", height: "32px", borderRadius: "8px", background: "linear-gradient(135deg, #f59e0b, #ea580c)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: "14px" }}>O</div>
+          <div>
+            <span style={{ color: "#fff", fontWeight: 700, fontSize: "15px" }}>Obrify IncompatiCheck</span>
+            <span style={{ color: "#555", fontSize: "10px", marginLeft: "8px" }}>Módulo v2.4</span>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button onClick={() => setShowUpload(true)} style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 16px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.05)", background: "#181c26", color: "#888", fontSize: "12px", cursor: "pointer" }}>📁 Upload</button>
+          <button onClick={() => setShowShare(true)} style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 16px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.05)", background: "#181c26", color: "#888", fontSize: "12px", cursor: "pointer" }}>📤 Partilhar</button>
+        </div>
       </div>
-      <div style={{ marginTop: "24px" }}>
-        <CrossSectionSVG />
+
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+        {/* SIDEBAR */}
+        <div style={{ width: "260px", minWidth: "260px", borderRight: "1px solid rgba(255,255,255,0.04)", padding: "20px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "12px" }}>
+          <div style={{ color: "#888", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px" }}>Projetos ({projects.length})</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            {projects.map(p => (
+              <div key={p.id} style={{ padding: "12px", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.04)", background: "rgba(255,255,255,0.02)", cursor: "pointer" }}>
+                <ProjectTypeBadge type={p.type} />
+                <div style={{ color: "#ccc", fontSize: "12px", fontWeight: 600, marginTop: "6px" }}>{p.name}</div>
+                <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
+                  <span style={{ fontSize: "10px", color: "#555" }}>{p.format.toUpperCase()}</span>
+                  <span style={{ fontSize: "10px", color: "#555" }}>{formatFileSize(p.file_size)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button onClick={() => setShowUpload(true)} style={{ width: "100%", border: "2px dashed rgba(255,165,0,0.15)", borderRadius: "12px", padding: "24px", textAlign: "center", background: "transparent", cursor: "pointer", color: "#888" }}>
+            <div style={{ fontSize: "24px", marginBottom: "4px" }}>📁</div>
+            <div style={{ fontSize: "12px", fontWeight: 600 }}>Carregar Projeto</div>
+            <div style={{ fontSize: "10px", color: "#555", marginTop: "2px" }}>PDF · DWG · DWF · IFC</div>
+          </button>
+        </div>
+
+        {/* MAIN */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "24px" }}>
+          {isAnalyzing && (
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "16px", marginBottom: "20px", borderRadius: "12px", background: "rgba(255,165,0,0.05)", border: "1px solid rgba(255,165,0,0.15)" }}>
+              <div style={{ width: "20px", height: "20px", border: "2px solid #f59e0b", borderTop: "2px solid transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
+              <span style={{ color: "#f59e0b", fontSize: "13px" }}>A analisar incompatibilidades...</span>
+            </div>
+          )}
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" }}>
+            <div>
+              <h2 style={{ color: "#fff", fontSize: "20px", fontWeight: 700, margin: 0 }}>Análise de Incompatibilidades</h2>
+              <p style={{ color: "#555", fontSize: "12px", marginTop: "4px" }}>{projects.length} projetos · Última análise: 11 Fev 2026</p>
+            </div>
+            <button onClick={runAnalysis} disabled={isAnalyzing} style={{ padding: "10px 20px", borderRadius: "12px", border: "none", background: "linear-gradient(135deg, #f59e0b, #ea580c)", color: "#fff", fontSize: "12px", fontWeight: 700, cursor: "pointer", opacity: isAnalyzing ? 0.5 : 1 }}>
+              ▶ Executar Análise
+            </button>
+          </div>
+
+          {/* Stats */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginBottom: "24px" }}>
+            <StatCard number={criticalCount} label="Críticas" type="critical" />
+            <StatCard number={warningCount} label="Alertas" type="warning" />
+            <StatCard number={infoCount} label="Observações" type="info" />
+            <StatCard number={projects.length} label="Projetos" type="ok" />
+          </div>
+
+          {/* Cross section */}
+          <div style={{ marginBottom: "24px", background: "rgba(255,255,255,0.02)", borderRadius: "16px", border: "1px solid rgba(255,255,255,0.04)", padding: "20px" }}>
+            <div style={{ color: "#888", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", marginBottom: "12px" }}>Secção Transversal — Eixo 3</div>
+            <CrossSectionSVG />
+            <div style={{ display: "flex", gap: "16px", marginTop: "12px", justifyContent: "center" }}>
+              {[{ c: "#00c9a7", l: "Hidráulica" }, { c: "#8b5cf6", l: "Esgoto" }, { c: "#ffd60a", l: "Gás" }, { c: "#ff3b5c", l: "Elétrica" }, { c: "#4a4a50", l: "Betão" }].map(x => (
+                <div key={x.l} style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "10px", color: "#666" }}>
+                  <div style={{ width: "8px", height: "8px", borderRadius: "2px", background: x.c }} />
+                  {x.l}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Incompatibilities list */}
+          <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: "16px", border: "1px solid rgba(255,255,255,0.04)", padding: "20px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <div style={{ color: "#888", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px" }}>Incompatibilidades ({filteredIncomp.length})</div>
+              <div style={{ display: "flex", gap: "6px" }}>
+                {[{ k: "all", l: "Todas" }, { k: "critical", l: "Críticas" }, { k: "warning", l: "Alertas" }, { k: "info", l: "Info" }].map(f => (
+                  <button key={f.k} onClick={() => setFilter(f.k)} style={{
+                    padding: "4px 12px", borderRadius: "20px", fontSize: "11px", cursor: "pointer",
+                    border: filter === f.k ? "1px solid rgba(255,165,0,0.3)" : "1px solid rgba(255,255,255,0.05)",
+                    background: filter === f.k ? "rgba(255,165,0,0.1)" : "transparent",
+                    color: filter === f.k ? "#f59e0b" : "#555",
+                  }}>{f.l}</button>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {filteredIncomp.map(inc => {
+                const sev = SEVERITY_CONFIG[inc.severity];
+                return (
+                  <div key={inc.id} style={{ display: "flex", gap: "12px", padding: "14px", borderRadius: "12px", border: `1px solid ${sev?.border || "rgba(255,255,255,0.04)"}`, background: sev?.bg || "transparent" }}>
+                    <div style={{ width: "4px", borderRadius: "4px", background: sev?.color || "#555", flexShrink: 0 }} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "4px" }}>
+                        <div style={{ color: "#ddd", fontSize: "13px", fontWeight: 600 }}>{inc.title}</div>
+                        <span style={{ fontSize: "10px", color: "#555", flexShrink: 0 }}>{inc.location}</span>
+                      </div>
+                      <p style={{ color: "#888", fontSize: "11px", lineHeight: 1.5, margin: "0 0 8px 0" }}>{inc.description}</p>
+                      <div style={{ display: "flex", gap: "4px" }}>
+                        {inc.tags.map(t => <ProjectTypeBadge key={t} type={t} />)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* AGENT PANEL */}
+        <AgentPanel chatMessages={chatMessages} onAddMessage={addMessage} />
       </div>
+
+      <UploadModal isOpen={showUpload} onClose={() => setShowUpload(false)} onUpload={handleUpload} />
+      <ShareModal isOpen={showShare} onClose={() => setShowShare(false)} />
+
+      <style>{`
+        @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(255,107,53,0.5); } 70% { box-shadow: 0 0 0 20px rgba(255,107,53,0); } 100% { box-shadow: 0 0 0 0 rgba(255,107,53,0); } }
+        @keyframes wave { 0%, 100% { transform: scaleY(0.4); } 50% { transform: scaleY(1); } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
     </div>
   );
 }
