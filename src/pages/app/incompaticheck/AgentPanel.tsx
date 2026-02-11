@@ -88,7 +88,7 @@ export default function AgentPanel({ findings, obraName }: AgentPanelProps) {
     },
     onError: (err: any) => {
       console.error('ElevenLabs conversation error:', err);
-      setError('Erro na ligação com o Eng. Marcos. Tente reconectar.');
+      setError('Erro na ligação com o Engenheiro Marcos. Tente reconectar.');
       setConnectionState('disconnected');
     },
     onModeChange: (mode: any) => {
@@ -133,7 +133,7 @@ export default function AgentPanel({ findings, obraName }: AgentPanelProps) {
       await conversation.setVolume({ volume });
     } catch (e) {
       console.error('Failed to start conversation:', e);
-      setError('Não foi possível ligar ao Eng. Marcos. Tente novamente.');
+      setError('Não foi possível ligar ao Engenheiro Marcos. Tente novamente.');
       setConnectionState('disconnected');
     }
   }, [conversation, volume]);
@@ -185,7 +185,7 @@ export default function AgentPanel({ findings, obraName }: AgentPanelProps) {
   const stateLabel = connectionState === 'connecting'
     ? 'A ligar...'
     : isSpeaking
-    ? 'Eng. Marcos está a falar...'
+    ? 'Engenheiro Marcos está a falar...'
     : isListening
     ? 'A ouvir...'
     : 'Desligado';
@@ -218,7 +218,7 @@ export default function AgentPanel({ findings, obraName }: AgentPanelProps) {
 
       {/* Name */}
       <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>Eng. Marcos IA</div>
+        <div style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>Engº Marcos IA</div>
         <div style={{ fontSize: '12px', color: '#888', marginTop: '2px' }}>Engenheiro Sénior · Fiscalização</div>
         {obraName && (
           <div style={{ fontSize: '11px', color: '#ff6b35', marginTop: '4px' }}>
