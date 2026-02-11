@@ -1,82 +1,89 @@
 
-# Fix: Agente Ouve Mas Nao Responde
 
-## Causa raiz
+# Agente Eng. Marcos — Voz Dinamica com ElevenLabs
 
-Dois problemas identificados:
+## Problemas identificados
 
-### Problema 1: `sendUserMessage` falha silenciosamente quando nao ha obra seleccionada
+1. **Fluxo partido**: Tem de clicar para gravar, depois clicar para parar, depois esperar -- nao e natural
+2. **"Selecione uma obra"**: O agente recusa funcionar sem obra seleccionada -- deveria funcionar sempre e dar contexto quando houver obra
+3. **Voz feminina**: O browser Speech Synthesis escolhe a primeira voz portuguesa disponivel (geralmente feminina) -- o Eng. Marcos e um homem
+4. **Nao e conversacional**: Depois de responder, volta ao idle -- deveria ser como falar com o GPT, fluido
 
-Em `useIncompaticheck.ts` linha 359:
-```typescript
-if (!obraAtiva || !user) return undefined;
-```
-Retorna `undefined` sem qualquer feedback. O `AgentPanel.tsx` recebe `undefined` na linha 111 e simplesmente volta ao estado idle — o utilizador nao ve nenhum erro nem ouve nenhuma resposta.
+## Solucao
 
-### Problema 2: Erros na chamada a edge function podem ser silenciosos
+### 1. ElevenLabs TTS para voz masculina real
 
-Se `supabase.functions.invoke` falha (ex: timeout, rede), o catch na linha 388 retorna uma string de erro que DEVERIA funcionar. Mas o `sendMessage` na linha 391 pode falhar se `obraAtiva` ficou null entretanto (stale closure).
+O projecto ja tem `ELEVENLABS_API_KEY` configurado e a edge function `elevenlabs-tts` criada. Vamos usar a voz **Daniel** (onwK4e9ZLuTAKqWW03F9) -- voz masculina portuguesa de alta qualidade -- em vez do Speech Synthesis do browser.
 
-### Problema 3: TTS pode nao iniciar se as vozes nao estiverem carregadas
+Fluxo TTS:
+- Resposta do agente chega como texto
+- Chama `elevenlabs-tts` edge function com o texto
+- Recebe audio MP3 binario
+- Reproduz com `new Audio(URL.createObjectURL(blob))`
 
-O `speechSynthesis.getVoices()` pode retornar array vazio na primeira chamada (as vozes carregam async). A funcao `speakText` funciona mas a utterance pode nao ter voz atribuida, o que em alguns browsers nao produz som.
+### 2. Fluxo conversacional automatico (como GPT Voice)
 
-## Correcoes
-
-### Ficheiro 1: `src/pages/app/incompaticheck/AgentPanel.tsx`
-
-1. **Adicionar pre-carregamento de vozes**: No mount do componente, chamar `speechSynthesis.getVoices()` e ouvir o evento `voiceschanged` para garantir que as vozes estao disponiveis quando o TTS for chamado.
-
-2. **Adicionar feedback visual quando `onSendMessage` retorna `undefined`**: Em vez de ir silenciosamente para idle, mostrar subtitulo "Seleccione uma obra primeiro" e falar a mensagem.
-
-3. **Melhorar `sendAndSpeak`**: Se a resposta for `undefined`, dar feedback ao utilizador em vez de falhar silenciosamente.
-
-### Ficheiro 2: `src/pages/app/incompaticheck/useIncompaticheck.ts`
-
-1. **Nunca retornar `undefined` silenciosamente**: Quando `obraAtiva` ou `user` sao null, retornar uma mensagem de erro em vez de `undefined`:
-```typescript
-if (!obraAtiva || !user) return 'Seleccione uma obra primeiro para falar comigo.';
+```text
+1. Utilizador clica microfone -> STT inicia
+2. Fala normalmente
+3. Silencio detectado -> STT para automaticamente (onend)
+4. Texto enviado AUTOMATICAMENTE a IA (sem clique extra)
+5. "A pensar..." com spinner
+6. Resposta chega -> ElevenLabs fala com voz masculina
+7. Apos falar -> volta ao idle, pronto para novo clique
 ```
 
-2. **Garantir que erros na edge function sempre retornam string**: O catch ja faz isto, mas adicionar log para debug.
+Zero cliques extras. Um clique para falar, o resto e automatico.
 
-## Ficheiros a alterar
+### 3. Agente funciona SEMPRE (com ou sem obra)
+
+Remover a condicao que bloqueia quando nao ha obra. O agente responde sempre:
+- **Com obra**: Tem contexto dos findings e nome da obra
+- **Sem obra**: Responde como engenheiro civil generalista, sem dados especificos da obra
+
+### 4. Seleccao de voz masculina portuguesa
+
+Na funcao `speakText` (fallback caso ElevenLabs falhe), procurar especificamente vozes masculinas portuguesas em vez de aceitar qualquer voz `pt`.
+
+## Ficheiros a modificar
 
 | Ficheiro | Alteracao |
 |---|---|
-| `src/pages/app/incompaticheck/useIncompaticheck.ts` | `sendUserMessage` retorna mensagem de erro em vez de `undefined` |
-| `src/pages/app/incompaticheck/AgentPanel.tsx` | Pre-carregar vozes TTS, melhorar feedback quando resposta falha |
+| `src/pages/app/incompaticheck/AgentPanel.tsx` | Substituir Speech Synthesis por ElevenLabs TTS, melhorar fluxo automatico |
+| `src/pages/app/incompaticheck/useIncompaticheck.ts` | Remover bloqueio sem obra, agente responde sempre |
 
 ## Detalhes tecnicos
 
-### useIncompaticheck.ts — linha 359
+### AgentPanel.tsx — ElevenLabs TTS
+
+Nova funcao `speakWithElevenLabs`:
+```text
+1. Recebe texto da resposta
+2. Chama fetch() ao endpoint elevenlabs-tts com voiceId "onwK4e9ZLuTAKqWW03F9" (Daniel)
+3. Recebe blob audio/mpeg
+4. Cria Audio object e reproduz
+5. onended -> volta ao idle
+6. Se ElevenLabs falhar -> fallback para Speech Synthesis com voz masculina
+```
+
+### AgentPanel.tsx — Fluxo automatico
+
+- `recognition.onend` envia automaticamente o texto acumulado (ja faz isto)
+- Apos `speakText` terminar, estado volta a idle (ja faz isto)
+- O que muda: remover qualquer espera por clique adicional entre gravar e enviar
+
+### useIncompaticheck.ts — Sem bloqueio
 
 Mudar de:
 ```typescript
-if (!obraAtiva || !user) return undefined;
+if (!obraAtiva) return 'Selecione uma obra primeiro...';
 ```
 Para:
 ```typescript
-if (!obraAtiva) return 'Seleccione uma obra primeiro para que eu possa ajudar.';
-if (!user) return 'Precisa de iniciar sessao primeiro.';
+// Funciona sempre, com ou sem obra
+const obraContext = obraAtiva ? obraAtiva.nome : undefined;
+// Se nao ha obra, nao persiste no Supabase mas responde na mesma
 ```
 
-### AgentPanel.tsx — pre-carregamento de vozes
+Se nao ha obra, chama a edge function na mesma mas sem findings e sem obraName. O agente responde como generalista. Se nao ha user, tambem responde (sem persistir).
 
-Adicionar `useEffect` no mount:
-```typescript
-useEffect(() => {
-  const loadVoices = () => {
-    window.speechSynthesis.getVoices();
-  };
-  loadVoices();
-  window.speechSynthesis.addEventListener('voiceschanged', loadVoices);
-  return () => window.speechSynthesis.removeEventListener('voiceschanged', loadVoices);
-}, []);
-```
-
-### AgentPanel.tsx — sendAndSpeak melhorado
-
-Garantir que mesmo quando a resposta vem de um erro (ex: "Seleccione uma obra"), o agente FALA essa mensagem e mostra o subtitulo. O bloco `if (response)` ja cobre isto porque a string de erro nao e `undefined`.
-
-Resultado: o utilizador vai SEMPRE ouvir uma resposta — ou a resposta da IA, ou uma mensagem a pedir para seleccionar a obra.
