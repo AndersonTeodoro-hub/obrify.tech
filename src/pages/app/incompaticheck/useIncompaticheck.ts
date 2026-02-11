@@ -356,9 +356,10 @@ export function useIncompaticheck() {
   const [agentThinking, setAgentThinking] = useState(false);
 
   const sendUserMessage = useCallback(async (content: string): Promise<string | undefined> => {
-    if (!obraAtiva) return 'Selecione uma obra primeiro para que eu possa ajudar.';
-    if (!user) return 'Precisa de iniciar sessão primeiro.';
-    await sendMessage(content, 'user', obraAtiva.id);
+    // Persist chat only if obra is active
+    if (obraAtiva && user) {
+      await sendMessage(content, 'user', obraAtiva.id);
+    }
 
     setAgentThinking(true);
     try {
@@ -371,25 +372,25 @@ export function useIncompaticheck() {
       const { data, error } = await supabase.functions.invoke('incompaticheck-agent', {
         body: {
           messages: recentMessages,
-          findings: findings.map(f => ({ severity: f.severity, title: f.title, description: f.description, location: f.location })),
-          obraName: obraAtiva.nome,
+          findings: obraAtiva ? findings.map(f => ({ severity: f.severity, title: f.title, description: f.description, location: f.location })) : [],
+          obraName: obraAtiva?.nome || undefined,
         },
       });
 
       if (error) {
         console.error('Agent function error:', error);
         const errMsg = 'Desculpe, ocorreu um erro de comunicação. Tente novamente.';
-        await sendMessage(errMsg, 'agent', obraAtiva.id);
+        if (obraAtiva && user) await sendMessage(errMsg, 'agent', obraAtiva.id);
         return errMsg;
       }
 
       const reply = data?.reply || data?.error || 'Sem resposta. Tente novamente.';
-      await sendMessage(reply, 'agent', obraAtiva.id);
+      if (obraAtiva && user) await sendMessage(reply, 'agent', obraAtiva.id);
       return reply;
     } catch (err) {
       console.error('Agent response error:', err);
       const errMsg = 'Erro de comunicação. Tente novamente.';
-      await sendMessage(errMsg, 'agent', obraAtiva.id);
+      if (obraAtiva && user) await sendMessage(errMsg, 'agent', obraAtiva.id);
       return errMsg;
     } finally {
       setAgentThinking(false);
