@@ -1,13 +1,23 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Mic, MicOff, Volume2, VolumeX, RotateCcw, Loader2, HardHat } from 'lucide-react';
+import React, { useState, useRef, useCallback } from 'react';
+import { useConversation } from '@elevenlabs/react';
+import { Mic, MicOff, Volume2, VolumeX, Phone, PhoneOff, Loader2, HardHat, AlertCircle } from 'lucide-react';
+import { Slider } from '@/components/ui/slider';
+import { supabase } from '@/integrations/supabase/client';
 import type { Finding } from './types';
 
-type VoiceState = 'idle' | 'recording' | 'processing' | 'speaking';
-
 interface AgentPanelProps {
-  onSendMessage: (content: string) => Promise<string | undefined>;
-  agentThinking: boolean;
   findings: Finding[];
+  obraName?: string;
+}
+
+type ConnectionState = 'disconnected' | 'connecting' | 'connected';
+type AgentMode = 'listening' | 'speaking';
+
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'agent';
+  text: string;
+  timestamp: Date;
 }
 
 const QUICK_COMMANDS = [
@@ -19,290 +29,189 @@ const QUICK_COMMANDS = [
   { label: '📊 Resumo', text: 'Faz um resumo da análise de incompatibilidades desta obra' },
 ];
 
-function cleanMarkdown(text: string): string {
-  return text
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/\*(.*?)\*/g, '$1')
-    .replace(/#{1,6}\s/g, '')
-    .replace(/```[\s\S]*?```/g, '')
-    .replace(/`(.*?)`/g, '$1')
-    .replace(/\n{2,}/g, '. ')
-    .replace(/\n/g, '. ')
-    .replace(/- /g, ', ')
-    .trim();
-}
+const MAX_MESSAGES = 50;
 
-export default function AgentPanel({ onSendMessage, agentThinking, findings }: AgentPanelProps) {
-  const [voiceState, setVoiceState] = useState<VoiceState>('idle');
-  const [subtitle, setSubtitle] = useState('');
+export default function AgentPanel({ findings, obraName }: AgentPanelProps) {
+  const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
+  const [agentMode, setAgentMode] = useState<AgentMode>('listening');
   const [isMuted, setIsMuted] = useState(false);
-  const [lastResponse, setLastResponse] = useState('');
+  const [volume, setVolume] = useState(0.8);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [micDenied, setMicDenied] = useState(false);
 
-  const recognitionRef = useRef<any>(null);
-  const accumulatedTextRef = useRef('');
-  const subtitleTimerRef = useRef<ReturnType<typeof setTimeout>>();
-  const isSendingRef = useRef(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageIdCounter = useRef(0);
 
-  // Sync agentThinking → voiceState
-  useEffect(() => {
-    if (agentThinking && voiceState !== 'processing') {
-      setVoiceState('processing');
-    }
-  }, [agentThinking]);
-
-  // Cleanup
-  useEffect(() => {
-    return () => {
-      recognitionRef.current?.abort();
-      stopAudio();
-      if (subtitleTimerRef.current) clearTimeout(subtitleTimerRef.current);
-    };
-  }, []);
-
-  const showSubtitle = useCallback((text: string, duration = 5000) => {
-    setSubtitle(text);
-    if (subtitleTimerRef.current) clearTimeout(subtitleTimerRef.current);
-    if (duration > 0) {
-      subtitleTimerRef.current = setTimeout(() => setSubtitle(''), duration);
-    }
-  }, []);
-
-  const stopAudio = useCallback(() => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-      if (audioRef.current.src.startsWith('blob:')) {
-        URL.revokeObjectURL(audioRef.current.src);
-      }
-      audioRef.current = null;
-    }
-  }, []);
-
-  // ElevenLabs TTS — voz masculina Daniel (PT-PT)
-  const speakWithElevenLabs = useCallback(async (text: string) => {
-    const clean = cleanMarkdown(text);
-    const displayText = text.length > 200 ? text.substring(0, 200) + '...' : text;
-
-    if (isMuted) {
-      setVoiceState('idle');
-      showSubtitle(displayText, 5000);
-      return;
-    }
-
-    setVoiceState('speaking');
-    showSubtitle(displayText, 0);
-
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/elevenlabs-tts`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({
-            text: clean.substring(0, 4500), // ElevenLabs limit
-            voiceId: 'onwK4e9ZLuTAKqWW03F9', // Daniel — male PT
-          }),
-        }
-      );
-
-      if (!response.ok) throw new Error(`TTS ${response.status}`);
-
-      const audioBlob = await response.blob();
-      const audioUrl = URL.createObjectURL(audioBlob);
-
-      stopAudio();
-      const audio = new Audio(audioUrl);
-      audioRef.current = audio;
-
-      audio.onended = () => {
-        setVoiceState('idle');
-        URL.revokeObjectURL(audioUrl);
-        audioRef.current = null;
-        setTimeout(() => setSubtitle(''), 3000);
-      };
-      audio.onerror = () => {
-        setVoiceState('idle');
-        URL.revokeObjectURL(audioUrl);
-        audioRef.current = null;
-      };
-
-      await audio.play();
-    } catch (e) {
-      console.error('ElevenLabs TTS error, falling back to browser:', e);
-      // Fallback: browser Speech Synthesis with male voice
-      fallbackSpeak(clean, displayText);
-    }
-  }, [isMuted, showSubtitle, stopAudio]);
-
-  // Fallback browser TTS — procura voz masculina PT
-  const fallbackSpeak = useCallback((clean: string, displayText: string) => {
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(clean);
-    utterance.lang = 'pt-PT';
-    utterance.rate = 1.0;
-
-    const voices = window.speechSynthesis.getVoices();
-    // Prefer male Portuguese voice
-    const maleVoice = voices.find(v => v.lang.startsWith('pt') && v.name.toLowerCase().includes('male'));
-    const ptVoice = maleVoice || voices.find(v => v.lang.startsWith('pt'));
-    if (ptVoice) utterance.voice = ptVoice;
-
-    utterance.onstart = () => {
-      setVoiceState('speaking');
-      showSubtitle(displayText, 0);
-    };
-    utterance.onend = () => {
-      setVoiceState('idle');
-      setTimeout(() => setSubtitle(''), 3000);
-    };
-    utterance.onerror = () => setVoiceState('idle');
-
-    window.speechSynthesis.speak(utterance);
-  }, [showSubtitle]);
-
-  const sendAndSpeak = useCallback(async (text: string) => {
-    if (!text.trim() || isSendingRef.current) return;
-    isSendingRef.current = true;
-    setVoiceState('processing');
-    showSubtitle(text, 3000);
-
-    try {
-      const response = await onSendMessage(text.trim());
-      const reply = response || 'Não consegui obter resposta. Tente novamente.';
-      setLastResponse(reply);
-      await speakWithElevenLabs(reply);
-    } catch {
-      setVoiceState('idle');
-      showSubtitle('Erro de comunicação. Tente novamente.', 4000);
-    } finally {
-      isSendingRef.current = false;
-    }
-  }, [onSendMessage, speakWithElevenLabs, showSubtitle]);
-
-  const startRecording = useCallback(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      showSubtitle('Reconhecimento de voz não suportado neste navegador.', 4000);
-      return;
-    }
-
-    stopAudio();
-    window.speechSynthesis.cancel();
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'pt-PT';
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    accumulatedTextRef.current = '';
-
-    recognition.onresult = (event: any) => {
-      let interim = '';
-      let finalText = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          finalText += transcript + ' ';
-        } else {
-          interim += transcript;
-        }
-      }
-      if (finalText) accumulatedTextRef.current += finalText;
-      showSubtitle(accumulatedTextRef.current + interim, 0);
-    };
-
-    // Auto-send when user stops speaking
-    recognition.onend = () => {
-      const text = accumulatedTextRef.current.trim();
-      if (text) {
-        sendAndSpeak(text);
-      } else {
-        setVoiceState('idle');
-        setSubtitle('');
-      }
-    };
-
-    recognition.onerror = (e: any) => {
-      console.error('STT error:', e.error);
-      if (e.error !== 'aborted') {
-        setVoiceState('idle');
-        showSubtitle('Erro no reconhecimento de voz.', 3000);
-      }
-    };
-
-    recognitionRef.current = recognition;
-    recognition.start();
-    setVoiceState('recording');
-    setSubtitle('');
-  }, [sendAndSpeak, showSubtitle, stopAudio]);
-
-  const stopRecording = useCallback(() => {
-    recognitionRef.current?.stop();
-  }, []);
-
-  const toggleRecording = useCallback(() => {
-    if (voiceState === 'recording') {
-      stopRecording();
-    } else if (voiceState === 'idle') {
-      startRecording();
-    } else if (voiceState === 'speaking') {
-      // Interrupt speech and start new recording
-      stopAudio();
-      window.speechSynthesis.cancel();
-      setVoiceState('idle');
-      setTimeout(() => startRecording(), 100);
-    }
-  }, [voiceState, startRecording, stopRecording, stopAudio]);
-
-  const toggleMute = useCallback(() => {
-    setIsMuted(prev => {
-      if (!prev) {
-        stopAudio();
-        window.speechSynthesis.cancel();
-      }
-      return !prev;
+  const addMessage = useCallback((role: 'user' | 'agent', text: string) => {
+    if (!text.trim()) return;
+    const id = `msg-${++messageIdCounter.current}`;
+    setMessages(prev => {
+      const next = [...prev, { id, role, text: text.trim(), timestamp: new Date() }];
+      return next.length > MAX_MESSAGES ? next.slice(-MAX_MESSAGES) : next;
     });
-  }, [stopAudio]);
+    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+  }, []);
 
-  const repeatLast = useCallback(() => {
-    if (lastResponse) speakWithElevenLabs(lastResponse);
-  }, [lastResponse, speakWithElevenLabs]);
+  const conversation = useConversation({
+    onConnect: () => {
+      setConnectionState('connected');
+      setAgentMode('listening');
+      setError(null);
+    },
+    onDisconnect: () => {
+      setConnectionState('disconnected');
+      setAgentMode('listening');
+    },
+    onMessage: (message: any) => {
+      try {
+        if (message.type === 'user_transcript') {
+          const text = message.user_transcription_event?.user_transcript;
+          if (text) addMessage('user', text);
+        } else if (message.type === 'agent_response') {
+          const text = message.agent_response_event?.agent_response;
+          if (text) addMessage('agent', text);
+        } else if (message.type === 'agent_response_correction') {
+          const corrected = message.agent_response_correction_event?.corrected_agent_response;
+          if (corrected) {
+            setMessages(prev => {
+              const lastAgent = [...prev].reverse().findIndex(m => m.role === 'agent');
+              if (lastAgent === -1) return prev;
+              const idx = prev.length - 1 - lastAgent;
+              return prev.map((m, i) => i === idx ? { ...m, text: corrected } : m);
+            });
+          }
+        }
+      } catch (e) {
+        console.error('onMessage parse error:', e);
+      }
+    },
+    onError: (err: any) => {
+      console.error('ElevenLabs conversation error:', err);
+      setError('Erro na ligação com o Eng. Marcos. Tente reconectar.');
+      setConnectionState('disconnected');
+    },
+    onModeChange: (mode: any) => {
+      if (mode?.mode === 'speaking') {
+        setAgentMode('speaking');
+      } else {
+        setAgentMode('listening');
+      }
+    },
+  });
+
+  const startConversation = useCallback(async () => {
+    setError(null);
+    setMicDenied(false);
+    setConnectionState('connecting');
+
+    // 1. Request microphone permission
+    try {
+      await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      console.error('Microphone permission denied:', e);
+      setMicDenied(true);
+      setConnectionState('disconnected');
+      return;
+    }
+
+    // 2. Get conversation token from edge function
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke('elevenlabs-conversation-token');
+
+      if (fnError || !data?.token) {
+        throw new Error(fnError?.message || 'No token received');
+      }
+
+      // 3. Start WebRTC session
+      await conversation.startSession({
+        conversationToken: data.token,
+        connectionType: 'webrtc' as any,
+      });
+
+      // Set initial volume
+      await conversation.setVolume({ volume });
+    } catch (e) {
+      console.error('Failed to start conversation:', e);
+      setError('Não foi possível ligar ao Eng. Marcos. Tente novamente.');
+      setConnectionState('disconnected');
+    }
+  }, [conversation, volume]);
+
+  const endConversation = useCallback(async () => {
+    try {
+      await conversation.endSession();
+    } catch (e) {
+      console.error('Error ending conversation:', e);
+    }
+    setConnectionState('disconnected');
+  }, [conversation]);
+
+  const handleVolumeChange = useCallback(async (value: number[]) => {
+    const v = value[0];
+    setVolume(v);
+    if (connectionState === 'connected') {
+      try {
+        await conversation.setVolume({ volume: v });
+      } catch (e) {
+        // ignore
+      }
+    }
+  }, [conversation, connectionState]);
 
   const handleQuickCommand = useCallback((text: string) => {
-    if (voiceState === 'processing' || voiceState === 'recording') return;
-    stopAudio();
-    window.speechSynthesis.cancel();
-    sendAndSpeak(text);
-  }, [voiceState, sendAndSpeak, stopAudio]);
+    if (connectionState !== 'connected') return;
+    try {
+      conversation.sendUserMessage(text);
+      addMessage('user', text);
+    } catch (e) {
+      console.error('Quick command error:', e);
+    }
+  }, [conversation, connectionState, addMessage]);
 
-  const stateConfig = {
-    idle: { label: 'Clique para falar com o Eng. Marcos', color: '#ff6b35' },
-    recording: { label: 'A ouvir...', color: '#ef4444' },
-    processing: { label: 'Eng. Marcos está a pensar...', color: '#f59e0b' },
-    speaking: { label: 'Eng. Marcos está a falar...', color: '#22c55e' },
-  };
-  const current = stateConfig[voiceState];
+  // Visual state config
+  const isActive = connectionState === 'connected';
+  const isSpeaking = isActive && agentMode === 'speaking';
+  const isListening = isActive && agentMode === 'listening';
+
+  const glowColor = isSpeaking
+    ? 'rgba(255,107,53,0.5)'
+    : isListening
+    ? 'rgba(34,197,94,0.4)'
+    : connectionState === 'connecting'
+    ? 'rgba(245,158,11,0.3)'
+    : 'rgba(255,107,53,0.15)';
+
+  const stateLabel = connectionState === 'connecting'
+    ? 'A ligar...'
+    : isSpeaking
+    ? 'Eng. Marcos está a falar...'
+    : isListening
+    ? 'A ouvir...'
+    : 'Desligado';
+
+  const stateColor = connectionState === 'connecting'
+    ? '#f59e0b'
+    : isSpeaking
+    ? '#ff6b35'
+    : isListening
+    ? '#22c55e'
+    : '#666';
 
   return (
     <div style={{
       width: '340px', minWidth: '340px', background: '#0d1117',
       borderLeft: '1px solid rgba(255,255,255,0.04)',
       display: 'flex', flexDirection: 'column', alignItems: 'center',
-      padding: '32px 20px', overflowY: 'auto', gap: '20px',
+      padding: '24px 20px', overflowY: 'auto', gap: '16px',
     }}>
       {/* Avatar */}
       <div style={{
         width: '80px', height: '80px', borderRadius: '50%',
         background: 'linear-gradient(135deg, #ff6b35, #ff8c5a)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        boxShadow: voiceState === 'speaking' ? '0 0 30px rgba(34,197,94,0.4)' :
-          voiceState === 'recording' ? '0 0 30px rgba(239,68,68,0.4)' :
-          '0 0 20px rgba(255,107,53,0.2)',
-        transition: 'box-shadow 0.3s',
+        boxShadow: `0 0 30px ${glowColor}`,
+        transition: 'box-shadow 0.4s ease',
       }}>
         <HardHat size={36} color="#fff" />
       </div>
@@ -311,6 +220,11 @@ export default function AgentPanel({ onSendMessage, agentThinking, findings }: A
       <div style={{ textAlign: 'center' }}>
         <div style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>Eng. Marcos IA</div>
         <div style={{ fontSize: '12px', color: '#888', marginTop: '2px' }}>Engenheiro Sénior · Fiscalização</div>
+        {obraName && (
+          <div style={{ fontSize: '11px', color: '#ff6b35', marginTop: '4px' }}>
+            🏗️ {obraName}
+          </div>
+        )}
       </div>
 
       {/* Norm badges */}
@@ -327,11 +241,11 @@ export default function AgentPanel({ onSendMessage, agentThinking, findings }: A
       <div style={{ display: 'flex', gap: '3px', alignItems: 'center', height: '40px' }}>
         {[...Array(7)].map((_, i) => (
           <div key={i} style={{
-            width: '4px', borderRadius: '2px', background: current.color,
-            opacity: (voiceState === 'recording' || voiceState === 'speaking') ? 0.8 : 0.2,
-            height: (voiceState === 'recording' || voiceState === 'speaking') ? '20px' : '6px',
+            width: '4px', borderRadius: '2px', background: stateColor,
+            opacity: isActive ? 0.8 : 0.2,
+            height: isActive ? '20px' : '6px',
             transition: 'all 0.15s',
-            animation: (voiceState === 'recording' || voiceState === 'speaking')
+            animation: isActive
               ? `wave ${0.5 + i * 0.05}s ease-in-out ${i * 0.08}s infinite alternate` : 'none',
           }} />
         ))}
@@ -339,83 +253,148 @@ export default function AgentPanel({ onSendMessage, agentThinking, findings }: A
       <style>{`@keyframes wave { 0% { height: 8px; } 100% { height: 28px; } }`}</style>
 
       {/* State label */}
-      <div style={{ fontSize: '13px', color: current.color, fontWeight: 600, textAlign: 'center', display: 'flex', alignItems: 'center', gap: '6px' }}>
-        {voiceState === 'processing' && <Loader2 size={14} className="animate-spin" />}
-        {voiceState === 'speaking' && <Volume2 size={14} />}
-        {current.label}
+      <div style={{ fontSize: '13px', color: stateColor, fontWeight: 600, textAlign: 'center', display: 'flex', alignItems: 'center', gap: '6px' }}>
+        {connectionState === 'connecting' && <Loader2 size={14} className="animate-spin" />}
+        {isSpeaking && <Volume2 size={14} />}
+        {isListening && <Mic size={14} />}
+        {stateLabel}
       </div>
 
-      {/* Subtitle */}
-      {subtitle && (
+      {/* Error message */}
+      {error && (
         <div style={{
-          fontSize: '12px', color: '#ccc', textAlign: 'center',
-          padding: '8px 16px', borderRadius: '10px', maxWidth: '280px',
-          background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)',
-          lineHeight: 1.5, maxHeight: '120px', overflowY: 'auto',
-          transition: 'opacity 0.3s',
+          fontSize: '12px', color: '#ef4444', textAlign: 'center', padding: '8px 12px',
+          borderRadius: '8px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.15)',
+          display: 'flex', alignItems: 'center', gap: '6px', maxWidth: '280px',
         }}>
-          "{subtitle}"
+          <AlertCircle size={14} /> {error}
         </div>
       )}
 
-      {/* Mic button */}
-      <button
-        onClick={toggleRecording}
-        disabled={voiceState === 'processing'}
-        style={{
-          width: '72px', height: '72px', borderRadius: '50%', border: 'none', cursor: 'pointer',
-          background: voiceState === 'recording'
-            ? 'linear-gradient(135deg, #ef4444, #dc2626)'
-            : 'linear-gradient(135deg, #ff6b35, #ff8c5a)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: voiceState === 'recording'
-            ? '0 0 40px rgba(239,68,68,0.5)' : '0 4px 20px rgba(255,107,53,0.3)',
-          opacity: voiceState === 'processing' ? 0.5 : 1,
-          animation: voiceState === 'recording' ? 'pulse-mic 1.5s ease-in-out infinite' : 'none',
-          transition: 'all 0.2s',
-        }}
-      >
-        {voiceState === 'recording' ? <MicOff size={28} color="#fff" /> : <Mic size={28} color="#fff" />}
-      </button>
-      <style>{`@keyframes pulse-mic { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }`}</style>
-
-      {/* Mute + Repeat */}
-      <div style={{ display: 'flex', gap: '12px' }}>
-        <button onClick={toggleMute} style={{
-          padding: '8px 16px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
-          cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px',
-          border: '1px solid rgba(255,255,255,0.08)', background: isMuted ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.03)',
-          color: isMuted ? '#ef4444' : '#999',
+      {/* Mic denied */}
+      {micDenied && (
+        <div style={{
+          fontSize: '11px', color: '#f59e0b', textAlign: 'center', padding: '10px 12px',
+          borderRadius: '8px', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.15)',
+          maxWidth: '280px', lineHeight: 1.5,
         }}>
-          {isMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
-          {isMuted ? 'Mudo' : 'Som'}
-        </button>
-        <button onClick={repeatLast} disabled={!lastResponse || voiceState === 'speaking'}
-          style={{
-            padding: '8px 16px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
-            cursor: lastResponse ? 'pointer' : 'default', display: 'flex', alignItems: 'center', gap: '4px',
-            border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)',
-            color: lastResponse ? '#999' : '#444', opacity: lastResponse ? 1 : 0.5,
+          <p style={{ fontWeight: 600, marginBottom: '4px' }}>🎤 Microfone necessário</p>
+          <p>Aceda às definições do browser e permita o acesso ao microfone para esta página.</p>
+          <button onClick={() => { setMicDenied(false); startConversation(); }} style={{
+            marginTop: '8px', padding: '6px 16px', borderRadius: '8px', border: 'none',
+            background: '#ff6b35', color: '#fff', fontSize: '11px', fontWeight: 600, cursor: 'pointer',
           }}>
-          <RotateCcw size={14} /> Repetir
+            Tentar novamente
+          </button>
+        </div>
+      )}
+
+      {/* Main action button */}
+      {connectionState === 'disconnected' && !micDenied && (
+        <button onClick={startConversation} style={{
+          width: '100%', maxWidth: '260px', padding: '14px', borderRadius: '14px',
+          border: 'none', cursor: 'pointer',
+          background: 'linear-gradient(135deg, #ff6b35, #ff8c5a)',
+          color: '#fff', fontSize: '14px', fontWeight: 700,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+          boxShadow: '0 4px 20px rgba(255,107,53,0.3)',
+          transition: 'all 0.2s',
+        }}>
+          <Phone size={18} /> Iniciar Conversa
         </button>
-      </div>
+      )}
+
+      {connectionState === 'connecting' && (
+        <button disabled style={{
+          width: '100%', maxWidth: '260px', padding: '14px', borderRadius: '14px',
+          border: 'none', background: 'rgba(255,255,255,0.05)',
+          color: '#888', fontSize: '14px', fontWeight: 600,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+        }}>
+          <Loader2 size={18} className="animate-spin" /> A ligar...
+        </button>
+      )}
+
+      {connectionState === 'connected' && (
+        <button onClick={endConversation} style={{
+          width: '100%', maxWidth: '260px', padding: '14px', borderRadius: '14px',
+          border: '1px solid rgba(239,68,68,0.3)', cursor: 'pointer',
+          background: 'rgba(239,68,68,0.08)',
+          color: '#ef4444', fontSize: '14px', fontWeight: 700,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+          transition: 'all 0.2s',
+        }}>
+          <PhoneOff size={18} /> Terminar Conversa
+        </button>
+      )}
+
+      {/* Controls: Mute + Volume */}
+      {isActive && (
+        <div style={{ width: '100%', maxWidth: '260px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <button onClick={() => setIsMuted(prev => !prev)} style={{
+              padding: '6px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)',
+              background: isMuted ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.03)',
+              color: isMuted ? '#ef4444' : '#999', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              {isMuted ? <MicOff size={16} /> : <Mic size={16} />}
+            </button>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
+              {volume === 0 ? <VolumeX size={14} color="#666" /> : <Volume2 size={14} color="#666" />}
+              <Slider
+                value={[volume]}
+                min={0} max={1} step={0.05}
+                onValueChange={handleVolumeChange}
+                className="flex-1"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Chat history */}
+      {messages.length > 0 && (
+        <div style={{
+          width: '100%', maxHeight: '200px', overflowY: 'auto',
+          display: 'flex', flexDirection: 'column', gap: '6px',
+          padding: '8px', borderRadius: '10px',
+          background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)',
+        }}>
+          {messages.map(msg => (
+            <div key={msg.id} style={{
+              fontSize: '11px', lineHeight: 1.5, padding: '6px 10px', borderRadius: '8px',
+              background: msg.role === 'user' ? 'rgba(34,197,94,0.06)' : 'rgba(255,107,53,0.06)',
+              border: `1px solid ${msg.role === 'user' ? 'rgba(34,197,94,0.1)' : 'rgba(255,107,53,0.1)'}`,
+              alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+              maxWidth: '90%',
+            }}>
+              <span style={{ fontWeight: 600, color: msg.role === 'user' ? '#22c55e' : '#ff6b35', marginRight: '4px' }}>
+                {msg.role === 'user' ? 'Você:' : 'Marcos:'}
+              </span>
+              <span style={{ color: '#ccc' }}>{msg.text}</span>
+            </div>
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
+      )}
 
       {/* Quick commands */}
-      <div style={{ width: '100%', marginTop: '8px' }}>
+      <div style={{ width: '100%', marginTop: '4px' }}>
         <div style={{ fontSize: '10px', color: '#555', fontWeight: 600, marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
           Comandos rápidos
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
           {QUICK_COMMANDS.map(cmd => (
             <button key={cmd.label} onClick={() => handleQuickCommand(cmd.text)}
-              disabled={voiceState === 'processing' || voiceState === 'recording'}
+              disabled={connectionState !== 'connected'}
               style={{
                 padding: '8px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: 600,
-                cursor: (voiceState === 'processing' || voiceState === 'recording') ? 'default' : 'pointer',
+                cursor: connectionState === 'connected' ? 'pointer' : 'default',
                 textAlign: 'left',
                 border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)',
-                color: '#aaa', opacity: (voiceState === 'processing' || voiceState === 'recording') ? 0.5 : 1,
+                color: '#aaa', opacity: connectionState === 'connected' ? 1 : 0.4,
                 transition: 'all 0.15s',
               }}>
               {cmd.label}
