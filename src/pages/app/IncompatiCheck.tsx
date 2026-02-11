@@ -421,53 +421,47 @@ function ShareModal({ isOpen, onClose, obraInfo }: { isOpen: boolean; onClose: (
   );
 }
 
-function ObraSetupScreen({ onConfirm }: { onConfirm: (info: { nome: string; cidade: string; fiscal: string }) => void }) {
+function ObraRegistModal({ isOpen, onClose, onConfirm }: { isOpen: boolean; onClose: () => void; onConfirm: (info: { nome: string; cidade: string; fiscal: string }) => void }) {
   const [nome, setNome] = useState("");
   const [cidade, setCidade] = useState("");
   const [fiscal, setFiscal] = useState("");
+
+  if (!isOpen) return null;
+
   const canSubmit = nome.trim().length > 0;
 
   return (
-    <div className="h-screen w-screen flex items-center justify-center" style={{ background: "#0a0c10", fontFamily: "'DM Sans', sans-serif" }}>
-      <div className="fixed inset-0 pointer-events-none" style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.012) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.012) 1px, transparent 1px)", backgroundSize: "60px 60px" }} />
-      <div className="fixed top-[-200px] right-[-100px] w-[600px] h-[600px] rounded-full pointer-events-none" style={{ background: "#ff6b35", filter: "blur(180px)", opacity: 0.06 }} />
-      <div className="relative z-10 w-full max-w-md mx-4">
-        <div className="text-center mb-8">
-          <div className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center text-white font-bold text-lg" style={{ background: "linear-gradient(135deg, #ff6b35, #ff8c5a)" }}>O</div>
-          <h1 className="text-2xl font-bold text-white mb-1">Obrify <span style={{ color: "#ff6b35" }}>IncompatiCheck</span></h1>
-          <p className="text-sm text-gray-400">Identificação do Pedido de Análise</p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }} onClick={onClose}>
+      <div className="rounded-2xl border border-white/5 p-6 sm:p-8 w-full max-w-md" style={{ background: "#181c26" }} onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-3 mb-1">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-xs" style={{ background: "linear-gradient(135deg, #ff6b35, #ff8c5a)" }}>O</div>
+          <h2 className="text-lg font-bold text-white">Registar Análise</h2>
         </div>
-        <div className="rounded-2xl border border-white/5 p-6" style={{ background: "#181c26" }}>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-[10px] text-gray-500 uppercase tracking-widest font-mono mb-2">Nome da Obra *</label>
-              <input type="text" value={nome} onChange={e => setNome(e.target.value)} placeholder="Ex: Edifício Residencial Tejo Park"
-                className="w-full px-4 py-3 rounded-xl border border-white/5 text-white text-sm outline-none focus:border-orange-500/30 placeholder:text-gray-600 transition-all"
-                style={{ background: "rgba(255,255,255,0.03)" }} />
-            </div>
-            <div>
-              <label className="block text-[10px] text-gray-500 uppercase tracking-widest font-mono mb-2">Cidade / Localização</label>
-              <input type="text" value={cidade} onChange={e => setCidade(e.target.value)} placeholder="Ex: Lisboa, Parque das Nações"
-                className="w-full px-4 py-3 rounded-xl border border-white/5 text-white text-sm outline-none focus:border-orange-500/30 placeholder:text-gray-600 transition-all"
-                style={{ background: "rgba(255,255,255,0.03)" }} />
-            </div>
-            <div>
-              <label className="block text-[10px] text-gray-500 uppercase tracking-widest font-mono mb-2">Fiscal / Analisador</label>
-              <input type="text" value={fiscal} onChange={e => setFiscal(e.target.value)} placeholder="Ex: Eng. João Silva"
-                className="w-full px-4 py-3 rounded-xl border border-white/5 text-white text-sm outline-none focus:border-orange-500/30 placeholder:text-gray-600 transition-all"
-                style={{ background: "rgba(255,255,255,0.03)" }} />
-            </div>
+        <p className="text-xs text-gray-400 mb-6">Identifique a obra para associar aos relatórios.</p>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-[10px] text-gray-500 uppercase tracking-widest font-mono mb-2">Nome da Obra *</label>
+            <input type="text" value={nome} onChange={e => setNome(e.target.value)} placeholder="Ex: Edifício Residencial Tejo Park"
+              className="w-full px-4 py-3 rounded-xl border border-white/5 text-white text-sm outline-none focus:border-orange-500/30 placeholder:text-gray-600 transition-all" style={{ background: "rgba(255,255,255,0.03)" }} />
           </div>
-          <div className="mt-4 p-3 rounded-xl border border-white/5" style={{ background: "rgba(255,255,255,0.02)" }}>
-            <div className="text-[10px] text-gray-500 font-mono">💡 Estes dados ficam associados à análise e são incluídos automaticamente nos relatórios. Os projetos já contêm as identificações técnicas detalhadas.</div>
+          <div>
+            <label className="block text-[10px] text-gray-500 uppercase tracking-widest font-mono mb-2">Cidade / Localização</label>
+            <input type="text" value={cidade} onChange={e => setCidade(e.target.value)} placeholder="Ex: Lisboa, Parque das Nações"
+              className="w-full px-4 py-3 rounded-xl border border-white/5 text-white text-sm outline-none focus:border-orange-500/30 placeholder:text-gray-600 transition-all" style={{ background: "rgba(255,255,255,0.03)" }} />
           </div>
-          <button
-            onClick={() => canSubmit && onConfirm({ nome: nome.trim(), cidade: cidade.trim(), fiscal: fiscal.trim() })}
+          <div>
+            <label className="block text-[10px] text-gray-500 uppercase tracking-widest font-mono mb-2">Fiscal / Analisador</label>
+            <input type="text" value={fiscal} onChange={e => setFiscal(e.target.value)} placeholder="Ex: Eng. João Silva"
+              className="w-full px-4 py-3 rounded-xl border border-white/5 text-white text-sm outline-none focus:border-orange-500/30 placeholder:text-gray-600 transition-all" style={{ background: "rgba(255,255,255,0.03)" }} />
+          </div>
+        </div>
+        <div className="flex gap-3 mt-6">
+          <button onClick={onClose} className="flex-1 px-4 py-3 rounded-xl border border-white/5 text-gray-400 text-sm font-semibold hover:border-white/10 transition-all">Cancelar</button>
+          <button onClick={() => { if (canSubmit) { onConfirm({ nome: nome.trim(), cidade: cidade.trim(), fiscal: fiscal.trim() }); } }}
             disabled={!canSubmit}
-            className="w-full mt-6 px-4 py-3.5 rounded-xl text-white text-sm font-semibold transition-all disabled:opacity-30 disabled:cursor-not-allowed hover:-translate-y-0.5"
-            style={{ background: "linear-gradient(135deg, #ff6b35, #ff8c5a)", boxShadow: canSubmit ? "0 4px 20px rgba(255,107,53,0.3)" : "none" }}
-          >
-            Iniciar Análise de Incompatibilidades
+            className="flex-1 px-4 py-3 rounded-xl text-white text-sm font-semibold transition-all disabled:opacity-30"
+            style={{ background: "linear-gradient(135deg, #ff6b35, #ff8c5a)" }}>
+            Registar e Iniciar
           </button>
         </div>
       </div>
@@ -477,7 +471,7 @@ function ObraSetupScreen({ onConfirm }: { onConfirm: (info: { nome: string; cida
 
 export default function IncompatiCheck() {
   const [obraInfo, setObraInfo] = useState<{ nome: string; cidade: string; fiscal: string } | null>(null);
-  const [showObraSetup, setShowObraSetup] = useState(true);
+  const [showObraModal, setShowObraModal] = useState(false);
   const [projects, setProjects] = useState<Project[]>(MOCK_PROJECTS);
   const [filter, setFilter] = useState("all");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -511,14 +505,11 @@ export default function IncompatiCheck() {
     }, 3500);
   }, [addMessage, incompatibilities.length, criticalCount, warningCount, infoCount]);
 
-  if (showObraSetup) {
-    return <ObraSetupScreen onConfirm={(info) => { setObraInfo(info); setShowObraSetup(false); }} />;
-  }
 
   return (
     <div style={{ height: "100vh", background: "#0a0a0a", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* HEADER */}
-      <div style={{ padding: "16px 24px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div className="flex items-center justify-between px-4 sm:px-6 gap-2" style={{ padding: "16px 0", paddingLeft: undefined, paddingRight: undefined, borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <div style={{ width: "32px", height: "32px", borderRadius: "8px", background: "linear-gradient(135deg, #f59e0b, #ea580c)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: "14px" }}>O</div>
           <div>
@@ -533,15 +524,32 @@ export default function IncompatiCheck() {
             </div>
           )}
         </div>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button onClick={() => setShowUpload(true)} style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 16px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.05)", background: "#181c26", color: "#888", fontSize: "12px", cursor: "pointer" }}>📁 Upload</button>
-          <button onClick={() => setShowShare(true)} style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 16px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.05)", background: "#181c26", color: "#888", fontSize: "12px", cursor: "pointer" }}>📤 Partilhar</button>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <div className="flex lg:hidden gap-2">
+            <button className="px-3 py-2 rounded-lg border border-white/5 text-gray-400 text-xs" style={{ background: "#181c26" }}>📁</button>
+            <button className="px-3 py-2 rounded-lg border border-white/5 text-gray-400 text-xs" style={{ background: "#181c26" }}>🏗️</button>
+          </div>
+          {obraInfo ? (
+            <div className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-lg border border-orange-500/20" style={{ background: "rgba(255,107,53,0.05)" }}>
+              <span className="text-xs text-orange-400 font-semibold">{obraInfo.nome}</span>
+              {obraInfo.cidade && <span className="text-[10px] text-gray-500">· {obraInfo.cidade}</span>}
+              <button onClick={() => setShowObraModal(true)} className="text-[10px] text-gray-500 hover:text-orange-400 ml-1 transition-all">✏️</button>
+            </div>
+          ) : (
+            <button onClick={() => setShowObraModal(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-xs font-semibold transition-all hover:-translate-y-0.5"
+              style={{ background: "linear-gradient(135deg, #ff6b35, #ff8c5a)", boxShadow: "0 2px 12px rgba(255,107,53,0.3)" }}>
+              📋 Registar Análise
+            </button>
+          )}
+          <button onClick={() => setShowUpload(true)} className="hidden sm:flex" style={{ display: undefined, alignItems: "center", gap: "6px", padding: "8px 16px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.05)", background: "#181c26", color: "#888", fontSize: "12px", cursor: "pointer" }}>📁 Upload</button>
+          <button onClick={() => setShowShare(true)} className="hidden sm:flex" style={{ display: undefined, alignItems: "center", gap: "6px", padding: "8px 16px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.05)", background: "#181c26", color: "#888", fontSize: "12px", cursor: "pointer" }}>📤 Partilhar</button>
         </div>
       </div>
 
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
         {/* SIDEBAR */}
-        <div style={{ width: "260px", minWidth: "260px", borderRight: "1px solid rgba(255,255,255,0.04)", padding: "20px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "12px" }}>
+        <div className="max-lg:hidden" style={{ width: "260px", minWidth: "260px", borderRight: "1px solid rgba(255,255,255,0.04)", padding: "20px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "12px" }}>
           <div style={{ color: "#888", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px" }}>Projetos ({projects.length})</div>
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
             {projects.map(p => (
@@ -563,7 +571,7 @@ export default function IncompatiCheck() {
         </div>
 
         {/* MAIN */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "24px" }}>
+        <div className="p-4 sm:p-6" style={{ flex: 1, overflowY: "auto" }}>
           {isAnalyzing && (
             <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "16px", marginBottom: "20px", borderRadius: "12px", background: "rgba(255,165,0,0.05)", border: "1px solid rgba(255,165,0,0.15)" }}>
               <div style={{ width: "20px", height: "20px", border: "2px solid #f59e0b", borderTop: "2px solid transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
@@ -582,7 +590,7 @@ export default function IncompatiCheck() {
           </div>
 
           {/* Stats */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginBottom: "24px" }}>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
             <StatCard number={criticalCount} label="Críticas" type="critical" />
             <StatCard number={warningCount} label="Alertas" type="warning" />
             <StatCard number={infoCount} label="Observações" type="info" />
@@ -642,11 +650,14 @@ export default function IncompatiCheck() {
         </div>
 
         {/* AGENT PANEL */}
-        <AgentPanel chatMessages={chatMessages} onAddMessage={addMessage} />
+        <div className="max-lg:hidden">
+          <AgentPanel chatMessages={chatMessages} onAddMessage={addMessage} />
+        </div>
       </div>
 
       <UploadModal isOpen={showUpload} onClose={() => setShowUpload(false)} onUpload={handleUpload} />
       <ShareModal isOpen={showShare} onClose={() => setShowShare(false)} obraInfo={obraInfo} />
+      <ObraRegistModal isOpen={showObraModal} onClose={() => setShowObraModal(false)} onConfirm={(info) => { setObraInfo(info); setShowObraModal(false); }} />
 
       <style>{`
         @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(255,107,53,0.5); } 70% { box-shadow: 0 0 0 20px rgba(255,107,53,0); } 100% { box-shadow: 0 0 0 0 rgba(255,107,53,0); } }
@@ -657,5 +668,5 @@ export default function IncompatiCheck() {
   );
 }
 
-export { MOCK_PROJECTS, MOCK_INCOMPATIBILITIES, SEVERITY_CONFIG, PROJECT_TYPES, FILE_SIZE_LIMIT, StatCard, CrossSectionSVG, ProjectTypeBadge, UploadModal, ShareModal };
+export { MOCK_PROJECTS, MOCK_INCOMPATIBILITIES, SEVERITY_CONFIG, PROJECT_TYPES, FILE_SIZE_LIMIT, StatCard, CrossSectionSVG, ProjectTypeBadge, UploadModal, ShareModal, ObraRegistModal };
 export type { Project, Incompatibility, ChatMessage };
