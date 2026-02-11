@@ -1,72 +1,72 @@
 
-# Upload ate 2GB com Chunked Upload
 
-## Resumo
+# Correcao de 3 Bugs Criticos no IncompatiCheck
 
-Aumentar o limite de ficheiro de 500MB para 2GB, adicionar simulacao de upload por chunks de 50MB com barra de progresso no UploadModal, e actualizar todas as mensagens e textos relacionados. Actualizar formatFileSize para suportar GB.
+## Bug 1: Voz Duplica Texto na Caixa de Preview
 
-## Alteracoes no ficheiro `src/pages/app/IncompatiCheck.tsx`
+**Causa raiz**: No `AgentPanel.tsx` linha 59, o loop `onresult` itera desde `i = 0` em vez de `event.resultIndex`. Com `continuous=true`, cada disparo de `onresult` re-processa TODOS os resultados anteriores, duplicando o texto final acumulado no `interimText`.
 
-### 1. Constantes (linha 18)
+**Ficheiro**: `src/pages/app/incompaticheck/AgentPanel.tsx`
 
-Substituir `FILE_SIZE_LIMIT = 500 * 1024 * 1024` por:
-- `FILE_SIZE_LIMIT = 2 * 1024 * 1024 * 1024` (2GB)
-- Adicionar `CHUNK_SIZE = 50 * 1024 * 1024` (50MB)
+**Correcao**: Alterar o loop para comecar em `event.resultIndex`:
+```typescript
+for (let i = event.resultIndex; i < e.results.length; i++) {
+```
 
-### 2. UploadModal -- novos states (linha 227-228)
+Isto garante que so processa resultados novos, sem re-acumular texto ja processado.
 
-Adicionar states dentro do UploadModal:
-- `uploading: boolean`
-- `progress: number`
-- `currentFile: string`
+---
 
-### 3. UploadModal -- refazer handleFile (linhas 233-238)
+## Bug 2: Agente Nao Responde
 
-Converter para funcao `async`. Simular upload por chunks com loop e setTimeout. Actualizar progresso. Desactivar cancelar durante upload.
+**Causa raiz**: No `useIncompaticheck.ts` linhas 361-363, a resposta do agente esta dentro de um `setTimeout` com callback `async`. O `setTimeout` nao aguarda a Promise, e se houver erro nao ha catch. Alem disso o delay de 600ms pode causar race conditions.
 
-Alteracoes:
-- Mensagem de limite: "Ficheiro excede o limite de 2GB."
-- Simulacao: loop de `totalChunks = Math.ceil(file.size / CHUNK_SIZE)` com 300ms por chunk
-- Limpar states apos conclusao
+**Ficheiro**: `src/pages/app/incompaticheck/useIncompaticheck.ts`
 
-### 4. UploadModal -- textos (linhas 257, 273)
+**Correcao**: Remover o `setTimeout` e chamar `sendMessage` directamente com `await` apos a mensagem do utilizador. Adicionar try/catch para garantir que erros nao passam silenciosamente:
 
-- Linha 257: `"Limite: 500MB"` muda para `"Limite: 2GB por ficheiro"`
-- Linha 273: `"máx. 500MB"` muda para `"máx. 2GB"`
+```typescript
+const sendUserMessage = useCallback(async (content: string) => {
+  if (!obraAtiva || !user) return;
+  await sendMessage(content, 'user', obraAtiva.id);
+  
+  // Gerar e guardar resposta do agente imediatamente
+  const agentResponse = generateAgentResponseFromFindings(content, findings);
+  await sendMessage(agentResponse, 'agent', obraAtiva.id);
+}, [obraAtiva, user, findings, sendMessage]);
+```
 
-### 5. UploadModal -- bloco informativo ZIP (linhas 277-281)
+---
 
-Substituir por versao expandida com 3 linhas:
-- ZIP: extraccao automatica
-- Limite: 2GB, chunks de 50MB
-- Formatos: PDF, DWG, DWF, IFC, ZIP, RAR, 7Z
+## Bug 3: Analise com 0 Findings
 
-### 6. UploadModal -- barra de progresso (antes linha 301)
+**Causa raiz**: A funcao `crossAnalyze` em `helpers.ts` so gera findings baseados em disciplinas quando `types.length >= 2` (linha ~130). Se todos os 299 projetos sao do mesmo tipo, retorna array vazio. Alem disso, erros de parse de PDF sao logados na consola mas nao geram findings informativos.
 
-Adicionar bloco condicional `{uploading && (...)}` com:
-- Nome do ficheiro truncado + percentagem
-- Barra de progresso com gradiente laranja
-- Texto contextual ("upload por chunks de 50MB" para ficheiros grandes)
+**Ficheiro**: `src/pages/app/incompaticheck/useIncompaticheck.ts` (funcao `runAnalysis`)
 
-### 7. UploadModal -- botao Cancelar (linhas 301-308)
+**Correcoes**:
 
-Adicionar `disabled={uploading}` e texto condicional. Estilos para estado desactivado.
+1. Adicionar findings INFO para cada PDF que falhe a extraccao de texto (dentro do catch no loop de PDFs, linhas 278-281)
 
-### 8. formatFileSize no helpers.ts (linha 27-30)
+2. Adicionar findings INFO para cada ficheiro DWG/DWF/IFC (ja existe no `crossAnalyze` mas pode nao estar a funcionar se os tipos nao corresponderem)
 
-Actualizar funcao para suportar GB (>= 1073741824 bytes).
+3. Apos `crossAnalyze`, se `newFindings` continuar vazio, adicionar um finding de fallback baseado nas disciplinas presentes -- mesmo que so haja 1 tipo
 
-### 9. Alerta no handleFile da sidebar (linha 234)
+4. Garantir que o fallback tambem funciona com tipo unico (ex: "X projetos de fundacoes carregados. Recomenda-se verificacao visual complementar.")
 
-Mensagem actualizada para "2GB" em vez de "500MB".
+**Ficheiro**: `src/pages/app/incompaticheck/helpers.ts` (funcao `crossAnalyze`)
 
-## Ficheiros modificados
+**Correcao adicional**: Remover a condicao `types.length >= 2` do bloco de fallback. Mesmo com apenas 1 disciplina, gerar um finding INFO: "Analise concluida com X projetos de {tipo}. Recomenda-se verificacao visual."
+
+---
+
+## Ficheiros a Alterar (apenas 3)
 
 | Ficheiro | Alteracao |
 |---|---|
-| `src/pages/app/IncompatiCheck.tsx` | Constantes, UploadModal (states, handleFile async, progresso, textos, botao), alerta |
-| `src/pages/app/incompaticheck/helpers.ts` | formatFileSize com suporte a GB |
+| `src/pages/app/incompaticheck/AgentPanel.tsx` | Linha 59: `i = 0` passa a `i = event.resultIndex` |
+| `src/pages/app/incompaticheck/useIncompaticheck.ts` | Linhas 355-364: remover setTimeout, await directo. Linhas 278-284: adicionar finding quando PDF falha |
+| `src/pages/app/incompaticheck/helpers.ts` | Funcao crossAnalyze: remover condicao `types.length >= 2`, adicionar fallback para tipo unico |
 
-## Nota
+Nenhum outro ficheiro e alterado. Nenhuma tabela, bucket ou dependencia e modificada.
 
-Nao e necessaria migracao SQL -- o bucket `project-files` ja existe e o limite de storage e gerido pela plataforma. A simulacao de chunks e local (frontend) para UX; em producao seria implementado via edge function.
