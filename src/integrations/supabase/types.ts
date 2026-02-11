@@ -1120,6 +1120,9 @@ export type Database = {
         Row: {
           created_at: string | null
           id: string
+          obra_cidade: string | null
+          obra_fiscal: string | null
+          obra_nome: string | null
           project_ids: string[] | null
           results: Json | null
           status: string | null
@@ -1128,6 +1131,9 @@ export type Database = {
         Insert: {
           created_at?: string | null
           id?: string
+          obra_cidade?: string | null
+          obra_fiscal?: string | null
+          obra_nome?: string | null
           project_ids?: string[] | null
           results?: Json | null
           status?: string | null
@@ -1136,6 +1142,9 @@ export type Database = {
         Update: {
           created_at?: string | null
           id?: string
+          obra_cidade?: string | null
+          obra_fiscal?: string | null
+          obra_nome?: string | null
           project_ids?: string[] | null
           results?: Json | null
           status?: string | null
