@@ -469,9 +469,64 @@ function ObraRegistModal({ isOpen, onClose, onConfirm }: { isOpen: boolean; onCl
   );
 }
 
+function ProjectPreviewModal({ project, onClose, onDelete }: { project: Project | null; onClose: () => void; onDelete: (id: string) => void }) {
+  if (!project) return null;
+  const typeConfig = PROJECT_TYPES[project.type];
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }} onClick={onClose}>
+      <div className="rounded-2xl border border-white/5 p-6 w-full max-w-sm" style={{ background: "#181c26" }} onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg" style={{ background: `${typeConfig?.color}15`, border: `1px solid ${typeConfig?.color}30` }}>
+            {typeConfig?.icon}
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-bold text-white truncate">{project.name}</h3>
+            <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: typeConfig?.color }}>{typeConfig?.label}</span>
+          </div>
+        </div>
+        <div className="space-y-3 mb-6">
+          <div className="flex justify-between items-center py-2 border-b border-white/5">
+            <span className="text-[11px] text-gray-500">Formato</span>
+            <span className="font-mono text-xs text-white uppercase">{project.format}</span>
+          </div>
+          <div className="flex justify-between items-center py-2 border-b border-white/5">
+            <span className="text-[11px] text-gray-500">Tamanho</span>
+            <span className="text-xs text-white">{project.file_size >= 1048576 ? `${(project.file_size / 1048576).toFixed(1)} MB` : `${(project.file_size / 1024).toFixed(0)} KB`}</span>
+          </div>
+          <div className="flex justify-between items-center py-2 border-b border-white/5">
+            <span className="text-[11px] text-gray-500">Carregado em</span>
+            <span className="text-xs text-white">{project.created_at}</span>
+          </div>
+          <div className="flex justify-between items-center py-2">
+            <span className="text-[11px] text-gray-500">ID</span>
+            <span className="font-mono text-[10px] text-gray-400">{project.id}</span>
+          </div>
+        </div>
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-xl border border-white/5 text-gray-400 text-xs font-semibold hover:border-white/10 transition-all">
+            Fechar
+          </button>
+          <button
+            onClick={() => {
+              if (window.confirm(`Remover "${project.name}"?`)) {
+                onDelete(project.id);
+                onClose();
+              }
+            }}
+            className="flex-1 px-4 py-2.5 rounded-xl border border-red-500/20 text-red-400 text-xs font-semibold hover:bg-red-500/10 hover:border-red-500/30 transition-all"
+          >
+            🗑 Remover
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function IncompatiCheck() {
   const [obraInfo, setObraInfo] = useState<{ nome: string; cidade: string; fiscal: string } | null>(null);
   const [showObraModal, setShowObraModal] = useState(false);
+  const [previewProject, setPreviewProject] = useState<Project | null>(null);
   const [projects, setProjects] = useState<Project[]>(MOCK_PROJECTS);
   const [filter, setFilter] = useState("all");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -552,16 +607,43 @@ export default function IncompatiCheck() {
         <div className="max-lg:hidden" style={{ width: "260px", minWidth: "260px", borderRight: "1px solid rgba(255,255,255,0.04)", padding: "20px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "12px" }}>
           <div style={{ color: "#888", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px" }}>Projetos ({projects.length})</div>
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            {projects.map(p => (
-              <div key={p.id} style={{ padding: "12px", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.04)", background: "rgba(255,255,255,0.02)", cursor: "pointer" }}>
-                <ProjectTypeBadge type={p.type} />
-                <div style={{ color: "#ccc", fontSize: "12px", fontWeight: 600, marginTop: "6px" }}>{p.name}</div>
-                <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
-                  <span style={{ fontSize: "10px", color: "#555" }}>{p.format.toUpperCase()}</span>
-                  <span style={{ fontSize: "10px", color: "#555" }}>{formatFileSize(p.file_size)}</span>
+            {projects.map(p => {
+              const typeConfig = PROJECT_TYPES[p.type];
+              return (
+                <div key={p.id} className="group relative overflow-hidden rounded-xl border border-white/5 p-3 cursor-pointer hover:border-orange-500/20 transition-all" style={{ background: "#181c26" }}>
+                  <div className="absolute left-0 top-0 bottom-0 w-0.5 rounded-r" style={{ background: typeConfig?.color }} />
+                  <div className="flex items-start justify-between pl-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-semibold mb-1 text-white truncate">{p.name}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[9px] px-1.5 py-0.5 rounded uppercase" style={{ background: "rgba(255,255,255,0.04)", color: "#8891a5" }}>{p.format}</span>
+                        <span className="text-[10px] text-gray-500">{formatFileSize(p.file_size)}</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setPreviewProject(p); }}
+                        className="w-6 h-6 rounded-md flex items-center justify-center text-[10px] border border-white/5 text-gray-400 hover:text-white hover:border-white/20 transition-all"
+                        style={{ background: "rgba(255,255,255,0.03)" }}
+                        title="Ver detalhes"
+                      >👁</button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm(`Tem a certeza que deseja remover "${p.name}"?\n\nPoderá carregar uma versão atualizada posteriormente.`)) {
+                            setProjects(prev => prev.filter(proj => proj.id !== p.id));
+                            addMessage(`Projeto "${p.name}" removido. Pode carregar a versão atualizada a qualquer momento.`, "agent");
+                          }
+                        }}
+                        className="w-6 h-6 rounded-md flex items-center justify-center text-[10px] border border-white/5 text-gray-400 hover:text-red-400 hover:border-red-500/30 transition-all"
+                        style={{ background: "rgba(255,255,255,0.03)" }}
+                        title="Remover projeto"
+                      >🗑</button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <button onClick={() => setShowUpload(true)} style={{ width: "100%", border: "2px dashed rgba(255,165,0,0.15)", borderRadius: "12px", padding: "24px", textAlign: "center", background: "transparent", cursor: "pointer", color: "#888" }}>
             <div style={{ fontSize: "24px", marginBottom: "4px" }}>📁</div>
@@ -658,6 +740,15 @@ export default function IncompatiCheck() {
       <UploadModal isOpen={showUpload} onClose={() => setShowUpload(false)} onUpload={handleUpload} />
       <ShareModal isOpen={showShare} onClose={() => setShowShare(false)} obraInfo={obraInfo} />
       <ObraRegistModal isOpen={showObraModal} onClose={() => setShowObraModal(false)} onConfirm={(info) => { setObraInfo(info); setShowObraModal(false); }} />
+      <ProjectPreviewModal
+        project={previewProject}
+        onClose={() => setPreviewProject(null)}
+        onDelete={(id) => {
+          const removed = projects.find(p => p.id === id);
+          setProjects(prev => prev.filter(p => p.id !== id));
+          if (removed) addMessage(`Projeto "${removed.name}" removido. Carregue a versão atualizada quando pretender.`, "agent");
+        }}
+      />
 
       <style>{`
         @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(255,107,53,0.5); } 70% { box-shadow: 0 0 0 20px rgba(255,107,53,0); } 100% { box-shadow: 0 0 0 0 rgba(255,107,53,0); } }
@@ -668,5 +759,5 @@ export default function IncompatiCheck() {
   );
 }
 
-export { MOCK_PROJECTS, MOCK_INCOMPATIBILITIES, SEVERITY_CONFIG, PROJECT_TYPES, FILE_SIZE_LIMIT, StatCard, CrossSectionSVG, ProjectTypeBadge, UploadModal, ShareModal, ObraRegistModal };
+export { MOCK_PROJECTS, MOCK_INCOMPATIBILITIES, SEVERITY_CONFIG, PROJECT_TYPES, FILE_SIZE_LIMIT, StatCard, CrossSectionSVG, ProjectTypeBadge, UploadModal, ShareModal, ObraRegistModal, ProjectPreviewModal };
 export type { Project, Incompatibility, ChatMessage };
