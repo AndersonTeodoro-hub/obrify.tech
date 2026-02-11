@@ -1,109 +1,72 @@
 
-
-# Gestao de Obras + Suporte ZIP no IncompatiCheck
+# Upload ate 2GB com Chunked Upload
 
 ## Resumo
 
-Substituir o state simples `obraInfo` por um sistema multi-obra com lista, seleccao e gestao. Adicionar suporte a ficheiros ZIP/RAR/7Z no upload com simulacao de extraccao. Criar modal de gestao de obras e indicador de progresso.
+Aumentar o limite de ficheiro de 500MB para 2GB, adicionar simulacao de upload por chunks de 50MB com barra de progresso no UploadModal, e actualizar todas as mensagens e textos relacionados. Actualizar formatFileSize para suportar GB.
 
 ## Alteracoes no ficheiro `src/pages/app/IncompatiCheck.tsx`
 
-### 1. Novo interface `Obra` (linha 28, apos `Project`)
+### 1. Constantes (linha 18)
 
-Adicionar interface com campos: id, nome, cidade, fiscal, created_at, project_count.
+Substituir `FILE_SIZE_LIMIT = 500 * 1024 * 1024` por:
+- `FILE_SIZE_LIMIT = 2 * 1024 * 1024 * 1024` (2GB)
+- Adicionar `CHUNK_SIZE = 50 * 1024 * 1024` (50MB)
 
-### 2. Substituir states (linhas 527-528)
+### 2. UploadModal -- novos states (linha 227-228)
 
-Remover `obraInfo` e `showObraModal`. Adicionar:
-- `obras: Obra[]` (lista de obras)
-- `obraAtiva: Obra | null` (obra seleccionada)
-- `showObraModal: boolean`
-- `showObraList: boolean`
-- `uploadProgress: string | null`
+Adicionar states dentro do UploadModal:
+- `uploading: boolean`
+- `progress: number`
+- `currentFile: string`
 
-### 3. Actualizar UploadModal (linhas 217-297)
+### 3. UploadModal -- refazer handleFile (linhas 233-238)
 
-- Extensoes aceites: adicionar `.zip,.rar,.7z` ao input file accept (linha 265)
-- Validacao de extensao (linha 227): adicionar `"zip", "rar", "7z"` ao array
-- Texto de formatos (linhas 248, 264): mudar para `PDF . DWG . DWF . IFC . ZIP`
-- Alerta de tamanho (linha 225): mensagem actualizada para ZIPs
-- Adicionar bloco informativo sobre ZIPs apos a zona de drag/drop (antes linha 268)
+Converter para funcao `async`. Simular upload por chunks com loop e setTimeout. Actualizar progresso. Desactivar cancelar durante upload.
 
-### 4. Substituir handleUpload (linhas 549-553)
+Alteracoes:
+- Mensagem de limite: "Ficheiro excede o limite de 2GB."
+- Simulacao: loop de `totalChunks = Math.ceil(file.size / CHUNK_SIZE)` com 300ms por chunk
+- Limpar states apos conclusao
 
-Nova logica com deteccao de ZIP:
-- Se ZIP: mostra progresso, simula extraccao com setTimeout (2.5s), cria 5 projectos extraidos, actualiza obra activa
-- Se ficheiro normal: comportamento actual mantido, actualiza obra activa
+### 4. UploadModal -- textos (linhas 257, 273)
 
-### 5. Novo componente ObraListModal (antes do export, linha 524)
+- Linha 257: `"Limite: 500MB"` muda para `"Limite: 2GB por ficheiro"`
+- Linha 273: `"máx. 500MB"` muda para `"máx. 2GB"`
 
-Modal overlay com:
-- Header com titulo, contagem e botao "+ Nova Obra"
-- Lista de obras com destaque na activa (badge "Ativa")
-- Info: nome, cidade, fiscal, n.o projectos, data
-- Botao remover ao hover com confirmacao
-- Estado vazio com emoji e instrucoes
-- Clicar numa obra selecciona-a e fecha o modal
+### 5. UploadModal -- bloco informativo ZIP (linhas 277-281)
 
-### 6. Actualizar header (linhas 587-599)
+Substituir por versao expandida com 3 linhas:
+- ZIP: extraccao automatica
+- Limite: 2GB, chunks de 50MB
+- Formatos: PDF, DWG, DWF, IFC, ZIP, RAR, 7Z
 
-Substituir bloco `obraInfo`/botao por:
-- Se `obraAtiva`: botao dropdown com nome + cidade + seta, abre `ObraListModal`
-- Se null: botao "Registar Obra" com gradiente laranja, abre `ObraRegistModal`
+### 6. UploadModal -- barra de progresso (antes linha 301)
 
-### 7. Actualizar referencia `obraInfo` no header decorativo (linhas 574-580)
+Adicionar bloco condicional `{uploading && (...)}` com:
+- Nome do ficheiro truncado + percentagem
+- Barra de progresso com gradiente laranja
+- Texto contextual ("upload por chunks de 50MB" para ficheiros grandes)
 
-Substituir `obraInfo` por `obraAtiva` no bloco de info junto ao titulo.
+### 7. UploadModal -- botao Cancelar (linhas 301-308)
 
-### 8. Actualizar ObraRegistModal onConfirm (linha 742)
+Adicionar `disabled={uploading}` e texto condicional. Estilos para estado desactivado.
 
-Em vez de `setObraInfo`, criar objecto `Obra`, adicionar a `obras`, definir como `obraAtiva`, e enviar mensagem ao agente.
+### 8. formatFileSize no helpers.ts (linha 27-30)
 
-### 9. Actualizar ShareModal prop (linha 741)
+Actualizar funcao para suportar GB (>= 1073741824 bytes).
 
-Substituir `obraInfo={obraInfo}` por `obraInfo={obraAtiva}`.
+### 9. Alerta no handleFile da sidebar (linha 234)
 
-### 10. Indicador de progresso ZIP na sidebar (antes linha 648)
-
-Bloco condicional com spinner e texto de `uploadProgress`.
-
-### 11. Actualizar texto do botao upload na sidebar (linha 651)
-
-Mudar de `PDF . DWG . DWF . IFC` para `PDF . DWG . DWF . IFC . ZIP`.
-
-### 12. Adicionar modais no return (linha 751)
-
-Adicionar `ObraListModal` com props para seleccao, remocao e criacao de novas obras.
-
-### 13. Actualizar exports (linha 762)
-
-Adicionar `ObraListModal` aos exports.
-
-## Base de dados (migracao SQL)
-
-Criar tabela `incompaticheck_obras` com RLS e adicionar coluna `obra_id` a `incompaticheck_projects` (se existir).
-
-```sql
-CREATE TABLE IF NOT EXISTS incompaticheck_obras (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id UUID REFERENCES auth.users(id),
-  nome TEXT NOT NULL,
-  cidade TEXT,
-  fiscal TEXT,
-  project_count INTEGER DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
-ALTER TABLE incompaticheck_obras ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users manage own obras" ON incompaticheck_obras
-  FOR ALL USING (auth.uid() = user_id);
-```
+Mensagem actualizada para "2GB" em vez de "500MB".
 
 ## Ficheiros modificados
 
 | Ficheiro | Alteracao |
 |---|---|
-| `src/pages/app/IncompatiCheck.tsx` | Interface Obra, states, ObraListModal, handleUpload ZIP, header, sidebar, exports |
-| Migracao SQL | Tabela incompaticheck_obras com RLS |
+| `src/pages/app/IncompatiCheck.tsx` | Constantes, UploadModal (states, handleFile async, progresso, textos, botao), alerta |
+| `src/pages/app/incompaticheck/helpers.ts` | formatFileSize com suporte a GB |
 
+## Nota
+
+Nao e necessaria migracao SQL -- o bucket `project-files` ja existe e o limite de storage e gerido pela plataforma. A simulacao de chunks e local (frontend) para UX; em producao seria implementado via edge function.
