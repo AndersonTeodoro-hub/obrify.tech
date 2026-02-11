@@ -42,6 +42,7 @@ export default function AgentPanel({ onSendMessage, agentThinking, findings }: A
   const accumulatedTextRef = useRef('');
   const subtitleTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const isSendingRef = useRef(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Sync agentThinking → voiceState
   useEffect(() => {
@@ -50,19 +51,11 @@ export default function AgentPanel({ onSendMessage, agentThinking, findings }: A
     }
   }, [agentThinking]);
 
-  // Pre-load TTS voices
-  useEffect(() => {
-    const loadVoices = () => { window.speechSynthesis.getVoices(); };
-    loadVoices();
-    window.speechSynthesis.addEventListener('voiceschanged', loadVoices);
-    return () => window.speechSynthesis.removeEventListener('voiceschanged', loadVoices);
-  }, []);
-
   // Cleanup
   useEffect(() => {
     return () => {
       recognitionRef.current?.abort();
-      window.speechSynthesis.cancel();
+      stopAudio();
       if (subtitleTimerRef.current) clearTimeout(subtitleTimerRef.current);
     };
   }, []);
@@ -75,26 +68,93 @@ export default function AgentPanel({ onSendMessage, agentThinking, findings }: A
     }
   }, []);
 
-  const speakText = useCallback((text: string) => {
+  const stopAudio = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      if (audioRef.current.src.startsWith('blob:')) {
+        URL.revokeObjectURL(audioRef.current.src);
+      }
+      audioRef.current = null;
+    }
+  }, []);
+
+  // ElevenLabs TTS — voz masculina Daniel (PT-PT)
+  const speakWithElevenLabs = useCallback(async (text: string) => {
+    const clean = cleanMarkdown(text);
+    const displayText = text.length > 200 ? text.substring(0, 200) + '...' : text;
+
     if (isMuted) {
       setVoiceState('idle');
-      showSubtitle(text.length > 200 ? text.substring(0, 200) + '...' : text, 5000);
+      showSubtitle(displayText, 5000);
       return;
     }
+
+    setVoiceState('speaking');
+    showSubtitle(displayText, 0);
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/elevenlabs-tts`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({
+            text: clean.substring(0, 4500), // ElevenLabs limit
+            voiceId: 'onwK4e9ZLuTAKqWW03F9', // Daniel — male PT
+          }),
+        }
+      );
+
+      if (!response.ok) throw new Error(`TTS ${response.status}`);
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+
+      stopAudio();
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+
+      audio.onended = () => {
+        setVoiceState('idle');
+        URL.revokeObjectURL(audioUrl);
+        audioRef.current = null;
+        setTimeout(() => setSubtitle(''), 3000);
+      };
+      audio.onerror = () => {
+        setVoiceState('idle');
+        URL.revokeObjectURL(audioUrl);
+        audioRef.current = null;
+      };
+
+      await audio.play();
+    } catch (e) {
+      console.error('ElevenLabs TTS error, falling back to browser:', e);
+      // Fallback: browser Speech Synthesis with male voice
+      fallbackSpeak(clean, displayText);
+    }
+  }, [isMuted, showSubtitle, stopAudio]);
+
+  // Fallback browser TTS — procura voz masculina PT
+  const fallbackSpeak = useCallback((clean: string, displayText: string) => {
     window.speechSynthesis.cancel();
-    const clean = cleanMarkdown(text);
     const utterance = new SpeechSynthesisUtterance(clean);
     utterance.lang = 'pt-PT';
     utterance.rate = 1.0;
-    utterance.pitch = 1.0;
 
     const voices = window.speechSynthesis.getVoices();
-    const ptVoice = voices.find(v => v.lang.startsWith('pt'));
+    // Prefer male Portuguese voice
+    const maleVoice = voices.find(v => v.lang.startsWith('pt') && v.name.toLowerCase().includes('male'));
+    const ptVoice = maleVoice || voices.find(v => v.lang.startsWith('pt'));
     if (ptVoice) utterance.voice = ptVoice;
 
     utterance.onstart = () => {
       setVoiceState('speaking');
-      showSubtitle(text.length > 200 ? text.substring(0, 200) + '...' : text, 0);
+      showSubtitle(displayText, 0);
     };
     utterance.onend = () => {
       setVoiceState('idle');
@@ -103,7 +163,7 @@ export default function AgentPanel({ onSendMessage, agentThinking, findings }: A
     utterance.onerror = () => setVoiceState('idle');
 
     window.speechSynthesis.speak(utterance);
-  }, [isMuted, showSubtitle]);
+  }, [showSubtitle]);
 
   const sendAndSpeak = useCallback(async (text: string) => {
     if (!text.trim() || isSendingRef.current) return;
@@ -113,21 +173,16 @@ export default function AgentPanel({ onSendMessage, agentThinking, findings }: A
 
     try {
       const response = await onSendMessage(text.trim());
-      if (response) {
-        setLastResponse(response);
-        speakText(response);
-      } else {
-        const fallback = 'Não consegui obter resposta. Tente novamente.';
-        setLastResponse(fallback);
-        speakText(fallback);
-      }
+      const reply = response || 'Não consegui obter resposta. Tente novamente.';
+      setLastResponse(reply);
+      await speakWithElevenLabs(reply);
     } catch {
       setVoiceState('idle');
       showSubtitle('Erro de comunicação. Tente novamente.', 4000);
     } finally {
       isSendingRef.current = false;
     }
-  }, [onSendMessage, speakText, showSubtitle]);
+  }, [onSendMessage, speakWithElevenLabs, showSubtitle]);
 
   const startRecording = useCallback(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -135,6 +190,9 @@ export default function AgentPanel({ onSendMessage, agentThinking, findings }: A
       showSubtitle('Reconhecimento de voz não suportado neste navegador.', 4000);
       return;
     }
+
+    stopAudio();
+    window.speechSynthesis.cancel();
 
     const recognition = new SpeechRecognition();
     recognition.lang = 'pt-PT';
@@ -157,6 +215,7 @@ export default function AgentPanel({ onSendMessage, agentThinking, findings }: A
       showSubtitle(accumulatedTextRef.current + interim, 0);
     };
 
+    // Auto-send when user stops speaking
     recognition.onend = () => {
       const text = accumulatedTextRef.current.trim();
       if (text) {
@@ -179,7 +238,7 @@ export default function AgentPanel({ onSendMessage, agentThinking, findings }: A
     recognition.start();
     setVoiceState('recording');
     setSubtitle('');
-  }, [sendAndSpeak, showSubtitle]);
+  }, [sendAndSpeak, showSubtitle, stopAudio]);
 
   const stopRecording = useCallback(() => {
     recognitionRef.current?.stop();
@@ -190,25 +249,35 @@ export default function AgentPanel({ onSendMessage, agentThinking, findings }: A
       stopRecording();
     } else if (voiceState === 'idle') {
       startRecording();
+    } else if (voiceState === 'speaking') {
+      // Interrupt speech and start new recording
+      stopAudio();
+      window.speechSynthesis.cancel();
+      setVoiceState('idle');
+      setTimeout(() => startRecording(), 100);
     }
-  }, [voiceState, startRecording, stopRecording]);
+  }, [voiceState, startRecording, stopRecording, stopAudio]);
 
   const toggleMute = useCallback(() => {
     setIsMuted(prev => {
-      if (!prev) window.speechSynthesis.cancel();
+      if (!prev) {
+        stopAudio();
+        window.speechSynthesis.cancel();
+      }
       return !prev;
     });
-  }, []);
+  }, [stopAudio]);
 
   const repeatLast = useCallback(() => {
-    if (lastResponse) speakText(lastResponse);
-  }, [lastResponse, speakText]);
+    if (lastResponse) speakWithElevenLabs(lastResponse);
+  }, [lastResponse, speakWithElevenLabs]);
 
   const handleQuickCommand = useCallback((text: string) => {
     if (voiceState === 'processing' || voiceState === 'recording') return;
+    stopAudio();
     window.speechSynthesis.cancel();
     sendAndSpeak(text);
-  }, [voiceState, sendAndSpeak]);
+  }, [voiceState, sendAndSpeak, stopAudio]);
 
   const stateConfig = {
     idle: { label: 'Clique para falar com o Eng. Marcos', color: '#ff6b35' },
@@ -292,7 +361,7 @@ export default function AgentPanel({ onSendMessage, agentThinking, findings }: A
       {/* Mic button */}
       <button
         onClick={toggleRecording}
-        disabled={voiceState === 'processing' || voiceState === 'speaking'}
+        disabled={voiceState === 'processing'}
         style={{
           width: '72px', height: '72px', borderRadius: '50%', border: 'none', cursor: 'pointer',
           background: voiceState === 'recording'
@@ -301,7 +370,7 @@ export default function AgentPanel({ onSendMessage, agentThinking, findings }: A
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: voiceState === 'recording'
             ? '0 0 40px rgba(239,68,68,0.5)' : '0 4px 20px rgba(255,107,53,0.3)',
-          opacity: (voiceState === 'processing' || voiceState === 'speaking') ? 0.5 : 1,
+          opacity: voiceState === 'processing' ? 0.5 : 1,
           animation: voiceState === 'recording' ? 'pulse-mic 1.5s ease-in-out infinite' : 'none',
           transition: 'all 0.2s',
         }}
