@@ -1,58 +1,93 @@
 
 
-# Fix: RLS policy bug blocking organization creation
+# Fix: Mudar todas as políticas RLS de RESTRICTIVE para PERMISSIVE
 
-## Root Cause
+## Problema
 
-The `memberships` table INSERT policy has a SQL bug. The condition meant to allow "first member of a new org" is:
+Todas as políticas RLS nas tabelas `organizations` e `memberships` estão como **RESTRICTIVE** (`Permissive: No`). Em PostgreSQL, políticas RESTRICTIVE exigem que TODAS passem (lógica AND), enquanto PERMISSIVE exige que QUALQUER uma passe (lógica OR). Isto bloqueia a criação de organizações.
 
-```sql
-NOT EXISTS (
-  SELECT 1 FROM memberships memberships_1
-  WHERE memberships_1.org_id = memberships_1.org_id  -- BUG: compares column to itself!
-)
-```
-
-This self-comparison is always TRUE for any non-null value, so `NOT EXISTS` is always FALSE (as long as any row exists in the memberships table). Combined with `has_org_role()` also being FALSE for a brand-new org (no members yet), the entire check fails.
-
-The `organizations` INSERT policy itself is fine (`auth.uid() IS NOT NULL`, PERMISSIVE), but the error may propagate from the membership insert or the user sees the membership error.
-
-## Fix
-
-Drop and recreate the `memberships` INSERT policy with the correct reference:
+## Migração SQL (um único ficheiro)
 
 ```sql
-DROP POLICY "Admins can insert memberships" ON public.memberships;
+-- ============================================
+-- FIX: Mudar políticas de RESTRICTIVE para PERMISSIVE
+-- ============================================
 
+-- 1. DROP todas as políticas da tabela organizations
+DROP POLICY IF EXISTS "Authenticated users can create organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Members can view their organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can update organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can delete organizations" ON public.organizations;
+
+-- 2. Recriar como PERMISSIVE (default)
+CREATE POLICY "Authenticated users can create organizations"
+  ON public.organizations FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() IS NOT NULL);
+
+CREATE POLICY "Members can view their organizations"
+  ON public.organizations FOR SELECT
+  TO authenticated
+  USING (is_org_member(auth.uid(), id));
+
+CREATE POLICY "Admins can update organizations"
+  ON public.organizations FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+
+CREATE POLICY "Admins can delete organizations"
+  ON public.organizations FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+
+-- 3. DROP todas as políticas da tabela memberships
+DROP POLICY IF EXISTS "Users can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Members can view memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can update memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can delete memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Users can view own memberships" ON public.memberships;
+
+-- 4. Recriar TODAS as políticas de memberships como PERMISSIVE
 CREATE POLICY "Users can insert memberships"
-ON public.memberships
-FOR INSERT
-TO authenticated
-WITH CHECK (
-  -- User is inserting themselves
-  auth.uid() = user_id
-  AND (
-    -- They're already admin of the org
-    has_org_role(auth.uid(), org_id, 'admin'::membership_role)
-    -- OR this org has no members yet (first member / creator)
-    OR NOT EXISTS (
-      SELECT 1 FROM public.memberships m
-      WHERE m.org_id = memberships.org_id
+  ON public.memberships FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+    AND (
+      has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+      OR NOT EXISTS (
+        SELECT 1 FROM public.memberships m
+        WHERE m.org_id = memberships.org_id
+      )
     )
-  )
-);
+  );
+
+CREATE POLICY "Members can view memberships"
+  ON public.memberships FOR SELECT
+  TO authenticated
+  USING (
+    auth.uid() = user_id
+    OR has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+  );
+
+CREATE POLICY "Admins can update memberships"
+  ON public.memberships FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+
+CREATE POLICY "Admins can delete memberships"
+  ON public.memberships FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
 ```
 
-Key changes:
-1. Correctly references `memberships.org_id` (the new row) vs `m.org_id` (existing rows)
-2. Adds `auth.uid() = user_id` check so users can only insert memberships for themselves
-3. Allows first member of a new org OR existing admins to add members
+## Resumo
 
-## Files Changed
-
-| File | Action |
+| Tabela | Acção |
 |---|---|
-| Database migration | Fix memberships INSERT RLS policy |
+| `organizations` | Drop 4 políticas RESTRICTIVE, recriar 4 como PERMISSIVE |
+| `memberships` | Drop todas as políticas, recriar 4 como PERMISSIVE (INSERT, SELECT, UPDATE, DELETE) |
 
-No code changes needed — only the RLS policy fix.
+Nenhuma alteração de código necessária — apenas a migração da base de dados.
 
