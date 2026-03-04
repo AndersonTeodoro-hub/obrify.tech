@@ -448,5 +448,6 @@ export function useEngSilvaVoice() {
     analyserNode: analyserRef.current,
     start,
     hangUp,
+    setPendingImage,
   };
 }
