@@ -8,7 +8,7 @@ export function EngSilvaFAB({ onClick }: EngSilvaFABProps) {
   return (
     <button
       onClick={onClick}
-      className="fixed bottom-5 right-5 z-50 flex flex-col items-center gap-1 group"
+      className="fixed bottom-28 right-5 z-50 flex flex-col items-center gap-1 group"
       aria-label="Ligar para Eng. Silva"
     >
       <div className="w-16 h-16 rounded-full flex items-center justify-center shadow-lg eng-silva-pulse"

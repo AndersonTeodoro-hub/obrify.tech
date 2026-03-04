@@ -68,6 +68,7 @@ export function useEngSilvaVoice() {
   const conversationRef = useRef<{ role: string; content: string }[]>([]);
   const recordingStartRef = useRef<number>(0);
   const activeRef = useRef(false);
+  const startListeningRef = useRef<(() => void) | null>(null);
 
   const cleanup = useCallback(() => {
     activeRef.current = false;
@@ -108,11 +109,18 @@ export function useEngSilvaVoice() {
   const startListening = useCallback(() => {
     if (!activeRef.current || !streamRef.current || !audioContextRef.current) return;
 
+    console.log("ENG-SILVA: Listening");
     setVoiceState('listening');
     setError(null);
     chunksRef.current = [];
 
-    const recorder = new MediaRecorder(streamRef.current, { mimeType: 'audio/webm' });
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : '';
+
+    const recorder = new MediaRecorder(streamRef.current, mimeType ? { mimeType } : undefined);
     recorderRef.current = recorder;
     recordingStartRef.current = Date.now();
 
@@ -125,7 +133,7 @@ export function useEngSilvaVoice() {
       const elapsed = Date.now() - recordingStartRef.current;
       if (elapsed < MIN_RECORDING_MS || chunksRef.current.length === 0) {
         // Too short — restart listening
-        if (activeRef.current) startListening();
+        if (activeRef.current) startListeningRef.current?.();
         return;
       }
       await processAudio();
@@ -139,7 +147,7 @@ export function useEngSilvaVoice() {
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
     const checkSilence = () => {
-      if (!activeRef.current || voiceState === 'idle') return;
+      if (!activeRef.current) return;
       analyser.getByteFrequencyData(dataArray);
       const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
 
@@ -150,6 +158,7 @@ export function useEngSilvaVoice() {
       const elapsed = Date.now() - recordingStartRef.current;
       if (elapsed > MIN_RECORDING_MS && Date.now() - lastSoundTime > SILENCE_DURATION) {
         // Silence detected — stop recording
+        console.log("ENG-SILVA: Silence detected");
         if (recorder.state === 'recording') {
           recorder.stop();
         }
@@ -162,6 +171,8 @@ export function useEngSilvaVoice() {
     rafRef.current = requestAnimationFrame(checkSilence);
   }, []);
 
+  startListeningRef.current = startListening;
+
   const processAudio = useCallback(async () => {
     if (!activeRef.current) return;
 
@@ -169,6 +180,7 @@ export function useEngSilvaVoice() {
       // STT
       setVoiceState('processing-stt');
       const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+      console.log("ENG-SILVA: STT sending, size:", blob.size);
       const base64Audio = await blobToBase64(blob);
 
       const { data: sttData, error: sttError } = await supabase.functions.invoke('eng-silva-stt', {
@@ -180,8 +192,9 @@ export function useEngSilvaVoice() {
       }
 
       const userText = sttData.text.trim();
+      console.log("ENG-SILVA: STT result:", userText);
       if (!userText) {
-        if (activeRef.current) startListening();
+        if (activeRef.current) startListeningRef.current?.();
         return;
       }
 
@@ -202,65 +215,54 @@ export function useEngSilvaVoice() {
       }
 
       const replyText = chatData.reply;
+      console.log("ENG-SILVA: Chat result:", replyText);
       conversationRef.current.push({ role: 'assistant', content: replyText });
 
       // TTS
       setVoiceState('processing-tts');
-      const ttsResponse = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/eng-silva-tts`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({ text: replyText }),
-        }
-      );
+      console.log("ENG-SILVA: TTS sending");
 
-      if (!ttsResponse.ok) {
-        const errBody = await ttsResponse.text();
-        if (ttsResponse.status === 429 || errBody.includes('quota')) {
-          setError('Limite de voz atingido. Tenta mais tarde.');
-          return;
-        }
-        throw new Error(`TTS failed: ${ttsResponse.status}`);
+      const { data: ttsData, error: ttsError } = await supabase.functions.invoke('eng-silva-tts', {
+        body: { text: replyText },
+      });
+
+      if (ttsError || !ttsData?.audio) {
+        throw new Error('TTS failed');
       }
-
-      const ttsJson = await ttsResponse.json();
-      if (!ttsJson?.audio) throw new Error('No audio in TTS response');
 
       // Play audio
       setVoiceState('speaking');
-      const audioUrl = `data:audio/mpeg;base64,${ttsJson.audio}`;
+      console.log("ENG-SILVA: Playing audio");
+      const audioUrl = `data:audio/mpeg;base64,${ttsData.audio}`;
       const audio = new Audio(audioUrl);
       audioRef.current = audio;
 
       audio.onended = () => {
+        console.log("ENG-SILVA: Audio ended, restarting");
         audioRef.current = null;
-        if (activeRef.current) startListening();
+        if (activeRef.current) startListeningRef.current?.();
       };
       audio.onerror = () => {
         audioRef.current = null;
         setError('Erro ao reproduzir áudio.');
-        if (activeRef.current) startListening();
+        if (activeRef.current) startListeningRef.current?.();
       };
 
       await audio.play();
     } catch (err: any) {
-      console.error('Voice pipeline error:', err);
+      console.error('ENG-SILVA ERROR:', err);
       setError('Erro de ligação. Tenta novamente.');
       // Auto-retry: restart listening after a short delay
       if (activeRef.current) {
         setTimeout(() => {
-          if (activeRef.current) startListening();
+          if (activeRef.current) startListeningRef.current?.();
         }, 2000);
       }
     }
-  }, [startListening]);
+  }, []);
 
   const start = useCallback(async () => {
+    console.log("ENG-SILVA: Requesting mic");
     setError(null);
     setVoiceState('requesting-mic');
     activeRef.current = true;
@@ -269,6 +271,7 @@ export function useEngSilvaVoice() {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
+      console.log("ENG-SILVA: Mic acquired");
       streamRef.current = stream;
 
       const ctx = new AudioContext();
@@ -279,9 +282,9 @@ export function useEngSilvaVoice() {
       source.connect(analyser);
       analyserRef.current = analyser;
 
-      startListening();
+      startListeningRef.current?.();
     } catch (err: any) {
-      console.error('Mic error:', err);
+      console.error('ENG-SILVA ERROR:', err);
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         setError('Precisas de permitir o microfone para falar com o Eng. Silva');
       } else {
@@ -290,7 +293,7 @@ export function useEngSilvaVoice() {
       setVoiceState('idle');
       activeRef.current = false;
     }
-  }, [startListening]);
+  }, []);
 
   const hangUp = useCallback(() => {
     cleanup();
