@@ -143,6 +143,7 @@ export function useEngSilvaVoice() {
 
     // Silence detection loop
     let lastSoundTime = Date.now();
+    let speechDetected = false;
     const analyser = analyserRef.current!;
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
@@ -153,11 +154,18 @@ export function useEngSilvaVoice() {
 
       if (avg > SILENCE_THRESHOLD) {
         lastSoundTime = Date.now();
+        speechDetected = true;
+      }
+
+      // Max recording timeout of 30 seconds
+      if (Date.now() - recordingStartRef.current > 30000) {
+        if (recorder.state === 'recording') recorder.stop();
+        return;
       }
 
       const elapsed = Date.now() - recordingStartRef.current;
-      if (elapsed > MIN_RECORDING_MS && Date.now() - lastSoundTime > SILENCE_DURATION) {
-        // Silence detected — stop recording
+      if (speechDetected && elapsed > MIN_RECORDING_MS && Date.now() - lastSoundTime > SILENCE_DURATION) {
+        // Silence detected after speech — stop recording
         console.log("ENG-SILVA: Silence detected");
         if (recorder.state === 'recording') {
           recorder.stop();
