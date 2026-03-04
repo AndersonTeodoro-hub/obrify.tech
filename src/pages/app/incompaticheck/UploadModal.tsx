@@ -21,7 +21,7 @@ export default function UploadModal({ isOpen, onClose, onUpload, obraNome, uploa
 
   const handleFile = async (file: File) => {
     setError(null);
-    if (file.size > FILE_SIZE_LIMIT) { setError('Ficheiro excede o limite de 50MB.'); return; }
+    if (file.size > FILE_SIZE_LIMIT) { setError('Ficheiro excede o limite de 2GB.'); return; }
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
     if (ext !== 'pdf') { setError('Formato não suportado. Utilize apenas ficheiros PDF.'); return; }
     try {
