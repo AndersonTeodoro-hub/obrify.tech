@@ -37,7 +37,7 @@ export default function UploadModal({ isOpen, onClose, onUpload, obraNome, uploa
       <div onClick={e => e.stopPropagation()} style={{ background: "#111", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "20px", padding: "32px", width: "90%", maxWidth: "480px" }}>
         <h3 style={{ color: "#fff", fontSize: "18px", fontWeight: 700, marginBottom: "4px" }}>Upload de Projecto</h3>
         {obraNome && <div style={{ color: "#ff6b35", fontSize: "11px", marginBottom: "8px" }}>Obra: {obraNome}</div>}
-        <p style={{ color: "#888", fontSize: "13px", marginBottom: "20px" }}>Limite: 50MB por ficheiro. Formato: PDF</p>
+        <p style={{ color: "#888", fontSize: "13px", marginBottom: "20px" }}>Limite: 2GB por ficheiro. Formato: PDF</p>
 
         <div
           onClick={() => !isUploading && fileRef.current?.click()}
