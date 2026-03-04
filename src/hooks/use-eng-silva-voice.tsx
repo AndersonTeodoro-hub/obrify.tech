@@ -10,7 +10,7 @@ export type VoiceState =
   | 'processing-tts'
   | 'speaking';
 
-const SYSTEM_PROMPT = `Tu és o Eng. Silva, consultor sénior de engenharia civil na plataforma Obrify.
+const BASE_SYSTEM_PROMPT = `Tu és o Eng. Silva, consultor sénior de engenharia civil na plataforma Obrify.
 
 QUEM ÉS:
 Tens 30+ anos de experiência em fiscalização de obras em Portugal e na Europa. Conheces todas as normas europeias de construção de cor — mas usas esse conhecimento como base, não como resposta. Falas como um colega engenheiro experiente que está ao lado do fiscal na obra, não como um manual técnico.
@@ -49,6 +49,40 @@ LIMITES:
 
 IMPORTANTE: Estás numa conversa por VOZ. Responde sempre como se estivesses ao telefone com um colega. Curto, directo, natural. Nada de texto formatado.`;
 
+function buildSystemPrompt(memory: { profile: any; summaries: any[] }): string {
+  let prompt = BASE_SYSTEM_PROMPT;
+
+  const { profile, summaries } = memory;
+
+  if (profile && Object.keys(profile).length > 0) {
+    prompt += `\n\nCONTEXTO DO FISCAL:`;
+    if (profile.name) prompt += `\n- Nome: ${profile.name}. Trata-o pelo nome.`;
+    if (profile.company) prompt += `\n- Empresa: ${profile.company}`;
+    if (profile.current_project) prompt += `\n- Obra actual: ${profile.current_project}`;
+    if (profile.role) prompt += `\n- Função: ${profile.role}`;
+  }
+
+  if (summaries && summaries.length > 0) {
+    prompt += `\n\nCONVERSAS ANTERIORES (resumos):`;
+    const recent = summaries.slice(-5);
+    recent.forEach((s: any) => {
+      const date = new Date(s.date).toLocaleDateString('pt-PT');
+      prompt += `\n- ${date}: ${s.summary}`;
+    });
+    prompt += `\n\nUsa este contexto naturalmente. Não repitas informação que o fiscal já sabe. Se ele já se apresentou antes, não perguntes o nome de novo.`;
+  }
+
+  prompt += `\n\nEXTRAÇÃO DE PERFIL:
+Se o fiscal mencionar o seu nome, empresa, obra, ou função, inclui no INÍCIO da tua resposta (antes do texto normal) uma linha especial no formato:
+[PERFIL: nome=..., empresa=..., obra=..., funcao=...]
+Inclui apenas os campos que foram mencionados. Esta linha será processada automaticamente e não será lida em voz alta.
+Exemplo: se ele diz "Sou o João da Engexpor", responde:
+[PERFIL: nome=João, empresa=Engexpor]
+Olá João! Bem-vindo...`;
+
+  return prompt;
+}
+
 const SILENCE_THRESHOLD = 25;
 const SILENCE_DURATION = 1500;
 const MIN_RECORDING_MS = 800;
@@ -56,6 +90,7 @@ const MIN_RECORDING_MS = 800;
 export function useEngSilvaVoice() {
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [memory, setMemory] = useState<{ profile: any; summaries: any[] }>({ profile: {}, summaries: [] });
 
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -69,6 +104,12 @@ export function useEngSilvaVoice() {
   const recordingStartRef = useRef<number>(0);
   const activeRef = useRef(false);
   const startListeningRef = useRef<(() => void) | null>(null);
+  const memoryRef = useRef(memory);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    memoryRef.current = memory;
+  }, [memory]);
 
   const cleanup = useCallback(() => {
     activeRef.current = false;
@@ -106,6 +147,23 @@ export function useEngSilvaVoice() {
       reader.readAsDataURL(blob);
     });
 
+  const loadMemory = useCallback(async () => {
+    try {
+      console.log("ENG-SILVA: Loading memory");
+      const { data, error: memError } = await supabase.functions.invoke('eng-silva-memory', {
+        body: { action: 'load' },
+      });
+      if (!memError && data) {
+        const loaded = { profile: data.profile || {}, summaries: data.summaries || [] };
+        setMemory(loaded);
+        memoryRef.current = loaded;
+        console.log("ENG-SILVA: Memory loaded:", loaded);
+      }
+    } catch (err) {
+      console.error("ENG-SILVA: Memory load error:", err);
+    }
+  }, []);
+
   const startListening = useCallback(() => {
     if (!activeRef.current || !streamRef.current || !audioContextRef.current) return;
 
@@ -132,7 +190,6 @@ export function useEngSilvaVoice() {
       if (!activeRef.current) return;
       const elapsed = Date.now() - recordingStartRef.current;
       if (elapsed < MIN_RECORDING_MS || chunksRef.current.length === 0) {
-        // Too short — restart listening
         if (activeRef.current) startListeningRef.current?.();
         return;
       }
@@ -165,7 +222,6 @@ export function useEngSilvaVoice() {
 
       const elapsed = Date.now() - recordingStartRef.current;
       if (speechDetected && elapsed > MIN_RECORDING_MS && Date.now() - lastSoundTime > SILENCE_DURATION) {
-        // Silence detected after speech — stop recording
         console.log("ENG-SILVA: Silence detected");
         if (recorder.state === 'recording') {
           recorder.stop();
@@ -214,7 +270,7 @@ export function useEngSilvaVoice() {
         body: {
           message: userText,
           conversation_history: conversationRef.current,
-          system: SYSTEM_PROMPT,
+          system: buildSystemPrompt(memoryRef.current),
         },
       });
 
@@ -222,8 +278,39 @@ export function useEngSilvaVoice() {
         throw new Error(chatError?.message || 'Chat falhou');
       }
 
-      const replyText = chatData.reply;
+      let replyText = chatData.reply;
       console.log("ENG-SILVA: Chat result:", replyText);
+
+      // Extract profile data if present
+      const profileMatch = replyText.match(/\[PERFIL:([^\]]+)\]/);
+      if (profileMatch) {
+        const profileStr = profileMatch[1];
+        const newProfile: any = {};
+        const nameMatch = profileStr.match(/nome=([^,\]]+)/);
+        const companyMatch = profileStr.match(/empresa=([^,\]]+)/);
+        const projectMatch = profileStr.match(/obra=([^,\]]+)/);
+        const roleMatch = profileStr.match(/funcao=([^,\]]+)/);
+        if (nameMatch) newProfile.name = nameMatch[1].trim();
+        if (companyMatch) newProfile.company = companyMatch[1].trim();
+        if (projectMatch) newProfile.current_project = projectMatch[1].trim();
+        if (roleMatch) newProfile.role = roleMatch[1].trim();
+
+        if (Object.keys(newProfile).length > 0) {
+          console.log("ENG-SILVA: Profile extracted:", newProfile);
+          supabase.functions.invoke('eng-silva-memory', {
+            body: { action: 'update_profile', profile: newProfile }
+          });
+          setMemory(prev => {
+            const updated = { ...prev, profile: { ...prev.profile, ...newProfile } };
+            memoryRef.current = updated;
+            return updated;
+          });
+        }
+
+        // Remove the profile tag from the text before TTS
+        replyText = replyText.replace(/\[PERFIL:[^\]]+\]\s*/g, '').trim();
+      }
+
       conversationRef.current.push({ role: 'assistant', content: replyText });
 
       // TTS
@@ -260,7 +347,6 @@ export function useEngSilvaVoice() {
     } catch (err: any) {
       console.error('ENG-SILVA ERROR:', err);
       setError('Erro de ligação. Tenta novamente.');
-      // Auto-retry: restart listening after a short delay
       if (activeRef.current) {
         setTimeout(() => {
           if (activeRef.current) startListeningRef.current?.();
@@ -274,6 +360,9 @@ export function useEngSilvaVoice() {
     setError(null);
     setVoiceState('requesting-mic');
     activeRef.current = true;
+
+    // Load memory before starting
+    await loadMemory();
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -301,9 +390,29 @@ export function useEngSilvaVoice() {
       setVoiceState('idle');
       activeRef.current = false;
     }
-  }, []);
+  }, [loadMemory]);
 
   const hangUp = useCallback(() => {
+    // Generate conversation summary before clearing
+    if (conversationRef.current.length >= 2) {
+      const lastMessages = conversationRef.current.slice(-6);
+      const summaryText = lastMessages.map(m => `${m.role === 'user' ? 'Fiscal' : 'Eng.Silva'}: ${m.content}`).join(' | ');
+      supabase.functions.invoke('eng-silva-chat', {
+        body: {
+          message: `Resume esta conversa em 1-2 frases curtas em português, focando nos temas técnicos discutidos e decisões tomadas. Não incluas saudações. Conversa: ${summaryText}`,
+          conversation_history: [],
+          system: 'És um assistente que faz resumos curtos de conversas técnicas. Responde apenas com o resumo, nada mais.'
+        }
+      }).then(({ data }) => {
+        if (data?.reply) {
+          console.log("ENG-SILVA: Conversation summary:", data.reply);
+          supabase.functions.invoke('eng-silva-memory', {
+            body: { action: 'add_summary', summary: data.reply }
+          });
+        }
+      }).catch(err => console.error("ENG-SILVA: Summary error:", err));
+    }
+
     cleanup();
     setVoiceState('idle');
     setError(null);
