@@ -61,6 +61,8 @@ export function AppLayout() {
 
       <HelpButton showPulse={showPulse} onTourComplete={() => setShowPulse(false)} />
       <ObrifyAgent open={agentOpen} onOpenChange={setAgentOpen} />
+      <EngSilvaFAB onClick={() => setSilvaOpen(true)} />
+      <EngSilvaCallOverlay open={silvaOpen} onClose={() => setSilvaOpen(false)} />
 
       <WelcomeModal
         open={showWelcome}

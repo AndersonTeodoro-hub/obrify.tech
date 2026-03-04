@@ -17,7 +17,7 @@ serve(async (req) => {
       throw new Error("ANTHROPIC_API_KEY not configured");
     }
 
-    const { message, conversation_history } = await req.json();
+    const { message, conversation_history, system } = await req.json();
     if (!message || typeof message !== "string") {
       return new Response(
         JSON.stringify({ error: "message is required" }),
@@ -28,6 +28,17 @@ serve(async (req) => {
     const messages = Array.isArray(conversation_history) ? [...conversation_history] : [];
     messages.push({ role: "user", content: message });
 
+    const body: Record<string, unknown> = {
+      model: "claude-sonnet-4-5-20250929",
+      max_tokens: 1500,
+      temperature: 0.3,
+      messages,
+    };
+
+    if (system && typeof system === "string") {
+      body.system = system;
+    }
+
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -35,12 +46,8 @@ serve(async (req) => {
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-5-20250929",
-        max_tokens: 1500,
-        temperature: 0.3,
-        messages,
-      }),
+      body: JSON.stringify(body),
+    });
     });
 
     if (!response.ok) {

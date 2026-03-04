@@ -212,6 +212,16 @@
   animation: pulse-glow 2s ease-in-out infinite;
 }
 
+/* Eng. Silva FAB Pulse */
+@keyframes eng-silva-pulse-kf {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+.eng-silva-pulse {
+  animation: eng-silva-pulse-kf 3s ease-in-out infinite;
+}
+
 /* Driver.js Tour Popover Styling */
 .obrify-tour-popover {
   background: hsl(var(--card)) !important;
