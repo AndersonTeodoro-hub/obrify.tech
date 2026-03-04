@@ -26,3 +26,12 @@ verify_jwt = false
 
 [functions.elevenlabs-conversation-token]
 verify_jwt = false
+
+[functions.eng-silva-stt]
+verify_jwt = false
+
+[functions.eng-silva-chat]
+verify_jwt = false
+
+[functions.eng-silva-tts]
+verify_jwt = false
