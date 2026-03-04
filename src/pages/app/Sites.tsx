@@ -80,7 +80,7 @@ export default function Sites() {
       // Create site first to get ID
       const { data, error } = await supabase
         .from('sites')
-        .insert({ org_id: selectedOrgId, name: newSiteName, address: newSiteAddress, description: newSiteDescription, status: 'active' } as any)
+        .insert({ org_id: selectedOrgId, name: newSiteName, address: newSiteAddress, description: newSiteDescription, status: 'active' })
         .select()
         .single();
       if (error) throw error;
@@ -92,7 +92,7 @@ export default function Sites() {
         if (!uploadError) {
           const { data: urlData } = supabase.storage.from('site-images').getPublicUrl(filePath);
           imageUrl = urlData.publicUrl;
-          await supabase.from('sites').update({ image_url: imageUrl } as any).eq('id', data.id);
+          await supabase.from('sites').update({ image_url: imageUrl }).eq('id', data.id);
         }
       }
 
