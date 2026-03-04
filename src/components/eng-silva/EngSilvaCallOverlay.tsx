@@ -1,5 +1,5 @@
-import { useEffect, useRef, useCallback } from 'react';
-import { PhoneOff } from 'lucide-react';
+import { useEffect, useRef, useCallback, useState } from 'react';
+import { PhoneOff, Camera } from 'lucide-react';
 import { useEngSilvaVoice, type VoiceState } from '@/hooks/use-eng-silva-voice';
 
 interface EngSilvaCallOverlayProps {
@@ -25,6 +25,34 @@ function visualizerColor(state: VoiceState): string {
   return '#D4A849'; // gold for thinking/default
 }
 
+async function compressImage(file: File, maxWidth = 800): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const canvas = document.createElement('canvas');
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, width, height);
+        const base64 = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
+        resolve(base64);
+      };
+      img.onerror = reject;
+      img.src = e.target!.result as string;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 function AudioVisualizer({ analyserNode, voiceState }: { analyserNode: AnalyserNode | null; voiceState: VoiceState }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
@@ -43,7 +71,6 @@ function AudioVisualizer({ analyserNode, voiceState }: { analyserNode: AnalyserN
     const isThinking = voiceState === 'processing-stt' || voiceState === 'processing-chat' || voiceState === 'processing-tts';
 
     if (isThinking) {
-      // Pulsing dots
       const time = Date.now() / 400;
       for (let i = 0; i < 3; i++) {
         const scale = 0.5 + 0.5 * Math.sin(time + i * 1.2);
@@ -85,7 +112,6 @@ function AudioVisualizer({ analyserNode, voiceState }: { analyserNode: AnalyserN
       }
       ctx.globalAlpha = 1;
     } else {
-      // Idle — flat line
       ctx.strokeStyle = color;
       ctx.globalAlpha = 0.3;
       ctx.lineWidth = 2;
@@ -117,7 +143,10 @@ function AudioVisualizer({ analyserNode, voiceState }: { analyserNode: AnalyserN
 }
 
 export function EngSilvaCallOverlay({ open, onClose }: EngSilvaCallOverlayProps) {
-  const { voiceState, error, analyserNode, start, hangUp } = useEngSilvaVoice();
+  const { voiceState, error, analyserNode, start, hangUp, setPendingImage } = useEngSilvaVoice();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [hasPendingImage, setHasPendingImage] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -132,6 +161,24 @@ export function EngSilvaCallOverlay({ open, onClose }: EngSilvaCallOverlayProps)
     hangUp();
     onClose();
   }, [hangUp, onClose]);
+
+  const handlePhotoCapture = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const base64 = await compressImage(file);
+      setPendingImage(base64);
+      setHasPendingImage(true);
+      setPhotoPreview(`data:image/jpeg;base64,${base64}`);
+      setTimeout(() => {
+        setPhotoPreview(null);
+        setHasPendingImage(false);
+      }, 5000);
+    } catch (err) {
+      console.error("ENG-SILVA: Photo capture error:", err);
+    }
+    e.target.value = '';
+  }, [setPendingImage]);
 
   if (!open) return null;
 
@@ -159,6 +206,21 @@ export function EngSilvaCallOverlay({ open, onClose }: EngSilvaCallOverlayProps)
         Consultor de Engenharia
       </p>
 
+      {/* Photo preview */}
+      {photoPreview && (
+        <div className="mb-4 animate-fade-in">
+          <img
+            src={photoPreview}
+            alt="Foto capturada"
+            className="w-20 h-20 rounded-lg object-cover mx-auto border-2"
+            style={{ borderColor: '#D4A849' }}
+          />
+          <p className="text-xs text-center mt-1" style={{ color: 'rgba(255,255,255,0.5)' }}>
+            Foto pronta — fale a sua dúvida
+          </p>
+        </div>
+      )}
+
       {/* Visualizer */}
       <div className="mb-4">
         <AudioVisualizer analyserNode={analyserNode} voiceState={voiceState} />
@@ -179,15 +241,41 @@ export function EngSilvaCallOverlay({ open, onClose }: EngSilvaCallOverlayProps)
       {/* Spacer */}
       <div className="flex-1 min-h-8" />
 
-      {/* Hang up */}
-      <button
-        onClick={handleHangUp}
-        className="w-16 h-16 rounded-full flex items-center justify-center mb-12 active:scale-95 transition-transform"
-        style={{ background: '#ef4444' }}
-        aria-label="Desligar"
-      >
-        <PhoneOff className="w-7 h-7 text-white" />
-      </button>
+      {/* Hidden file input */}
+      <input
+        type="file"
+        accept="image/*"
+        capture="environment"
+        ref={fileInputRef}
+        className="hidden"
+        onChange={handlePhotoCapture}
+      />
+
+      {/* Bottom buttons */}
+      <div className="flex items-center gap-6 mb-12">
+        {/* Camera button */}
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="w-14 h-14 rounded-full flex items-center justify-center active:scale-95 transition-transform relative"
+          style={{ background: 'rgba(255,255,255,0.1)' }}
+          aria-label="Tirar foto"
+        >
+          <Camera className="w-6 h-6 text-white" />
+          {hasPendingImage && (
+            <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-amber-400 animate-pulse" />
+          )}
+        </button>
+
+        {/* Hang up button */}
+        <button
+          onClick={handleHangUp}
+          className="w-16 h-16 rounded-full flex items-center justify-center active:scale-95 transition-transform"
+          style={{ background: '#ef4444' }}
+          aria-label="Desligar"
+        >
+          <PhoneOff className="w-7 h-7 text-white" />
+        </button>
+      </div>
     </div>
   );
 }
