@@ -35,3 +35,6 @@ verify_jwt = false
 
 [functions.eng-silva-tts]
 verify_jwt = false
+
+[functions.incompaticheck-analyze]
+verify_jwt = false
