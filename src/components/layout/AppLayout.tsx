@@ -15,6 +15,7 @@ export function AppLayout() {
   const [showWelcome, setShowWelcome] = useState(false);
   const [showPulse, setShowPulse] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
+  const [silvaOpen, setSilvaOpen] = useState(false);
 
   const toggleAgent = useCallback(() => setAgentOpen(prev => !prev), []);
   const closeAgent = useCallback(() => setAgentOpen(false), []);
