@@ -1,93 +1,37 @@
 
 
-# Fix: Mudar todas as políticas RLS de RESTRICTIVE para PERMISSIVE
+# Plan: Add Camera + AI Vision to Eng. Silva Voice Call
 
-## Problema
+## Overview
+Add a camera button to the call overlay so inspectors can photograph site issues and have Eng. Silva analyze them using Claude's multimodal vision capabilities.
 
-Todas as políticas RLS nas tabelas `organizations` e `memberships` estão como **RESTRICTIVE** (`Permissive: No`). Em PostgreSQL, políticas RESTRICTIVE exigem que TODAS passem (lógica AND), enquanto PERMISSIVE exige que QUALQUER uma passe (lógica OR). Isto bloqueia a criação de organizações.
+## Changes
 
-## Migração SQL (um único ficheiro)
+### 1. Edge Function: `supabase/functions/eng-silva-chat/index.ts`
+- Accept optional `image` field (base64) in request body
+- When image is present, construct multimodal message with `type: "image"` + `type: "text"` content blocks
+- When no image, keep current simple text message format
 
-```sql
--- ============================================
--- FIX: Mudar políticas de RESTRICTIVE para PERMISSIVE
--- ============================================
+### 2. Hook: `src/hooks/use-eng-silva-voice.tsx`
+- Add `pendingImageRef` for storing captured image base64
+- Add `setPendingImage` callback exposed from hook
+- In `processAudio`, build chat body conditionally with `image` field when pending
+- Clear `pendingImageRef` after sending
+- Handle empty STT + pending image case (auto-generate "Analisa esta imagem" text)
+- Export `setPendingImage` in return object
 
--- 1. DROP todas as políticas da tabela organizations
-DROP POLICY IF EXISTS "Authenticated users can create organizations" ON public.organizations;
-DROP POLICY IF EXISTS "Members can view their organizations" ON public.organizations;
-DROP POLICY IF EXISTS "Admins can update organizations" ON public.organizations;
-DROP POLICY IF EXISTS "Admins can delete organizations" ON public.organizations;
+### 3. Overlay: `src/components/eng-silva/EngSilvaCallOverlay.tsx`
+- Import `Camera` from lucide-react, add `useState` import
+- Destructure `setPendingImage` from hook
+- Add `compressImage` utility (canvas resize to 800px, JPEG 0.7 quality)
+- Add hidden file input with `capture="environment"`
+- Add camera button (w-14 h-14, semi-transparent) left of hang-up in a flex row
+- Add `hasPendingImage` state with pulsing gold dot indicator on camera button
+- Add `photoPreview` state showing 80x80 thumbnail above visualizer with fade, auto-clears after 5s
+- `handlePhotoCapture`: compress → setPendingImage → show preview → auto-clear
 
--- 2. Recriar como PERMISSIVE (default)
-CREATE POLICY "Authenticated users can create organizations"
-  ON public.organizations FOR INSERT
-  TO authenticated
-  WITH CHECK (auth.uid() IS NOT NULL);
-
-CREATE POLICY "Members can view their organizations"
-  ON public.organizations FOR SELECT
-  TO authenticated
-  USING (is_org_member(auth.uid(), id));
-
-CREATE POLICY "Admins can update organizations"
-  ON public.organizations FOR UPDATE
-  TO authenticated
-  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
-
-CREATE POLICY "Admins can delete organizations"
-  ON public.organizations FOR DELETE
-  TO authenticated
-  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
-
--- 3. DROP todas as políticas da tabela memberships
-DROP POLICY IF EXISTS "Users can insert memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Admins can insert memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Members can view memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Admins can update memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Admins can delete memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Users can view own memberships" ON public.memberships;
-
--- 4. Recriar TODAS as políticas de memberships como PERMISSIVE
-CREATE POLICY "Users can insert memberships"
-  ON public.memberships FOR INSERT
-  TO authenticated
-  WITH CHECK (
-    auth.uid() = user_id
-    AND (
-      has_org_role(auth.uid(), org_id, 'admin'::membership_role)
-      OR NOT EXISTS (
-        SELECT 1 FROM public.memberships m
-        WHERE m.org_id = memberships.org_id
-      )
-    )
-  );
-
-CREATE POLICY "Members can view memberships"
-  ON public.memberships FOR SELECT
-  TO authenticated
-  USING (
-    auth.uid() = user_id
-    OR has_org_role(auth.uid(), org_id, 'admin'::membership_role)
-  );
-
-CREATE POLICY "Admins can update memberships"
-  ON public.memberships FOR UPDATE
-  TO authenticated
-  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
-
-CREATE POLICY "Admins can delete memberships"
-  ON public.memberships FOR DELETE
-  TO authenticated
-  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
-```
-
-## Resumo
-
-| Tabela | Acção |
-|---|---|
-| `organizations` | Drop 4 políticas RESTRICTIVE, recriar 4 como PERMISSIVE |
-| `memberships` | Drop todas as políticas, recriar 4 como PERMISSIVE (INSERT, SELECT, UPDATE, DELETE) |
-
-Nenhuma alteração de código necessária — apenas a migração da base de dados.
+## Files Modified
+1. `supabase/functions/eng-silva-chat/index.ts` — multimodal message support
+2. `src/hooks/use-eng-silva-voice.tsx` — pendingImageRef + setPendingImage
+3. `src/components/eng-silva/EngSilvaCallOverlay.tsx` — camera UI + compression
 
