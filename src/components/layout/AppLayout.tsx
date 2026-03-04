@@ -8,11 +8,14 @@ import { WelcomeModal } from '@/components/onboarding/WelcomeModal';
 import { startProductTour } from '@/components/onboarding/ProductTour';
 import { ObrifyAgent } from '@/components/ai/ObrifyAgent';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { EngSilvaFAB } from '@/components/eng-silva/EngSilvaFAB';
+import { EngSilvaCallOverlay } from '@/components/eng-silva/EngSilvaCallOverlay';
 
 export function AppLayout() {
   const [showWelcome, setShowWelcome] = useState(false);
   const [showPulse, setShowPulse] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
+  const [silvaOpen, setSilvaOpen] = useState(false);
 
   const toggleAgent = useCallback(() => setAgentOpen(prev => !prev), []);
   const closeAgent = useCallback(() => setAgentOpen(false), []);
@@ -58,6 +61,8 @@ export function AppLayout() {
 
       <HelpButton showPulse={showPulse} onTourComplete={() => setShowPulse(false)} />
       <ObrifyAgent open={agentOpen} onOpenChange={setAgentOpen} />
+      <EngSilvaFAB onClick={() => setSilvaOpen(true)} />
+      <EngSilvaCallOverlay open={silvaOpen} onClose={() => setSilvaOpen(false)} />
 
       <WelcomeModal
         open={showWelcome}
