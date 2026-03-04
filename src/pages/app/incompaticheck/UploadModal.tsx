@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { PROJECT_TYPES, ACCEPTED_FORMATS, FILE_SIZE_LIMIT } from './types';
+import { PROJECT_TYPES, FILE_SIZE_LIMIT } from './types';
 
 interface UploadModalProps {
   isOpen: boolean;
@@ -21,9 +21,9 @@ export default function UploadModal({ isOpen, onClose, onUpload, obraNome, uploa
 
   const handleFile = async (file: File) => {
     setError(null);
-    if (file.size > FILE_SIZE_LIMIT) { setError('Ficheiro excede o limite de 2GB.'); return; }
+    if (file.size > FILE_SIZE_LIMIT) { setError('Ficheiro excede o limite de 50MB.'); return; }
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
-    if (!ACCEPTED_FORMATS.includes(ext)) { setError('Formato não suportado. Utilize PDF, DWG, DWF, IFC ou ZIP.'); return; }
+    if (ext !== 'pdf') { setError('Formato não suportado. Utilize apenas ficheiros PDF.'); return; }
     try {
       await onUpload(file, selectedType);
       onClose();
@@ -35,9 +35,9 @@ export default function UploadModal({ isOpen, onClose, onUpload, obraNome, uploa
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
       <div onClick={e => e.stopPropagation()} style={{ background: "#111", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "20px", padding: "32px", width: "90%", maxWidth: "480px" }}>
-        <h3 style={{ color: "#fff", fontSize: "18px", fontWeight: 700, marginBottom: "4px" }}>Upload de Projeto</h3>
+        <h3 style={{ color: "#fff", fontSize: "18px", fontWeight: 700, marginBottom: "4px" }}>Upload de Projecto</h3>
         {obraNome && <div style={{ color: "#ff6b35", fontSize: "11px", marginBottom: "8px" }}>Obra: {obraNome}</div>}
-        <p style={{ color: "#888", fontSize: "13px", marginBottom: "20px" }}>Limite: 2GB por ficheiro. Formatos: PDF · DWG · DWF · IFC · ZIP.</p>
+        <p style={{ color: "#888", fontSize: "13px", marginBottom: "20px" }}>Limite: 50MB por ficheiro. Formato: PDF</p>
 
         <div
           onClick={() => !isUploading && fileRef.current?.click()}
@@ -51,10 +51,10 @@ export default function UploadModal({ isOpen, onClose, onUpload, obraNome, uploa
             opacity: isUploading ? 0.5 : 1,
           }}
         >
-          <div style={{ fontSize: "32px", marginBottom: "8px" }}>📁</div>
-          <div style={{ color: "#ccc", fontSize: "14px", fontWeight: 600 }}>Arraste o ficheiro para aqui</div>
-          <div style={{ color: "#666", fontSize: "12px", marginTop: "4px" }}>PDF · DWG · DWF · IFC · ZIP — máx. 2GB</div>
-          <input ref={fileRef} type="file" accept=".pdf,.dwg,.dwf,.ifc,.zip,.rar,.7z" style={{ display: "none" }}
+          <div style={{ fontSize: "32px", marginBottom: "8px" }}>📄</div>
+          <div style={{ color: "#ccc", fontSize: "14px", fontWeight: 600 }}>Arraste o ficheiro PDF para aqui</div>
+          <div style={{ color: "#666", fontSize: "12px", marginTop: "4px" }}>PDF — máx. 50MB</div>
+          <input ref={fileRef} type="file" accept=".pdf" style={{ display: "none" }}
             onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
         </div>
 
@@ -76,7 +76,7 @@ export default function UploadModal({ isOpen, onClose, onUpload, obraNome, uploa
           </div>
         )}
 
-        <div style={{ color: "#aaa", fontSize: "13px", fontWeight: 600, marginBottom: "10px" }}>Tipo de projeto</div>
+        <div style={{ color: "#aaa", fontSize: "13px", fontWeight: 600, marginBottom: "10px" }}>Tipo de projecto</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "20px" }}>
           {Object.entries(PROJECT_TYPES).map(([key, val]) => (
             <button key={key} onClick={() => setSelectedType(key)} style={{
