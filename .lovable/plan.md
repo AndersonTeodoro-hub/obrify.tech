@@ -1,50 +1,93 @@
 
 
-# Plan: Redesign IncompatiCheck Page
+# Fix: Mudar todas as políticas RLS de RESTRICTIVE para PERMISSIVE
 
-## Overview
-Complete redesign of the IncompatiCheck page: remove the AgentPanel sidebar, update to use Obrify design system components (Card, Button, Badge, Breadcrumb), create a clean two-panel layout, and update the UploadModal to PDF-only with expanded project types.
+## Problema
 
-## Files Modified
+Todas as políticas RLS nas tabelas `organizations` e `memberships` estão como **RESTRICTIVE** (`Permissive: No`). Em PostgreSQL, políticas RESTRICTIVE exigem que TODAS passem (lógica AND), enquanto PERMISSIVE exige que QUALQUER uma passe (lógica OR). Isto bloqueia a criação de organizações.
 
-### 1. `src/pages/app/incompaticheck/types.ts`
-- Add new project types: `arquitectura`, `avac`, `aguas_esgotos`, `electricidade`
-- Update `ProjectType` union
-- Change `ACCEPTED_FORMATS` to `['pdf']` only
-- Change `FILE_SIZE_LIMIT` to 50MB
+## Migração SQL (um único ficheiro)
 
-### 2. `src/pages/app/incompaticheck/UploadModal.tsx`
-- Update drop zone text to "Arraste o ficheiro PDF para aqui"
-- Update limit text to "Limite: 50MB por ficheiro. Formato: PDF"
-- Update file input `accept` to `.pdf` only
-- Update validation error message
-- Render all project types (including new ones) from `PROJECT_TYPES`
+```sql
+-- ============================================
+-- FIX: Mudar políticas de RESTRICTIVE para PERMISSIVE
+-- ============================================
 
-### 3. `src/pages/app/IncompatiCheck.tsx` — Full redesign
-- **Remove**: `AgentPanel` import and usage, the right sidebar `<div>` containing it, the left projects sidebar
-- **Add imports**: `Card`, `CardHeader`, `CardTitle`, `CardContent` from ui/card; `Button` from ui/button; `Badge` from ui/badge; `Breadcrumb` components; lucide icons (`FileSearch`, `Upload`, `FileText`, `AlertTriangle`, `Download`, `Plus`, `Loader2`)
-- **Layout structure**:
-  - Full-width page using existing AppLayout (no custom sidebars)
-  - Breadcrumb: Dashboard > IncompatiCheck
-  - Header with title + subtitle + "Selecionar Obra" button (top right)
-  - **No obra**: centered empty state with `FileSearch` icon
-  - **Obra, no projects**: obra name + empty state + "+ Carregar Projectos" button
-  - **Obra with projects (main state)**:
-    - Two-column grid (lg:grid-cols-5, gap-6): left 3 cols "Projectos Carregados", right 2 cols "Análise"
-    - Left panel: Card listing projects grouped by type, each showing filename, type badge, date, size; "+ Carregar Projecto" button at bottom
-    - Right panel: Card with analysis prompt (if <2 projects show message), "Analisar Incompatibilidades" accent button (if 2+), explanation text
-  - **Analyzing**: spinner state in right panel
-  - **Results**: right panel expands to show findings list with severity badges (Alta/Média/Baixa mapped from critical/warning/info), filter buttons, export PDF button; stats cards above
-- **Styling**: Use Tailwind classes matching Obrify design system (bg-background, dark mode support, accent gradients for primary actions, rounded-xl cards)
-- **Keep**: all existing Supabase integration, obra/upload/share/preview modals, useIncompaticheck hook
+-- 1. DROP todas as políticas da tabela organizations
+DROP POLICY IF EXISTS "Authenticated users can create organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Members can view their organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can update organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can delete organizations" ON public.organizations;
 
-### 4. `src/pages/app/incompaticheck/AgentPanel.tsx`
-- File can remain (not deleted) but will no longer be imported. Optional cleanup.
+-- 2. Recriar como PERMISSIVE (default)
+CREATE POLICY "Authenticated users can create organizations"
+  ON public.organizations FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() IS NOT NULL);
 
-## Key Design Decisions
-- Use shadcn Card/Button/Badge/Breadcrumb components instead of inline styles
-- Full-width layout (no sidebars) — projects list is inline in main content
-- Accent/gold color for the primary "Analisar" CTA button
-- Mobile responsive: stack columns on small screens
-- Dark mode via existing CSS variables (bg-background, text-foreground, etc.)
+CREATE POLICY "Members can view their organizations"
+  ON public.organizations FOR SELECT
+  TO authenticated
+  USING (is_org_member(auth.uid(), id));
+
+CREATE POLICY "Admins can update organizations"
+  ON public.organizations FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+
+CREATE POLICY "Admins can delete organizations"
+  ON public.organizations FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+
+-- 3. DROP todas as políticas da tabela memberships
+DROP POLICY IF EXISTS "Users can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Members can view memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can update memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can delete memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Users can view own memberships" ON public.memberships;
+
+-- 4. Recriar TODAS as políticas de memberships como PERMISSIVE
+CREATE POLICY "Users can insert memberships"
+  ON public.memberships FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+    AND (
+      has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+      OR NOT EXISTS (
+        SELECT 1 FROM public.memberships m
+        WHERE m.org_id = memberships.org_id
+      )
+    )
+  );
+
+CREATE POLICY "Members can view memberships"
+  ON public.memberships FOR SELECT
+  TO authenticated
+  USING (
+    auth.uid() = user_id
+    OR has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+  );
+
+CREATE POLICY "Admins can update memberships"
+  ON public.memberships FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+
+CREATE POLICY "Admins can delete memberships"
+  ON public.memberships FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+```
+
+## Resumo
+
+| Tabela | Acção |
+|---|---|
+| `organizations` | Drop 4 políticas RESTRICTIVE, recriar 4 como PERMISSIVE |
+| `memberships` | Drop todas as políticas, recriar 4 como PERMISSIVE (INSERT, SELECT, UPDATE, DELETE) |
+
+Nenhuma alteração de código necessária — apenas a migração da base de dados.
 

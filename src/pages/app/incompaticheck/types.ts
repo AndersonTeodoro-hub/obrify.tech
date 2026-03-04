@@ -21,7 +21,7 @@ export interface Project {
   created_at: string;
 }
 
-export type ProjectType = 'fundacoes' | 'estrutural' | 'rede_enterrada' | 'terraplanagem';
+export type ProjectType = 'fundacoes' | 'estrutural' | 'rede_enterrada' | 'terraplanagem' | 'arquitectura' | 'avac' | 'aguas_esgotos' | 'electricidade';
 
 export interface Analysis {
   id: string;
@@ -72,6 +72,10 @@ export const PROJECT_TYPES: Record<string, { color: string; label: string; icon:
   estrutural: { color: "#8b5cf6", label: "Estrutural", icon: "▦" },
   rede_enterrada: { color: "#00c9a7", label: "Rede Enterrada", icon: "◎" },
   terraplanagem: { color: "#ffd60a", label: "Terraplanagem", icon: "▧" },
+  arquitectura: { color: "#3b82f6", label: "Arquitectura", icon: "◫" },
+  avac: { color: "#06b6d4", label: "AVAC", icon: "◈" },
+  aguas_esgotos: { color: "#2563eb", label: "Águas e Esgotos", icon: "◉" },
+  electricidade: { color: "#eab308", label: "Electricidade", icon: "⚡" },
 };
 
 export const SEVERITY_CONFIG: Record<string, { color: string; bg: string; label: string; border: string }> = {
@@ -80,7 +84,7 @@ export const SEVERITY_CONFIG: Record<string, { color: string; bg: string; label:
   info: { color: "#00c9a7", bg: "rgba(0,201,167,0.1)", label: "Observação", border: "rgba(0,201,167,0.25)" },
 };
 
-export const ACCEPTED_FORMATS = ['pdf', 'dwg', 'dwf', 'ifc', 'zip', 'rar', '7z'];
+export const ACCEPTED_FORMATS = ['pdf'];
 export const ZIP_FORMATS = ['zip', 'rar', '7z'];
-export const EXTRACTABLE_FORMATS = ['pdf', 'dwg', 'dwf', 'ifc'];
-export const FILE_SIZE_LIMIT = 2 * 1024 * 1024 * 1024; // 2GB
+export const EXTRACTABLE_FORMATS = ['pdf'];
+export const FILE_SIZE_LIMIT = 50 * 1024 * 1024; // 50MB
