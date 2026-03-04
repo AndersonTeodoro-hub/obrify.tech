@@ -1,38 +1,93 @@
 
 
-# Plan: Wire Up Real AI Analysis in IncompatiCheck
+# Fix: Mudar todas as políticas RLS de RESTRICTIVE para PERMISSIVE
 
-## Overview
-Replace the local PDF text extraction + regex analysis with a new edge function that sends actual PDFs to Claude for multimodal analysis, then display the rich results in the UI.
+## Problema
 
-## Changes
+Todas as políticas RLS nas tabelas `organizations` e `memberships` estão como **RESTRICTIVE** (`Permissive: No`). Em PostgreSQL, políticas RESTRICTIVE exigem que TODAS passem (lógica AND), enquanto PERMISSIVE exige que QUALQUER uma passe (lógica OR). Isto bloqueia a criação de organizações.
 
-### 1. Create Edge Function `supabase/functions/incompaticheck-analyze/index.ts`
-- Downloads PDFs from `incompaticheck-files` storage bucket using service role key
-- Converts to base64, sends to Claude as `document` type content blocks
-- Two strategies: all-at-once (< 80MB base64) or pairwise (> 80MB)
-- Prompt instructs Claude to return JSON array of findings with `severity` (alta/media/baixa), `title`, `description`, `specialties`, `location`, `recommendation`
-- Deduplicates findings by title
-- Returns structured response with findings + metadata
+## Migração SQL (um único ficheiro)
 
-### 2. Update `supabase/config.toml`
-- Add `[functions.incompaticheck-analyze]` with `verify_jwt = false`
+```sql
+-- ============================================
+-- FIX: Mudar políticas de RESTRICTIVE para PERMISSIVE
+-- ============================================
 
-### 3. Modify `src/pages/app/IncompatiCheck.tsx`
-- Add local state: `analysisResult`, `analyzing` (local, separate from hook), `analysisError`, `severityFilter`
-- Add `handleAnalyze` function that maps `ic.projects` to `{ name, type, file_path, storage_bucket }` and invokes `incompaticheck-analyze`
-- Replace the existing analysis panel with new UI states:
-  - **Analyzing**: spinner + "1-3 minutos" message + pulsing bar
-  - **Error**: AlertTriangle + error message + retry button
-  - **Results** (full width below projects): stats row (Alta/Média/Baixa counts), filter buttons, findings list with severity badge, specialties badges, location, recommendation, action buttons (Nova Análise, Exportar Relatório)
-- Also persist findings to DB via existing hook after getting results (insert into `incompaticheck_findings` and update `incompaticheck_analyses`)
-- Keep existing modals and project management unchanged
+-- 1. DROP todas as políticas da tabela organizations
+DROP POLICY IF EXISTS "Authenticated users can create organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Members can view their organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can update organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can delete organizations" ON public.organizations;
 
-### Key Field Mapping
-From the hook, projects have: `id`, `name`, `type`, `file_path`, `file_size`, `format` — map directly to edge function payload.
+-- 2. Recriar como PERMISSIVE (default)
+CREATE POLICY "Authenticated users can create organizations"
+  ON public.organizations FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() IS NOT NULL);
 
-## Files
-1. **Create** `supabase/functions/incompaticheck-analyze/index.ts`
-2. **Edit** `supabase/config.toml` — add function config
-3. **Edit** `src/pages/app/IncompatiCheck.tsx` — new analysis flow + results UI
+CREATE POLICY "Members can view their organizations"
+  ON public.organizations FOR SELECT
+  TO authenticated
+  USING (is_org_member(auth.uid(), id));
+
+CREATE POLICY "Admins can update organizations"
+  ON public.organizations FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+
+CREATE POLICY "Admins can delete organizations"
+  ON public.organizations FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+
+-- 3. DROP todas as políticas da tabela memberships
+DROP POLICY IF EXISTS "Users can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Members can view memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can update memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can delete memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Users can view own memberships" ON public.memberships;
+
+-- 4. Recriar TODAS as políticas de memberships como PERMISSIVE
+CREATE POLICY "Users can insert memberships"
+  ON public.memberships FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+    AND (
+      has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+      OR NOT EXISTS (
+        SELECT 1 FROM public.memberships m
+        WHERE m.org_id = memberships.org_id
+      )
+    )
+  );
+
+CREATE POLICY "Members can view memberships"
+  ON public.memberships FOR SELECT
+  TO authenticated
+  USING (
+    auth.uid() = user_id
+    OR has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+  );
+
+CREATE POLICY "Admins can update memberships"
+  ON public.memberships FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+
+CREATE POLICY "Admins can delete memberships"
+  ON public.memberships FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+```
+
+## Resumo
+
+| Tabela | Acção |
+|---|---|
+| `organizations` | Drop 4 políticas RESTRICTIVE, recriar 4 como PERMISSIVE |
+| `memberships` | Drop todas as políticas, recriar 4 como PERMISSIVE (INSERT, SELECT, UPDATE, DELETE) |
+
+Nenhuma alteração de código necessária — apenas a migração da base de dados.
 
