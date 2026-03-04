@@ -8,6 +8,8 @@ import { WelcomeModal } from '@/components/onboarding/WelcomeModal';
 import { startProductTour } from '@/components/onboarding/ProductTour';
 import { ObrifyAgent } from '@/components/ai/ObrifyAgent';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { EngSilvaFAB } from '@/components/eng-silva/EngSilvaFAB';
+import { EngSilvaCallOverlay } from '@/components/eng-silva/EngSilvaCallOverlay';
 
 export function AppLayout() {
   const [showWelcome, setShowWelcome] = useState(false);
