@@ -53,7 +53,7 @@ export default function UploadModal({ isOpen, onClose, onUpload, obraNome, uploa
         >
           <div style={{ fontSize: "32px", marginBottom: "8px" }}>📄</div>
           <div style={{ color: "#ccc", fontSize: "14px", fontWeight: 600 }}>Arraste o ficheiro PDF para aqui</div>
-          <div style={{ color: "#666", fontSize: "12px", marginTop: "4px" }}>PDF — máx. 50MB</div>
+          <div style={{ color: "#666", fontSize: "12px", marginTop: "4px" }}>PDF — máx. 2GB</div>
           <input ref={fileRef} type="file" accept=".pdf" style={{ display: "none" }}
             onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
         </div>
