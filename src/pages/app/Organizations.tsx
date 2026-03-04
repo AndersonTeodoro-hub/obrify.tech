@@ -64,17 +64,12 @@ export default function Organizations() {
 
   const createOrgMutation = useMutation({
     mutationFn: async () => {
-      const { data: org, error: orgError } = await supabase
-        .from('organizations')
-        .insert({ name: newOrgName, description: newOrgDescription || null } as any)
-        .select()
-        .single();
-      if (orgError) throw orgError;
-      const { error: memberError } = await supabase
-        .from('memberships')
-        .insert([{ org_id: org.id, user_id: user?.id!, role: 'admin' }]);
-      if (memberError) throw memberError;
-      return org;
+      const { data, error } = await supabase.rpc('create_organization_with_membership', {
+        _name: newOrgName,
+        _description: newOrgDescription || null,
+      });
+      if (error) throw error;
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['user-memberships'] });
