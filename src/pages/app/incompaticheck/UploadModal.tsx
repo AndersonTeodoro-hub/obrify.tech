@@ -21,7 +21,7 @@ export default function UploadModal({ isOpen, onClose, onUpload, obraNome, uploa
 
   const handleFile = async (file: File) => {
     setError(null);
-    if (file.size > FILE_SIZE_LIMIT) { setError('Ficheiro excede o limite de 50MB.'); return; }
+    if (file.size > FILE_SIZE_LIMIT) { setError('Ficheiro excede o limite de 2GB.'); return; }
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
     if (ext !== 'pdf') { setError('Formato não suportado. Utilize apenas ficheiros PDF.'); return; }
     try {
@@ -37,7 +37,7 @@ export default function UploadModal({ isOpen, onClose, onUpload, obraNome, uploa
       <div onClick={e => e.stopPropagation()} style={{ background: "#111", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "20px", padding: "32px", width: "90%", maxWidth: "480px" }}>
         <h3 style={{ color: "#fff", fontSize: "18px", fontWeight: 700, marginBottom: "4px" }}>Upload de Projecto</h3>
         {obraNome && <div style={{ color: "#ff6b35", fontSize: "11px", marginBottom: "8px" }}>Obra: {obraNome}</div>}
-        <p style={{ color: "#888", fontSize: "13px", marginBottom: "20px" }}>Limite: 50MB por ficheiro. Formato: PDF</p>
+        <p style={{ color: "#888", fontSize: "13px", marginBottom: "20px" }}>Limite: 2GB por ficheiro. Formato: PDF</p>
 
         <div
           onClick={() => !isUploading && fileRef.current?.click()}
@@ -53,7 +53,7 @@ export default function UploadModal({ isOpen, onClose, onUpload, obraNome, uploa
         >
           <div style={{ fontSize: "32px", marginBottom: "8px" }}>📄</div>
           <div style={{ color: "#ccc", fontSize: "14px", fontWeight: 600 }}>Arraste o ficheiro PDF para aqui</div>
-          <div style={{ color: "#666", fontSize: "12px", marginTop: "4px" }}>PDF — máx. 50MB</div>
+          <div style={{ color: "#666", fontSize: "12px", marginTop: "4px" }}>PDF — máx. 2GB</div>
           <input ref={fileRef} type="file" accept=".pdf" style={{ display: "none" }}
             onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
         </div>

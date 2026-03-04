@@ -87,4 +87,4 @@ export const SEVERITY_CONFIG: Record<string, { color: string; bg: string; label:
 export const ACCEPTED_FORMATS = ['pdf'];
 export const ZIP_FORMATS = ['zip', 'rar', '7z'];
 export const EXTRACTABLE_FORMATS = ['pdf'];
-export const FILE_SIZE_LIMIT = 50 * 1024 * 1024; // 50MB
+export const FILE_SIZE_LIMIT = 2 * 1024 * 1024 * 1024; // 2GB
