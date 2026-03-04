@@ -261,8 +261,14 @@ export function useEngSilvaVoice() {
         throw new Error(sttError?.message || 'STT falhou');
       }
 
-      const userText = sttData.text.trim();
+      let userText = sttData.text.trim();
       console.log("ENG-SILVA: STT result:", userText);
+
+      // If no speech but image is pending, auto-generate prompt
+      if (!userText && pendingImageRef.current) {
+        userText = "Analisa esta imagem que acabei de tirar na obra.";
+      }
+
       if (!userText) {
         if (activeRef.current) startListeningRef.current?.();
         return;
@@ -272,12 +278,20 @@ export function useEngSilvaVoice() {
       setVoiceState('processing-chat');
       conversationRef.current.push({ role: 'user', content: userText });
 
+      const chatBody: any = {
+        message: userText,
+        conversation_history: conversationRef.current,
+        system: buildSystemPrompt(memoryRef.current),
+      };
+
+      if (pendingImageRef.current) {
+        chatBody.image = pendingImageRef.current;
+        console.log("ENG-SILVA: Sending image with message");
+        pendingImageRef.current = null;
+      }
+
       const { data: chatData, error: chatError } = await supabase.functions.invoke('eng-silva-chat', {
-        body: {
-          message: userText,
-          conversation_history: conversationRef.current,
-          system: buildSystemPrompt(memoryRef.current),
-        },
+        body: chatBody,
       });
 
       if (chatError || !chatData?.reply) {
