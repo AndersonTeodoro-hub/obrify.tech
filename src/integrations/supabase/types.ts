@@ -2428,6 +2428,10 @@ export type Database = {
         Args: { _site_id: string; _user_id: string }
         Returns: boolean
       }
+      create_organization_with_membership: {
+        Args: { _description?: string; _name: string }
+        Returns: string
+      }
       get_file_path: {
         Args: {
           _date?: string
