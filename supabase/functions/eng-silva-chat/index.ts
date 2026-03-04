@@ -2,19 +2,42 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { message, conversation_history, system } = await req.json();
+    const { message, conversation_history, system, image } = await req.json();
     const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
 
-    const messages = [...(conversation_history || []), { role: "user", content: message }];
+    const messages = [...(conversation_history || [])];
+
+    if (image) {
+      // Multi-modal message with image + text
+      messages.push({
+        role: "user",
+        content: [
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: "image/jpeg",
+              data: image,
+            },
+          },
+          {
+            type: "text",
+            text: message || "Analisa esta imagem e diz-me o que vês do ponto de vista de fiscalização de obra.",
+          },
+        ],
+      });
+    } else {
+      messages.push({ role: "user", content: message });
+    }
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",

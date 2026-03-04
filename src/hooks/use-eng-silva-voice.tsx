@@ -105,6 +105,12 @@ export function useEngSilvaVoice() {
   const activeRef = useRef(false);
   const startListeningRef = useRef<(() => void) | null>(null);
   const memoryRef = useRef(memory);
+  const pendingImageRef = useRef<string | null>(null);
+
+  const setPendingImage = useCallback((base64: string) => {
+    pendingImageRef.current = base64;
+    console.log("ENG-SILVA: Image captured, pending for next message");
+  }, []);
 
   // Keep ref in sync with state
   useEffect(() => {
