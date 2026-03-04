@@ -975,6 +975,30 @@ export type Database = {
           },
         ]
       }
+      eng_silva_memory: {
+        Row: {
+          conversation_summaries: Json | null
+          id: string
+          profile: Json | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          conversation_summaries?: Json | null
+          id?: string
+          profile?: Json | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          conversation_summaries?: Json | null
+          id?: string
+          profile?: Json | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       evidence_links: {
         Row: {
           capture_id: string
