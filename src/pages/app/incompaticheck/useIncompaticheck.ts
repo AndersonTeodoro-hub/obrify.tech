@@ -705,6 +705,7 @@ export function useIncompaticheck() {
     runAnalysis,
     sendUserMessage,
     generateReport,
+    generateReportWithAnnotations,
     setUploadProgress,
   };
 }
