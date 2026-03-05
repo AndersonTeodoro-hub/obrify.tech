@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useIncompaticheck } from './incompaticheck/useIncompaticheck';
 import { PROJECT_TYPES } from './incompaticheck/types';
 import type { Project } from './incompaticheck/types';
