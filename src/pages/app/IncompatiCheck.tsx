@@ -240,7 +240,8 @@ export default function IncompatiCheck() {
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
 
-      console.log('INCOMPATICHECK: Analysis complete:', data);
+      console.log('INCOMPATICHECK: Analysis result received:', data);
+      console.log('INCOMPATICHECK: Findings count:', data?.findings?.length);
       setAnalysisResult(data as AnalysisResult);
 
       // Persist to DB via existing hook flow
@@ -306,6 +307,7 @@ export default function IncompatiCheck() {
 
   const saveAnalysisToEngSilva = async (result: AnalysisResult, obraName: string) => {
     try {
+      console.log('INCOMPATICHECK: Saving to Eng. Silva memory...');
       const alta = result.findings.filter(f => f.severity === 'alta');
       const media = result.findings.filter(f => f.severity === 'media');
       const baixa = result.findings.filter(f => f.severity === 'baixa');
@@ -320,11 +322,10 @@ export default function IncompatiCheck() {
         summary += `[MÉDIA] ${f.id} - ${f.title}: ${f.description.substring(0, 100)}. `;
       });
 
-      await supabase.functions.invoke('eng-silva-memory', {
+      const response = await supabase.functions.invoke('eng-silva-memory', {
         body: { action: 'add_summary', summary: summary.trim() },
       });
-
-      console.log('INCOMPATICHECK: Analysis saved to Eng. Silva memory');
+      console.log('INCOMPATICHECK: Memory save response:', response);
     } catch (err) {
       console.error('INCOMPATICHECK: Failed to save to Eng. Silva memory:', err);
     }
