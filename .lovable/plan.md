@@ -1,93 +1,20 @@
 
 
-# Fix: Mudar todas as políticas RLS de RESTRICTIVE para PERMISSIVE
+# Plan: Connect IncompatiCheck Results to Eng. Silva Memory
 
-## Problema
+## Overview
+Two small, additive changes to let Eng. Silva discuss IncompatiCheck findings in voice conversations.
 
-Todas as políticas RLS nas tabelas `organizations` e `memberships` estão como **RESTRICTIVE** (`Permissive: No`). Em PostgreSQL, políticas RESTRICTIVE exigem que TODAS passem (lógica AND), enquanto PERMISSIVE exige que QUALQUER uma passe (lógica OR). Isto bloqueia a criação de organizações.
+## Changes
 
-## Migração SQL (um único ficheiro)
+### 1. `src/pages/app/IncompatiCheck.tsx`
+- Add `saveAnalysisToEngSilva(result, obraName)` function that builds a concise text summary of findings (counts + details for alta/média) and calls `eng-silva-memory` edge function with `action: 'add_summary'`
+- Call it in `handleRunAnalysis` right after `persistAnalysis`, gated on `data.findings.length > 0`
+- No new dependencies; uses existing `supabase` import
 
-```sql
--- ============================================
--- FIX: Mudar políticas de RESTRICTIVE para PERMISSIVE
--- ============================================
+### 2. `src/hooks/use-eng-silva-voice.tsx`
+- In `buildSystemPrompt`, after the summaries section (line 72), check if any summary contains `'incompatibilidades detectadas'`
+- If yes, append an `ANÁLISE DE INCOMPATIBILIDADES` block instructing Eng. Silva to discuss findings by ID, suggest resolution priorities, and speak as if he analyzed the projects himself
 
--- 1. DROP todas as políticas da tabela organizations
-DROP POLICY IF EXISTS "Authenticated users can create organizations" ON public.organizations;
-DROP POLICY IF EXISTS "Members can view their organizations" ON public.organizations;
-DROP POLICY IF EXISTS "Admins can update organizations" ON public.organizations;
-DROP POLICY IF EXISTS "Admins can delete organizations" ON public.organizations;
-
--- 2. Recriar como PERMISSIVE (default)
-CREATE POLICY "Authenticated users can create organizations"
-  ON public.organizations FOR INSERT
-  TO authenticated
-  WITH CHECK (auth.uid() IS NOT NULL);
-
-CREATE POLICY "Members can view their organizations"
-  ON public.organizations FOR SELECT
-  TO authenticated
-  USING (is_org_member(auth.uid(), id));
-
-CREATE POLICY "Admins can update organizations"
-  ON public.organizations FOR UPDATE
-  TO authenticated
-  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
-
-CREATE POLICY "Admins can delete organizations"
-  ON public.organizations FOR DELETE
-  TO authenticated
-  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
-
--- 3. DROP todas as políticas da tabela memberships
-DROP POLICY IF EXISTS "Users can insert memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Admins can insert memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Members can view memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Admins can update memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Admins can delete memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Users can view own memberships" ON public.memberships;
-
--- 4. Recriar TODAS as políticas de memberships como PERMISSIVE
-CREATE POLICY "Users can insert memberships"
-  ON public.memberships FOR INSERT
-  TO authenticated
-  WITH CHECK (
-    auth.uid() = user_id
-    AND (
-      has_org_role(auth.uid(), org_id, 'admin'::membership_role)
-      OR NOT EXISTS (
-        SELECT 1 FROM public.memberships m
-        WHERE m.org_id = memberships.org_id
-      )
-    )
-  );
-
-CREATE POLICY "Members can view memberships"
-  ON public.memberships FOR SELECT
-  TO authenticated
-  USING (
-    auth.uid() = user_id
-    OR has_org_role(auth.uid(), org_id, 'admin'::membership_role)
-  );
-
-CREATE POLICY "Admins can update memberships"
-  ON public.memberships FOR UPDATE
-  TO authenticated
-  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
-
-CREATE POLICY "Admins can delete memberships"
-  ON public.memberships FOR DELETE
-  TO authenticated
-  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
-```
-
-## Resumo
-
-| Tabela | Acção |
-|---|---|
-| `organizations` | Drop 4 políticas RESTRICTIVE, recriar 4 como PERMISSIVE |
-| `memberships` | Drop todas as políticas, recriar 4 como PERMISSIVE (INSERT, SELECT, UPDATE, DELETE) |
-
-Nenhuma alteração de código necessária — apenas a migração da base de dados.
+No edge function or database changes needed — the existing `eng-silva-memory` function already supports `add_summary`.
 
