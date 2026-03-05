@@ -240,7 +240,8 @@ export default function IncompatiCheck() {
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
 
-      console.log('INCOMPATICHECK: Analysis complete:', data);
+      console.log('INCOMPATICHECK: Analysis result received:', data);
+      console.log('INCOMPATICHECK: Findings count:', data?.findings?.length);
       setAnalysisResult(data as AnalysisResult);
 
       // Persist to DB via existing hook flow
