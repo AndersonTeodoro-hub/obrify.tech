@@ -246,6 +246,11 @@ export default function IncompatiCheck() {
       // Persist to DB via existing hook flow
       await persistAnalysis(data as AnalysisResult);
 
+      // Save to Eng. Silva memory for voice conversations
+      if (data.findings && data.findings.length > 0) {
+        saveAnalysisToEngSilva(data as AnalysisResult, ic.obraAtiva?.nome || 'obra');
+      }
+
       toast.success(`Análise concluída: ${data.findings.length} incompatibilidade(s) encontrada(s)`);
     } catch (err: any) {
       console.error('INCOMPATICHECK: Analysis error:', err);
@@ -296,6 +301,32 @@ export default function IncompatiCheck() {
       }
     } catch (err) {
       console.error('INCOMPATICHECK: Failed to persist analysis:', err);
+    }
+  };
+
+  const saveAnalysisToEngSilva = async (result: AnalysisResult, obraName: string) => {
+    try {
+      const alta = result.findings.filter(f => f.severity === 'alta');
+      const media = result.findings.filter(f => f.severity === 'media');
+      const baixa = result.findings.filter(f => f.severity === 'baixa');
+
+      let summary = `Análise de incompatibilidades na obra ${obraName}: ${result.findings.length} incompatibilidades detectadas (${alta.length} alta, ${media.length} média, ${baixa.length} baixa). `;
+
+      alta.forEach(f => {
+        summary += `[ALTA] ${f.id} - ${f.title}: ${f.description.substring(0, 150)}. Recomendação: ${f.recommendation.substring(0, 150)}. `;
+      });
+
+      media.forEach(f => {
+        summary += `[MÉDIA] ${f.id} - ${f.title}: ${f.description.substring(0, 100)}. `;
+      });
+
+      await supabase.functions.invoke('eng-silva-memory', {
+        body: { action: 'add_summary', summary: summary.trim() },
+      });
+
+      console.log('INCOMPATICHECK: Analysis saved to Eng. Silva memory');
+    } catch (err) {
+      console.error('INCOMPATICHECK: Failed to save to Eng. Silva memory:', err);
     }
   };
 
