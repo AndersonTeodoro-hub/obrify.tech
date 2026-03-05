@@ -307,6 +307,7 @@ export default function IncompatiCheck() {
 
   const saveAnalysisToEngSilva = async (result: AnalysisResult, obraName: string) => {
     try {
+      console.log('INCOMPATICHECK: Saving to Eng. Silva memory...');
       const alta = result.findings.filter(f => f.severity === 'alta');
       const media = result.findings.filter(f => f.severity === 'media');
       const baixa = result.findings.filter(f => f.severity === 'baixa');
