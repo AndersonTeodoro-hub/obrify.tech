@@ -687,6 +687,7 @@ export default function IncompatiCheck() {
                         )}
                       </div>
                     )}
+                  </div>
                 ))}
               </CardContent>
             </Card>
