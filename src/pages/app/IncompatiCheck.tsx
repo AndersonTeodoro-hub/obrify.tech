@@ -34,6 +34,7 @@ import {
   MapPin,
   Lightbulb,
 } from 'lucide-react';
+import { Eye, EyeOff } from 'lucide-react';
 import { format } from 'date-fns';
 import { pt } from 'date-fns/locale';
 import { supabase } from '@/integrations/supabase/client';
