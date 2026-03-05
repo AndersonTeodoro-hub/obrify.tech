@@ -70,6 +70,18 @@ function buildSystemPrompt(memory: { profile: any; summaries: any[] }): string {
       prompt += `\n- ${date}: ${s.summary}`;
     });
     prompt += `\n\nUsa este contexto naturalmente. Não repitas informação que o fiscal já sabe. Se ele já se apresentou antes, não perguntes o nome de novo.`;
+
+    const hasAnalysis = summaries.some((s: any) => s.summary?.includes('incompatibilidades detectadas'));
+    if (hasAnalysis) {
+      prompt += `\n\nANÁLISE DE INCOMPATIBILIDADES:
+Tens acesso aos resultados da análise de incompatibilidades feita pelo IncompatiCheck. Quando o fiscal perguntar sobre incompatibilidades, conflitos entre projectos, ou problemas detectados:
+- Responde com base nos dados que tens na memória
+- Sê específico sobre os IDs (INC-001, INC-002, etc), localizações e recomendações
+- Sugere soluções práticas baseadas na tua experiência
+- Se o fiscal perguntar sobre uma incompatibilidade específica, dá detalhes e opções de resolução
+- Podes sugerir a ordem de prioridade para resolver os problemas (alta primeiro)
+- Fala naturalmente como se tivesses analisado os projectos tu próprio`;
+    }
   }
 
   prompt += `\n\nEXTRAÇÃO DE PERFIL:

@@ -304,6 +304,32 @@ export default function IncompatiCheck() {
     }
   };
 
+  const saveAnalysisToEngSilva = async (result: AnalysisResult, obraName: string) => {
+    try {
+      const alta = result.findings.filter(f => f.severity === 'alta');
+      const media = result.findings.filter(f => f.severity === 'media');
+      const baixa = result.findings.filter(f => f.severity === 'baixa');
+
+      let summary = `Análise de incompatibilidades na obra ${obraName}: ${result.findings.length} incompatibilidades detectadas (${alta.length} alta, ${media.length} média, ${baixa.length} baixa). `;
+
+      alta.forEach(f => {
+        summary += `[ALTA] ${f.id} - ${f.title}: ${f.description.substring(0, 150)}. Recomendação: ${f.recommendation.substring(0, 150)}. `;
+      });
+
+      media.forEach(f => {
+        summary += `[MÉDIA] ${f.id} - ${f.title}: ${f.description.substring(0, 100)}. `;
+      });
+
+      await supabase.functions.invoke('eng-silva-memory', {
+        body: { action: 'add_summary', summary: summary.trim() },
+      });
+
+      console.log('INCOMPATICHECK: Analysis saved to Eng. Silva memory');
+    } catch (err) {
+      console.error('INCOMPATICHECK: Failed to save to Eng. Silva memory:', err);
+    }
+  };
+
   const hasObra = !!ic.obraAtiva;
   const hasProjects = ic.projects.length > 0;
   const canAnalyze = ic.projects.length >= 2;
