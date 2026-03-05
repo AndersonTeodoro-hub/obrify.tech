@@ -246,6 +246,11 @@ export default function IncompatiCheck() {
       // Persist to DB via existing hook flow
       await persistAnalysis(data as AnalysisResult);
 
+      // Save to Eng. Silva memory for voice conversations
+      if (data.findings && data.findings.length > 0) {
+        saveAnalysisToEngSilva(data as AnalysisResult, ic.obraAtiva?.nome || 'obra');
+      }
+
       toast.success(`Análise concluída: ${data.findings.length} incompatibilidade(s) encontrada(s)`);
     } catch (err: any) {
       console.error('INCOMPATICHECK: Analysis error:', err);
