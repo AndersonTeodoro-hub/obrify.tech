@@ -76,6 +76,10 @@ export default function IncompatiCheck() {
   const [showShare, setShowShare] = useState(false);
   const [previewProject, setPreviewProject] = useState<Project | null>(null);
   const [filter, setFilter] = useState('all');
+  const [expandedZones, setExpandedZones] = useState<Set<string>>(new Set());
+  const [zoneImages, setZoneImages] = useState<Map<string, string>>(new Map());
+  const [loadingZones, setLoadingZones] = useState<Set<string>>(new Set());
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   // Real AI analysis state
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
