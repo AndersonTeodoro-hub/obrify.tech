@@ -550,8 +550,14 @@ export default function IncompatiCheck() {
                       <RotateCcw className="w-3.5 h-3.5" />
                       Nova Análise
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => setShowShare(true)} className="gap-1.5 flex-1">
-                      <Download className="w-3.5 h-3.5" />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleExportPdfWithAnnotations}
+                      disabled={exportingPdf}
+                      className="gap-1.5 flex-1"
+                    >
+                      {exportingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
                       PDF
                     </Button>
                   </div>
