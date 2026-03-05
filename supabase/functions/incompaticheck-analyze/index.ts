@@ -164,7 +164,14 @@ Para cada incompatibilidade encontrada, responde APENAS com um JSON array (sem m
     "description": "Descrição detalhada do conflito identificado",
     "specialties": ["Estrutural", "Fundações"],
     "location": "Referência à localização no projecto (ex: Eixo B, Pilar P3, Cota -2.50)",
-    "recommendation": "Recomendação prática para resolver"
+    "recommendation": "Recomendação prática para resolver",
+    "zone": {
+      "description": "Zona central-esquerda da planta, junto ao eixo B entre pilares P3 e P5",
+      "x_percent": 35,
+      "y_percent": 50,
+      "radius_percent": 15,
+      "source_project": "nome-do-ficheiro.pdf"
+    }
   }
 ]
 
@@ -176,6 +183,13 @@ Regras:
 - Se forem memórias descritivas, compara especificações, materiais, dimensões, cotas
 - Foca especialmente em: redes enterradas que atravessam sapatas ou lintéis, cotas de fundo de tubagem vs cotas de fundação, caixas de visita em conflito com elementos estruturais, passagens de cabos ou tubagens que conflituam com armaduras
 - Se não encontrares incompatibilidades claras, devolve um array com uma entrada de severity "baixa" a indicar que não foram detectados conflitos significativos
+- Para cada incompatibilidade, inclui um campo "zone" que indica a zona aproximada na planta onde o conflito ocorre:
+  - description: descrição textual da zona
+  - x_percent: posição horizontal aproximada em percentagem (0=esquerda, 100=direita)
+  - y_percent: posição vertical aproximada em percentagem (0=topo, 100=fundo)
+  - radius_percent: raio aproximado da zona afectada em percentagem da largura da planta (10=pequena, 30=grande)
+  - source_project: nome do ficheiro de projecto mais relevante para visualizar esta incompatibilidade
+  Não precisas de ser exacto — indica a zona abrangente onde o especialista deve verificar.
 - Responde APENAS com o JSON array, nada mais`;
 }
 

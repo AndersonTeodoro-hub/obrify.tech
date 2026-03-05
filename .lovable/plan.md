@@ -1,57 +1,93 @@
 
 
-# Plan: Visual Annotations for IncompatiCheck Analysis & PDF Report
+# Fix: Mudar todas as políticas RLS de RESTRICTIVE para PERMISSIVE
 
-## Overview
-Add zone coordinate data to Claude's analysis output, create a client-side utility to render annotated plan images with colored circles, and embed these annotated images in both the UI findings list and the PDF report.
+## Problema
 
-## Changes
+Todas as políticas RLS nas tabelas `organizations` e `memberships` estão como **RESTRICTIVE** (`Permissive: No`). Em PostgreSQL, políticas RESTRICTIVE exigem que TODAS passem (lógica AND), enquanto PERMISSIVE exige que QUALQUER uma passe (lógica OR). Isto bloqueia a criação de organizações.
 
-### 1. Edge Function `supabase/functions/incompaticheck-analyze/index.ts`
-- Update `getAnalysisPrompt()` to add a `zone` field to the JSON schema Claude returns:
-  ```json
-  "zone": {
-    "description": "Zona central-esquerda da planta...",
-    "x_percent": 35,
-    "y_percent": 50,
-    "radius_percent": 15,
-    "source_project": "filename.pdf"
-  }
-  ```
-- Add Portuguese instructions explaining approximate zone marking
+## Migração SQL (um único ficheiro)
 
-### 2. Create `src/utils/annotate-plan-image.ts`
-- `pdfPageToImage(pdfBase64: string): Promise<string>` — uses pdfjs-dist to render PDF page 1 to a canvas, returns JPEG data URL
-- `annotateImage(imageDataUrl: string, annotations: ZoneAnnotation[]): Promise<string>` — draws semi-transparent colored circles (red/amber/blue by severity), dashed borders, and labeled ID tags on the image
-- Export `ZoneAnnotation` interface
+```sql
+-- ============================================
+-- FIX: Mudar políticas de RESTRICTIVE para PERMISSIVE
+-- ============================================
 
-### 3. Update `src/pages/app/IncompatiCheck.tsx`
-- Extend `AIFinding` interface with optional `zone` field
-- In the findings list UI, for each finding with a `zone`, show a "Ver zona" button that lazily generates and displays the annotated plan image inline (expand/collapse)
-- Update PDF export button handler (`handleExportPDF`):
-  1. Download referenced project PDFs from storage (cached per project name)
-  2. Render first page to image via `pdfPageToImage`
-  3. Annotate with `annotateImage` per finding
-  4. Pass `Map<findingId, annotatedImageDataUrl>` to the report generator
-- Add a loading toast during PDF generation
+-- 1. DROP todas as políticas da tabela organizations
+DROP POLICY IF EXISTS "Authenticated users can create organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Members can view their organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can update organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can delete organizations" ON public.organizations;
 
-### 4. Update `src/pages/app/incompaticheck/useIncompaticheck.ts`
-- Update `generateReport` to accept an optional `annotatedImages?: Map<string, string>` parameter
-- After the findings table row for each finding, if an annotated image exists:
-  - Add the image (fit to content width, max height 100mm)
-  - Add italic caption with `zone.description`
-- This keeps the existing report structure but enriches it with visual annotations
+-- 2. Recriar como PERMISSIVE (default)
+CREATE POLICY "Authenticated users can create organizations"
+  ON public.organizations FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() IS NOT NULL);
 
-## Technical Notes
-- pdfjs-dist and jspdf are already installed
-- PDF.js worker must use the Cloudflare CDN path per project convention
-- Zone coordinates are approximate — circles are intentionally large (semi-transparent) to mark general areas
-- Project images are cached to avoid re-downloading the same PDF for multiple findings
-- The `zone` field is optional in findings — gracefully skip annotation when absent
+CREATE POLICY "Members can view their organizations"
+  ON public.organizations FOR SELECT
+  TO authenticated
+  USING (is_org_member(auth.uid(), id));
 
-## Files
-1. **Edit** `supabase/functions/incompaticheck-analyze/index.ts` — update prompt
-2. **Create** `src/utils/annotate-plan-image.ts` — PDF-to-image + annotation utility
-3. **Edit** `src/pages/app/IncompatiCheck.tsx` — UI zone display + PDF export with annotations
-4. **Edit** `src/pages/app/incompaticheck/useIncompaticheck.ts` — accept annotated images in report generator
+CREATE POLICY "Admins can update organizations"
+  ON public.organizations FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+
+CREATE POLICY "Admins can delete organizations"
+  ON public.organizations FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+
+-- 3. DROP todas as políticas da tabela memberships
+DROP POLICY IF EXISTS "Users can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Members can view memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can update memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can delete memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Users can view own memberships" ON public.memberships;
+
+-- 4. Recriar TODAS as políticas de memberships como PERMISSIVE
+CREATE POLICY "Users can insert memberships"
+  ON public.memberships FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+    AND (
+      has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+      OR NOT EXISTS (
+        SELECT 1 FROM public.memberships m
+        WHERE m.org_id = memberships.org_id
+      )
+    )
+  );
+
+CREATE POLICY "Members can view memberships"
+  ON public.memberships FOR SELECT
+  TO authenticated
+  USING (
+    auth.uid() = user_id
+    OR has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+  );
+
+CREATE POLICY "Admins can update memberships"
+  ON public.memberships FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+
+CREATE POLICY "Admins can delete memberships"
+  ON public.memberships FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+```
+
+## Resumo
+
+| Tabela | Acção |
+|---|---|
+| `organizations` | Drop 4 políticas RESTRICTIVE, recriar 4 como PERMISSIVE |
+| `memberships` | Drop todas as políticas, recriar 4 como PERMISSIVE (INSERT, SELECT, UPDATE, DELETE) |
+
+Nenhuma alteração de código necessária — apenas a migração da base de dados.
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useIncompaticheck } from './incompaticheck/useIncompaticheck';
 import { PROJECT_TYPES } from './incompaticheck/types';
 import type { Project } from './incompaticheck/types';
@@ -34,12 +34,21 @@ import {
   MapPin,
   Lightbulb,
 } from 'lucide-react';
+import { Eye, EyeOff } from 'lucide-react';
 import { format } from 'date-fns';
 import { pt } from 'date-fns/locale';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
 // Types for the real AI analysis
+interface AIFindingZone {
+  description: string;
+  x_percent: number;
+  y_percent: number;
+  radius_percent: number;
+  source_project: string;
+}
+
 interface AIFinding {
   id: string;
   severity: 'alta' | 'media' | 'baixa';
@@ -48,6 +57,7 @@ interface AIFinding {
   specialties: string[];
   location: string;
   recommendation: string;
+  zone?: AIFindingZone;
 }
 
 interface AnalysisResult {
@@ -66,12 +76,133 @@ export default function IncompatiCheck() {
   const [showShare, setShowShare] = useState(false);
   const [previewProject, setPreviewProject] = useState<Project | null>(null);
   const [filter, setFilter] = useState('all');
+  const [expandedZones, setExpandedZones] = useState<Set<string>>(new Set());
+  const [zoneImages, setZoneImages] = useState<Map<string, string>>(new Map());
+  const [loadingZones, setLoadingZones] = useState<Set<string>>(new Set());
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   // Real AI analysis state
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [severityFilter, setSeverityFilter] = useState<string | null>(null);
+
+  // Zone image loading
+  const handleToggleZone = useCallback(async (finding: AIFinding) => {
+    const key = finding.id;
+    if (expandedZones.has(key)) {
+      setExpandedZones(prev => { const n = new Set(prev); n.delete(key); return n; });
+      return;
+    }
+    setExpandedZones(prev => new Set(prev).add(key));
+
+    if (zoneImages.has(key)) return;
+    if (!finding.zone?.source_project) return;
+
+    setLoadingZones(prev => new Set(prev).add(key));
+    try {
+      const project = ic.projects.find(p => p.name === finding.zone!.source_project);
+      if (!project) return;
+
+      const { data: fileData } = await supabase.storage
+        .from('incompaticheck-files')
+        .download(project.file_path);
+      if (!fileData) return;
+
+      const arrayBuffer = await fileData.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+      let binary = '';
+      const chunkSize = 8192;
+      for (let i = 0; i < uint8Array.length; i += chunkSize) {
+        const chunk = uint8Array.subarray(i, i + chunkSize);
+        binary += String.fromCharCode(...chunk);
+      }
+      const base64 = btoa(binary);
+
+      const { pdfPageToImage, annotateImage } = await import('@/utils/annotate-plan-image');
+      const baseImage = await pdfPageToImage(base64);
+      const annotated = await annotateImage(baseImage, [{
+        x_percent: finding.zone!.x_percent,
+        y_percent: finding.zone!.y_percent,
+        radius_percent: finding.zone!.radius_percent,
+        label: finding.id,
+        severity: finding.severity,
+      }]);
+      setZoneImages(prev => new Map(prev).set(key, annotated));
+    } catch (err) {
+      console.error('Zone image error:', err);
+    } finally {
+      setLoadingZones(prev => { const n = new Set(prev); n.delete(key); return n; });
+    }
+  }, [expandedZones, zoneImages, ic.projects]);
+
+  // PDF export with annotations
+  const handleExportPdfWithAnnotations = useCallback(async () => {
+    if (!analysisResult || analysisResult.findings.length === 0) {
+      toast.error('Execute uma análise primeiro.');
+      return;
+    }
+    setExportingPdf(true);
+    toast.info('A gerar relatório com imagens anotadas...');
+
+    try {
+      const annotatedImages = new Map<string, string>();
+      const projectCache = new Map<string, string>();
+
+      for (const finding of analysisResult.findings) {
+        if (!finding.zone?.source_project) continue;
+        const projectName = finding.zone.source_project;
+
+        if (!projectCache.has(projectName)) {
+          const project = ic.projects.find(p => p.name === projectName);
+          if (project) {
+            try {
+              const { data: fileData } = await supabase.storage
+                .from('incompaticheck-files')
+                .download(project.file_path);
+              if (fileData) {
+                const arrayBuffer = await fileData.arrayBuffer();
+                const uint8Array = new Uint8Array(arrayBuffer);
+                let binary = '';
+                const chunkSize = 8192;
+                for (let i = 0; i < uint8Array.length; i += chunkSize) {
+                  const chunk = uint8Array.subarray(i, i + chunkSize);
+                  binary += String.fromCharCode(...chunk);
+                }
+                const base64 = btoa(binary);
+                const { pdfPageToImage } = await import('@/utils/annotate-plan-image');
+                const imageDataUrl = await pdfPageToImage(base64);
+                projectCache.set(projectName, imageDataUrl);
+              }
+            } catch (err) {
+              console.error(`Failed to process ${projectName}:`, err);
+            }
+          }
+        }
+
+        if (projectCache.has(projectName)) {
+          const baseImage = projectCache.get(projectName)!;
+          const { annotateImage } = await import('@/utils/annotate-plan-image');
+          const annotated = await annotateImage(baseImage, [{
+            x_percent: finding.zone.x_percent,
+            y_percent: finding.zone.y_percent,
+            radius_percent: finding.zone.radius_percent,
+            label: finding.id,
+            severity: finding.severity,
+          }]);
+          annotatedImages.set(finding.id, annotated);
+        }
+      }
+
+      await ic.generateReportWithAnnotations(analysisResult, annotatedImages);
+      toast.success('Relatório gerado com sucesso!');
+    } catch (err) {
+      console.error('PDF generation error:', err);
+      toast.error('Não foi possível gerar o relatório.');
+    } finally {
+      setExportingPdf(false);
+    }
+  }, [analysisResult, ic]);
 
   const handleCreateObra = async (info: { nome: string; cidade: string; fiscal: string }) => {
     const obra = await ic.createObra(info.nome, info.cidade, info.fiscal);
@@ -419,8 +550,14 @@ export default function IncompatiCheck() {
                       <RotateCcw className="w-3.5 h-3.5" />
                       Nova Análise
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => setShowShare(true)} className="gap-1.5 flex-1">
-                      <Download className="w-3.5 h-3.5" />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleExportPdfWithAnnotations}
+                      disabled={exportingPdf}
+                      className="gap-1.5 flex-1"
+                    >
+                      {exportingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
                       PDF
                     </Button>
                   </div>
@@ -513,6 +650,41 @@ export default function IncompatiCheck() {
                         <p className="text-xs text-muted-foreground leading-relaxed">
                           <span className="font-medium text-foreground">Recomendação:</span> {finding.recommendation}
                         </p>
+                      </div>
+                    )}
+
+                    {/* Zone annotation button */}
+                    {finding.zone && (
+                      <div className="space-y-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="gap-1.5 text-xs h-7"
+                          onClick={() => handleToggleZone(finding)}
+                          disabled={loadingZones.has(finding.id)}
+                        >
+                          {loadingZones.has(finding.id) ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : expandedZones.has(finding.id) ? (
+                            <EyeOff className="w-3 h-3" />
+                          ) : (
+                            <Eye className="w-3 h-3" />
+                          )}
+                          {expandedZones.has(finding.id) ? 'Ocultar zona' : 'Ver zona na planta'}
+                        </Button>
+
+                        {expandedZones.has(finding.id) && zoneImages.has(finding.id) && (
+                          <div className="space-y-1.5">
+                            <img
+                              src={zoneImages.get(finding.id)}
+                              alt={`Zona: ${finding.zone.description}`}
+                              className="rounded-lg border border-border w-full max-h-80 object-contain bg-muted"
+                            />
+                            <p className="text-[11px] text-muted-foreground italic px-1">
+                              Zona identificada: {finding.zone.description}
+                            </p>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
