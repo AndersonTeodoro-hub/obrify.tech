@@ -652,7 +652,41 @@ export default function IncompatiCheck() {
                         </p>
                       </div>
                     )}
-                  </div>
+
+                    {/* Zone annotation button */}
+                    {finding.zone && (
+                      <div className="space-y-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="gap-1.5 text-xs h-7"
+                          onClick={() => handleToggleZone(finding)}
+                          disabled={loadingZones.has(finding.id)}
+                        >
+                          {loadingZones.has(finding.id) ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : expandedZones.has(finding.id) ? (
+                            <EyeOff className="w-3 h-3" />
+                          ) : (
+                            <Eye className="w-3 h-3" />
+                          )}
+                          {expandedZones.has(finding.id) ? 'Ocultar zona' : 'Ver zona na planta'}
+                        </Button>
+
+                        {expandedZones.has(finding.id) && zoneImages.has(finding.id) && (
+                          <div className="space-y-1.5">
+                            <img
+                              src={zoneImages.get(finding.id)}
+                              alt={`Zona: ${finding.zone.description}`}
+                              className="rounded-lg border border-border w-full max-h-80 object-contain bg-muted"
+                            />
+                            <p className="text-[11px] text-muted-foreground italic px-1">
+                              Zona identificada: {finding.zone.description}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                 ))}
               </CardContent>
             </Card>
