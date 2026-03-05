@@ -322,11 +322,10 @@ export default function IncompatiCheck() {
         summary += `[MÉDIA] ${f.id} - ${f.title}: ${f.description.substring(0, 100)}. `;
       });
 
-      await supabase.functions.invoke('eng-silva-memory', {
+      const response = await supabase.functions.invoke('eng-silva-memory', {
         body: { action: 'add_summary', summary: summary.trim() },
       });
-
-      console.log('INCOMPATICHECK: Analysis saved to Eng. Silva memory');
+      console.log('INCOMPATICHECK: Memory save response:', response);
     } catch (err) {
       console.error('INCOMPATICHECK: Failed to save to Eng. Silva memory:', err);
     }
