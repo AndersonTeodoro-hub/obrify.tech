@@ -204,7 +204,7 @@ export default function IncompatiCheck() {
     }
   }, [analysisResult, ic]);
 
-
+  const handleCreateObra = async (info: { nome: string; cidade: string; fiscal: string }) => {
     const obra = await ic.createObra(info.nome, info.cidade, info.fiscal);
     if (obra) {
       await ic.selectObra(obra);
