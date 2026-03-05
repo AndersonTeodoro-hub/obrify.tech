@@ -40,6 +40,14 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
 // Types for the real AI analysis
+interface AIFindingZone {
+  description: string;
+  x_percent: number;
+  y_percent: number;
+  radius_percent: number;
+  source_project: string;
+}
+
 interface AIFinding {
   id: string;
   severity: 'alta' | 'media' | 'baixa';
@@ -48,6 +56,7 @@ interface AIFinding {
   specialties: string[];
   location: string;
   recommendation: string;
+  zone?: AIFindingZone;
 }
 
 interface AnalysisResult {
