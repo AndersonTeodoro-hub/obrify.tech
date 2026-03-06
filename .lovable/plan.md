@@ -1,93 +1,51 @@
 
 
-# Fix: Mudar todas as políticas RLS de RESTRICTIVE para PERMISSIVE
+# Plan: Update ProjectKnowledge Upload Modal
 
-## Problema
+## Changes
 
-Todas as políticas RLS nas tabelas `organizations` e `memberships` estão como **RESTRICTIVE** (`Permissive: No`). Em PostgreSQL, políticas RESTRICTIVE exigem que TODAS passem (lógica AND), enquanto PERMISSIVE exige que QUALQUER uma passe (lógica OR). Isto bloqueia a criação de organizações.
+### 1. `src/pages/app/ProjectKnowledge.tsx`
 
-## Migração SQL (um único ficheiro)
+**Update SPECIALTIES constant** to two grouped arrays:
+```typescript
+const PROJECT_SPECIALTIES = [
+  'Topografia', 'Arquitectura', 'Estrutural', 'Fundações', 'Rede Enterrada',
+  'AVAC', 'Águas e Esgotos', 'Electricidade', 'Telecomunicações', 'Gás',
+  'Segurança Contra Incêndios', 'Acústica', 'Térmica',
+];
 
-```sql
--- ============================================
--- FIX: Mudar políticas de RESTRICTIVE para PERMISSIVE
--- ============================================
-
--- 1. DROP todas as políticas da tabela organizations
-DROP POLICY IF EXISTS "Authenticated users can create organizations" ON public.organizations;
-DROP POLICY IF EXISTS "Members can view their organizations" ON public.organizations;
-DROP POLICY IF EXISTS "Admins can update organizations" ON public.organizations;
-DROP POLICY IF EXISTS "Admins can delete organizations" ON public.organizations;
-
--- 2. Recriar como PERMISSIVE (default)
-CREATE POLICY "Authenticated users can create organizations"
-  ON public.organizations FOR INSERT
-  TO authenticated
-  WITH CHECK (auth.uid() IS NOT NULL);
-
-CREATE POLICY "Members can view their organizations"
-  ON public.organizations FOR SELECT
-  TO authenticated
-  USING (is_org_member(auth.uid(), id));
-
-CREATE POLICY "Admins can update organizations"
-  ON public.organizations FOR UPDATE
-  TO authenticated
-  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
-
-CREATE POLICY "Admins can delete organizations"
-  ON public.organizations FOR DELETE
-  TO authenticated
-  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
-
--- 3. DROP todas as políticas da tabela memberships
-DROP POLICY IF EXISTS "Users can insert memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Admins can insert memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Members can view memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Admins can update memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Admins can delete memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Users can view own memberships" ON public.memberships;
-
--- 4. Recriar TODAS as políticas de memberships como PERMISSIVE
-CREATE POLICY "Users can insert memberships"
-  ON public.memberships FOR INSERT
-  TO authenticated
-  WITH CHECK (
-    auth.uid() = user_id
-    AND (
-      has_org_role(auth.uid(), org_id, 'admin'::membership_role)
-      OR NOT EXISTS (
-        SELECT 1 FROM public.memberships m
-        WHERE m.org_id = memberships.org_id
-      )
-    )
-  );
-
-CREATE POLICY "Members can view memberships"
-  ON public.memberships FOR SELECT
-  TO authenticated
-  USING (
-    auth.uid() = user_id
-    OR has_org_role(auth.uid(), org_id, 'admin'::membership_role)
-  );
-
-CREATE POLICY "Admins can update memberships"
-  ON public.memberships FOR UPDATE
-  TO authenticated
-  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
-
-CREATE POLICY "Admins can delete memberships"
-  ON public.memberships FOR DELETE
-  TO authenticated
-  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+const DOCUMENT_TYPES = [
+  'Contrato', 'Caderno de Encargos', 'Condições Técnicas', 'Mapa de Quantidades (MQT)',
+  'Memória Descritiva', 'Acta de Reunião', 'Relatório Fotográfico', 'Pormenores Construtivos',
+  'Mapa de Acabamentos', 'Plano de Segurança', 'Plano de Qualidade', 'Correspondência', 'Outros',
+];
 ```
 
-## Resumo
+**Update upload dialog** (lines 509-572):
+- Change label from "Especialidade" to "Tipo de Documento"
+- Add `SelectGroup` + `SelectLabel` for two groups with separator labels
+- Change file input `accept` to `.pdf,.jpg,.jpeg,.png`
+- Update drop zone text to "Arraste ficheiros para aqui" and subtitle "PDF · JPG · PNG — máx. 2GB"
+- File list icons: show 📄 for PDF, 🖼️ for images
 
-| Tabela | Acção |
-|---|---|
-| `organizations` | Drop 4 políticas RESTRICTIVE, recriar 4 como PERMISSIVE |
-| `memberships` | Drop todas as políticas, recriar 4 como PERMISSIVE (INSERT, SELECT, UPDATE, DELETE) |
+**Update `handleUpload`** (line 128-175):
+- Detect file type from extension and set `document_type` accordingly (`pdf`, `jpg`, `png`)
 
-Nenhuma alteração de código necessária — apenas a migração da base de dados.
+**Update `processDocument`** (line 177-233):
+- Rename `pdf_base64` param to `file_base64` in edge function call
+- Pass `file_type` (e.g. `application/pdf`, `image/jpeg`, `image/png`) to edge function
+
+**Update empty state text** (line 382-383):
+- Change "Carregue PDFs" to "Carregue documentos"
+
+### 2. `supabase/functions/eng-silva-knowledge/index.ts`
+
+**Update `process_document` action** (lines 29-40):
+- Accept `file_base64` and `file_type` params (fallback to `pdf_base64` for backwards compat)
+- If `file_type` starts with `image/`, send as `type: "image"` with appropriate `media_type`
+- Otherwise keep current `type: "document"` behavior for PDFs
+
+## Files
+1. **Edit** `src/pages/app/ProjectKnowledge.tsx` — grouped dropdown, multi-format accept, file type detection
+2. **Edit** `supabase/functions/eng-silva-knowledge/index.ts` — image support in Claude call
 
