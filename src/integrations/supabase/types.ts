@@ -1756,6 +1756,8 @@ export type Database = {
           ai_analysis: Json | null
           ai_recommendation: string | null
           certificates: Json | null
+          contract_file_name: string | null
+          contract_file_path: string | null
           created_at: string | null
           decided_at: string | null
           decided_by: string | null
@@ -1779,6 +1781,8 @@ export type Database = {
           ai_analysis?: Json | null
           ai_recommendation?: string | null
           certificates?: Json | null
+          contract_file_name?: string | null
+          contract_file_path?: string | null
           created_at?: string | null
           decided_at?: string | null
           decided_by?: string | null
@@ -1802,6 +1806,8 @@ export type Database = {
           ai_analysis?: Json | null
           ai_recommendation?: string | null
           certificates?: Json | null
+          contract_file_name?: string | null
+          contract_file_path?: string | null
           created_at?: string | null
           decided_at?: string | null
           decided_by?: string | null

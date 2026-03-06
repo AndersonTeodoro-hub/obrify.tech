@@ -53,18 +53,20 @@ serve(async (req) => {
     const body = await req.json();
     const approval_id = body.approval_id;
     const pdm_base64 = body.pdm_base64;
+    const mqt_base64 = body.mqt_base64 || null;
+    const contract_base64 = body.contract_base64 || null;
     const certificates_base64 = body.certificates_base64 || [];
     const manufacturer_docs_base64 = body.manufacturer_docs_base64 || [];
     const material_category = body.material_category;
     const obra_id = body.obra_id;
-    const user_id = body.user_id;
 
     console.log("PAM: Request received:", JSON.stringify({
       approval_id, obra_id, material_category,
       has_pdm: !!pdm_base64,
+      has_mqt: !!mqt_base64,
+      has_contract: !!contract_base64,
       certs: certificates_base64?.length || 0,
       mfg_docs: manufacturer_docs_base64?.length || 0,
-      has_user_id: !!user_id,
     }));
 
     if (!approval_id || !pdm_base64 || !material_category || !obra_id) {
@@ -77,45 +79,9 @@ serve(async (req) => {
       .update({ status: "analyzing", updated_at: new Date().toISOString() })
       .eq("id", approval_id);
 
-    // Load project knowledge (MQT, Contract, specs) automatically
-    let knowledge: any[] = [];
-    try {
-      if (obra_id && user_id) {
-        const { data } = await supabase
-          .from("eng_silva_project_knowledge")
-          .select("document_name, specialty, summary, key_elements")
-          .eq("obra_id", obra_id)
-          .eq("user_id", user_id)
-          .eq("processed", true);
-        knowledge = data || [];
-      }
-    } catch (err) {
-      console.error("PAM: Knowledge load failed:", err);
-    }
-
-    let projectContext = "";
-    if (knowledge.length > 0) {
-      projectContext = "\n\nCONHECIMENTO DO PROJECTO, MQT E CONTRATO:";
-      knowledge.forEach((doc: any) => {
-        projectContext += `\n\n--- ${doc.specialty}: ${doc.document_name} ---`;
-        projectContext += `\n${doc.summary}`;
-        if (doc.key_elements && Array.isArray(doc.key_elements) && doc.key_elements.length > 0) {
-          const validElements = doc.key_elements.filter((e: any) => e && e.type && e.id);
-          if (validElements.length > 0) {
-            projectContext += `\nElementos: ${validElements.slice(0, 10).map((e: any) => `${e.type}: ${e.id} - ${e.details || ''}`).join('; ')}`;
-          }
-        }
-      });
-    }
-
-    // Limit context to avoid token overflow
-    if (projectContext.length > 6000) {
-      projectContext = projectContext.substring(0, 6000) + '\n[... contexto truncado]';
-    }
-
     const content: any[] = [];
 
-    // 1. Add PAM document (always)
+    // 1. PAM document (always)
     content.push({
       type: "document",
       source: { type: "base64", media_type: "application/pdf", data: pdm_base64 },
@@ -125,7 +91,31 @@ serve(async (req) => {
       text: "[PEDIDO DE APROVAÇÃO DE MATERIAIS (PAM) — documento do empreiteiro acima]",
     });
 
-    // 2. Add certificates (if any, max 5)
+    // 2. MQT document (if provided)
+    if (mqt_base64) {
+      content.push({
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: mqt_base64 },
+      });
+      content.push({
+        type: "text",
+        text: "[MQT / CADERNO DE ENCARGOS — mapa de quantidades e trabalhos do projecto]",
+      });
+    }
+
+    // 3. Contract document (if provided)
+    if (contract_base64) {
+      content.push({
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: contract_base64 },
+      });
+      content.push({
+        type: "text",
+        text: "[CONTRATO DA OBRA — contrato de empreitada]",
+      });
+    }
+
+    // 4. Certificates (max 5)
     if (certificates_base64 && certificates_base64.length > 0) {
       for (const cert of certificates_base64.slice(0, 5)) {
         const isImage = cert.type && cert.type.startsWith('image/');
@@ -140,7 +130,7 @@ serve(async (req) => {
       }
     }
 
-    // 3. Add manufacturer docs (if any, max 5)
+    // 5. Manufacturer docs (max 5)
     if (manufacturer_docs_base64 && manufacturer_docs_base64.length > 0) {
       for (const mdoc of manufacturer_docs_base64.slice(0, 5)) {
         const isImage = mdoc.type && mdoc.type.startsWith('image/');
@@ -155,16 +145,28 @@ serve(async (req) => {
       }
     }
 
-    // 4. Add project context (MQT, Contract, project specs) as TEXT + analysis prompt
+    // 6. Analysis prompt
+    let contextNote = "";
+    if (mqt_base64 && contract_base64) {
+      contextNote = "Foram fornecidos o MQT/Caderno de Encargos e o Contrato da Obra. Compara o material proposto com as especificações destes documentos.";
+    } else if (mqt_base64) {
+      contextNote = "Foi fornecido o MQT/Caderno de Encargos. Compara o material proposto com as especificações deste documento.";
+    } else if (contract_base64) {
+      contextNote = "Foi fornecido o Contrato da Obra. Verifica se o material proposto cumpre os requisitos contratuais.";
+    } else {
+      contextNote = "Não foram fornecidos MQT nem Contrato. Analisa o PAM apenas com base nas normas aplicáveis e nos certificados/documentos do fabricante fornecidos.";
+    }
+
     content.push({
       type: "text",
-      text: `${projectContext}
+      text: `${contextNote}
 
 Analisa este PAM considerando:
 1. O pedido de aprovação do empreiteiro (documento PDF acima)
-2. Os certificados e laudos fornecidos (se existirem)
-3. Os documentos do fabricante (se existirem)
-4. O MQT, Contrato e especificações do projecto (contexto acima, extraído do Conhecimento do Projecto)
+2. O MQT / Caderno de Encargos (se fornecido)
+3. O Contrato da Obra (se fornecido)
+4. Os certificados e laudos fornecidos (se existirem)
+5. Os documentos do fabricante (se existirem)
 
 ${getAnalysisPrompt(material_category)}`,
     });

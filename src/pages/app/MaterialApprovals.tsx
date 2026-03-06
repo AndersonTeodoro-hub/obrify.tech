@@ -11,7 +11,7 @@ import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import {
-  FileCheck, Plus, Upload, ChevronDown, ChevronUp, Trash2, CheckCircle2, AlertTriangle, XCircle, Clock, Loader2, Building2, ArrowLeft, FileText, Award, Factory, X, Download,
+  FileCheck, Plus, Upload, ChevronDown, ChevronUp, Trash2, CheckCircle2, AlertTriangle, XCircle, Clock, Loader2, Building2, ArrowLeft, FileText, Award, Factory, X, Download, ScrollText, FileSignature,
 } from 'lucide-react';
 import { generateMaterialApprovalPDF } from '@/utils/material-approval-pdf';
 
@@ -26,6 +26,7 @@ type Obra = { id: string; nome: string; cidade: string | null };
 type Approval = {
   id: string; obra_id: string; pdm_name: string; pdm_file_path: string; pdm_file_size: number | null;
   mqt_name: string | null; mqt_file_path: string | null; mqt_file_size: number | null;
+  contract_file_path: string | null; contract_file_name: string | null;
   material_category: string; status: string; ai_analysis: any; ai_recommendation: string | null;
   reviewer_notes: string | null; final_decision: string | null; decided_by: string | null;
   decided_at: string | null; created_at: string; updated_at: string;
@@ -45,6 +46,8 @@ export default function MaterialApprovals() {
   const [newModalOpen, setNewModalOpen] = useState(false);
   const [category, setCategory] = useState('');
   const [pdmFile, setPdmFile] = useState<File | null>(null);
+  const [mqtFile, setMqtFile] = useState<File | null>(null);
+  const [contractFile, setContractFile] = useState<File | null>(null);
   const [certFiles, setCertFiles] = useState<File[]>([]);
   const [mfgFiles, setMfgFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -105,7 +108,23 @@ export default function MaterialApprovals() {
       const { error: upErr } = await supabase.storage.from('material-approvals').upload(pdmPath, pdmFile);
       if (upErr) throw upErr;
 
-      // 2. Upload certificates
+      // 2. Upload MQT (optional)
+      let mqtPath: string | null = null;
+      if (mqtFile) {
+        mqtPath = `${basePath}_mqt_${sanitizeFilename(mqtFile.name)}`;
+        const { error } = await supabase.storage.from('material-approvals').upload(mqtPath, mqtFile);
+        if (error) throw error;
+      }
+
+      // 3. Upload Contract (optional)
+      let contractPath: string | null = null;
+      if (contractFile) {
+        contractPath = `${basePath}_contract_${sanitizeFilename(contractFile.name)}`;
+        const { error } = await supabase.storage.from('material-approvals').upload(contractPath, contractFile);
+        if (error) throw error;
+      }
+
+      // 4. Upload certificates
       const certificatesJson: Array<{ name: string; path: string; size: number }> = [];
       for (const cf of certFiles) {
         const cfPath = `${basePath}_cert_${sanitizeFilename(cf.name)}`;
@@ -114,7 +133,7 @@ export default function MaterialApprovals() {
         certificatesJson.push({ name: cf.name, path: cfPath, size: cf.size });
       }
 
-      // 3. Upload manufacturer docs
+      // 5. Upload manufacturer docs
       const mfgDocsJson: Array<{ name: string; path: string; size: number }> = [];
       for (const mf of mfgFiles) {
         const mfPath = `${basePath}_mfg_${sanitizeFilename(mf.name)}`;
@@ -123,22 +142,29 @@ export default function MaterialApprovals() {
         mfgDocsJson.push({ name: mf.name, path: mfPath, size: mf.size });
       }
 
-      // 4. Insert record
+      // 6. Insert record
       const { data: record, error: insErr } = await supabase.from('material_approvals').insert({
         obra_id: selectedObra.id,
         user_id: user.id,
         pdm_name: pdmFile.name,
         pdm_file_path: pdmPath,
         pdm_file_size: pdmFile.size,
+        mqt_name: mqtFile?.name || null,
+        mqt_file_path: mqtPath,
+        mqt_file_size: mqtFile?.size || null,
+        contract_file_path: contractPath,
+        contract_file_name: contractFile?.name || null,
         material_category: category,
         status: 'pending',
         certificates: certificatesJson as any,
         manufacturer_docs: mfgDocsJson as any,
-      }).select().single();
+      } as any).select().single();
       if (insErr) throw insErr;
 
       setNewModalOpen(false);
       setPdmFile(null);
+      setMqtFile(null);
+      setContractFile(null);
       setCertFiles([]);
       setMfgFiles([]);
       setCategory('');
@@ -159,6 +185,24 @@ export default function MaterialApprovals() {
       const { data: pdmData } = await supabase.storage.from('material-approvals').download(approval.pdm_file_path);
       if (!pdmData) throw new Error('Failed to download PAM');
       const pdmBase64 = await blobToBase64(pdmData);
+
+      // Download MQT (if exists)
+      let mqtBase64: string | null = null;
+      if (approval.mqt_file_path) {
+        try {
+          const { data } = await supabase.storage.from('material-approvals').download(approval.mqt_file_path);
+          if (data) mqtBase64 = await blobToBase64(data);
+        } catch { /* skip */ }
+      }
+
+      // Download Contract (if exists)
+      let contractBase64: string | null = null;
+      if (approval.contract_file_path) {
+        try {
+          const { data } = await supabase.storage.from('material-approvals').download(approval.contract_file_path);
+          if (data) contractBase64 = await blobToBase64(data);
+        } catch { /* skip */ }
+      }
 
       // Download certificates
       const certificatesBase64: Array<{ name: string; base64: string; type: string }> = [];
@@ -190,11 +234,12 @@ export default function MaterialApprovals() {
         body: {
           approval_id: approval.id,
           pdm_base64: pdmBase64,
+          mqt_base64: mqtBase64,
+          contract_base64: contractBase64,
           certificates_base64: certificatesBase64,
           manufacturer_docs_base64: mfgDocsBase64,
           material_category: approval.material_category,
           obra_id: approval.obra_id,
-          user_id: user!.id,
         },
       });
 
@@ -236,6 +281,7 @@ export default function MaterialApprovals() {
   const handleDelete = async (approval: Approval) => {
     const pathsToRemove = [approval.pdm_file_path];
     if (approval.mqt_file_path) pathsToRemove.push(approval.mqt_file_path);
+    if (approval.contract_file_path) pathsToRemove.push(approval.contract_file_path);
     const certs = (approval as any).certificates || [];
     certs.forEach((c: any) => { if (c.path) pathsToRemove.push(c.path); });
     const mfgDocs = (approval as any).manufacturer_docs || [];
@@ -600,7 +646,7 @@ export default function MaterialApprovals() {
 
       {/* New approval modal */}
       <Dialog open={newModalOpen} onOpenChange={setNewModalOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Novo Pedido de Aprovação</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div>
@@ -623,6 +669,24 @@ export default function MaterialApprovals() {
             />
 
             <UploadBox
+              icon={ScrollText}
+              title="MQT / Caderno de Encargos"
+              subtitle="Mapa de quantidades e trabalhos (opcional)"
+              accept=".pdf"
+              files={mqtFile}
+              onFilesChange={(f) => setMqtFile(f as File | null)}
+            />
+
+            <UploadBox
+              icon={FileSignature}
+              title="Contrato da Obra"
+              subtitle="Contrato de empreitada (opcional)"
+              accept=".pdf"
+              files={contractFile}
+              onFilesChange={(f) => setContractFile(f as File | null)}
+            />
+
+            <UploadBox
               icon={Award}
               title="Certificados e Laudos"
               subtitle="Certificados CE, laudos, relatórios de ensaio"
@@ -641,10 +705,6 @@ export default function MaterialApprovals() {
               files={mfgFiles}
               onFilesChange={(f) => setMfgFiles(f as File[])}
             />
-
-            <p className="text-xs text-muted-foreground bg-muted/50 rounded-lg p-3">
-              💡 O MQT e o Contrato são consultados automaticamente a partir do Conhecimento do Projecto.
-            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setNewModalOpen(false)}>Cancelar</Button>
