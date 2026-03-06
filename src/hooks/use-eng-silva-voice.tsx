@@ -434,6 +434,7 @@ export function useEngSilvaVoice() {
         });
         if (knowledgeData?.knowledge) {
           setProjectKnowledge(knowledgeData.knowledge);
+          projectKnowledgeRef.current = knowledgeData.knowledge;
           console.log(`ENG-SILVA: Loaded knowledge for ${knowledgeData.knowledge.length} documents`);
         }
       }
