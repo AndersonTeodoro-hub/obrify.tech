@@ -150,13 +150,16 @@ export default function ProjectKnowledge() {
           .upload(filePath, file);
         if (uploadError) throw uploadError;
 
+        const mimeType = getFileMimeType(file.name);
+        const docType = mimeType.startsWith('image/') ? mimeType.split('/')[1] : 'pdf';
+
         const { data: insertData, error: insertError } = await supabase
           .from('eng_silva_project_knowledge')
           .insert({
             obra_id: selectedObra.id,
             user_id: user.id,
             document_name: file.name,
-            document_type: 'pdf',
+            document_type: docType,
             specialty: uploadSpecialty,
             summary: '',
             file_path: filePath,
