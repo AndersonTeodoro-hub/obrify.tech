@@ -50,9 +50,26 @@ serve(async (req) => {
     const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { approval_id, pdm_base64, certificates_base64, manufacturer_docs_base64, material_category, obra_id, user_id } = await req.json();
+    const body = await req.json();
+    const approval_id = body.approval_id;
+    const pdm_base64 = body.pdm_base64;
+    const certificates_base64 = body.certificates_base64 || [];
+    const manufacturer_docs_base64 = body.manufacturer_docs_base64 || [];
+    const material_category = body.material_category;
+    const obra_id = body.obra_id;
+    const user_id = body.user_id;
 
-    console.log(`PAM: Analyzing material approval ${approval_id} (${material_category})`);
+    console.log("PAM: Request received:", JSON.stringify({
+      approval_id, obra_id, material_category,
+      has_pdm: !!pdm_base64,
+      certs: certificates_base64?.length || 0,
+      mfg_docs: manufacturer_docs_base64?.length || 0,
+      has_user_id: !!user_id,
+    }));
+
+    if (!approval_id || !pdm_base64 || !material_category || !obra_id) {
+      throw new Error("Missing required fields: approval_id, pdm_base64, material_category, obra_id");
+    }
 
     // Update status to analyzing
     await supabase
@@ -61,15 +78,23 @@ serve(async (req) => {
       .eq("id", approval_id);
 
     // Load project knowledge (MQT, Contract, specs) automatically
-    const { data: knowledge } = await supabase
-      .from("eng_silva_project_knowledge")
-      .select("document_name, specialty, summary, key_elements")
-      .eq("obra_id", obra_id)
-      .eq("user_id", user_id)
-      .eq("processed", true);
+    let knowledge: any[] = [];
+    try {
+      if (obra_id && user_id) {
+        const { data } = await supabase
+          .from("eng_silva_project_knowledge")
+          .select("document_name, specialty, summary, key_elements")
+          .eq("obra_id", obra_id)
+          .eq("user_id", user_id)
+          .eq("processed", true);
+        knowledge = data || [];
+      }
+    } catch (err) {
+      console.error("PAM: Knowledge load failed:", err);
+    }
 
     let projectContext = "";
-    if (knowledge && knowledge.length > 0) {
+    if (knowledge.length > 0) {
       projectContext = "\n\nCONHECIMENTO DO PROJECTO, MQT E CONTRATO:";
       knowledge.forEach((doc: any) => {
         projectContext += `\n\n--- ${doc.specialty}: ${doc.document_name} ---`;
