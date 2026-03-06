@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  LayoutDashboard, Building2, HardHat, Camera, ClipboardCheck, BarChart3, Plane, Settings, LogOut, AlertTriangle, Search,
+  LayoutDashboard, Building2, HardHat, Camera, ClipboardCheck, BarChart3, Plane, Settings, LogOut, AlertTriangle, Search, BookOpen,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { supabase } from '@/integrations/supabase/client';
@@ -47,6 +47,7 @@ export function AppSidebar() {
 
   const toolItems = [
     { title: 'Análise de Incompatibilidades', url: '/app/incompaticheck', icon: Search, badge: 'Novo' },
+    { title: 'Conhecimento do Projecto', url: '/app/project-knowledge', icon: BookOpen },
   ];
 
   const futureItems = [

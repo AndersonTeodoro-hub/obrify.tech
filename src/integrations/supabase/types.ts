@@ -999,6 +999,54 @@ export type Database = {
         }
         Relationships: []
       }
+      eng_silva_project_knowledge: {
+        Row: {
+          created_at: string | null
+          document_name: string
+          document_type: string | null
+          file_path: string | null
+          file_size: number | null
+          id: string
+          key_elements: Json | null
+          obra_id: string
+          processed: boolean | null
+          specialty: string
+          summary: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          document_name: string
+          document_type?: string | null
+          file_path?: string | null
+          file_size?: number | null
+          id?: string
+          key_elements?: Json | null
+          obra_id: string
+          processed?: boolean | null
+          specialty: string
+          summary?: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          document_name?: string
+          document_type?: string | null
+          file_path?: string | null
+          file_size?: number | null
+          id?: string
+          key_elements?: Json | null
+          obra_id?: string
+          processed?: boolean | null
+          specialty?: string
+          summary?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       evidence_links: {
         Row: {
           capture_id: string

@@ -49,7 +49,7 @@ LIMITES:
 
 IMPORTANTE: Estás numa conversa por VOZ. Responde sempre como se estivesses ao telefone com um colega. Curto, directo, natural. Nada de texto formatado.`;
 
-function buildSystemPrompt(memory: { profile: any; summaries: any[] }): string {
+function buildSystemPrompt(memory: { profile: any; summaries: any[] }, projectKnowledge: any[]): string {
   let prompt = BASE_SYSTEM_PROMPT;
 
   const { profile, summaries } = memory;
@@ -84,6 +84,32 @@ Tens acesso aos resultados da análise de incompatibilidades feita pelo Incompat
     }
   }
 
+  // Project knowledge injection
+  if (projectKnowledge && projectKnowledge.length > 0) {
+    const limited = projectKnowledge.slice(0, 15);
+    prompt += `\n\nCONHECIMENTO COMPLETO DO PROJECTO (${limited.length} documentos analisados):`;
+
+    const bySpecialty: Record<string, any[]> = {};
+    limited.forEach(doc => {
+      if (!bySpecialty[doc.specialty]) bySpecialty[doc.specialty] = [];
+      bySpecialty[doc.specialty].push(doc);
+    });
+
+    Object.entries(bySpecialty).forEach(([specialty, docs]) => {
+      prompt += `\n\n--- ${specialty.toUpperCase()} ---`;
+      docs.forEach(doc => {
+        const shortSummary = doc.summary.split(' ').slice(0, 150).join(' ');
+        prompt += `\n📄 ${doc.document_name}: ${shortSummary}`;
+        if (doc.key_elements && doc.key_elements.length > 0) {
+          const elements = doc.key_elements.slice(0, 8);
+          prompt += `\n   Elementos: ${elements.map((e: any) => `${e.type} ${e.id}`).join(', ')}`;
+        }
+      });
+    });
+
+    prompt += `\n\nTens conhecimento completo do projecto. Quando o fiscal perguntar sobre qualquer elemento (pilares, sapatas, tubagens, cotas, eixos), responde com precisão usando esta informação. Refere os documentos de origem quando relevante. Não digas que não tens informação se ela está aqui.`;
+  }
+
   prompt += `\n\nEXTRAÇÃO DE PERFIL:
 Se o fiscal mencionar o seu nome, empresa, obra, ou função, inclui no INÍCIO da tua resposta (antes do texto normal) uma linha especial no formato:
 [PERFIL: nome=..., empresa=..., obra=..., funcao=...]
@@ -103,6 +129,7 @@ export function useEngSilvaVoice() {
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [memory, setMemory] = useState<{ profile: any; summaries: any[] }>({ profile: {}, summaries: [] });
+  const [projectKnowledge, setProjectKnowledge] = useState<any[]>([]);
 
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -293,7 +320,7 @@ export function useEngSilvaVoice() {
       const chatBody: any = {
         message: userText,
         conversation_history: conversationRef.current,
-        system: buildSystemPrompt(memoryRef.current),
+        system: buildSystemPrompt(memoryRef.current, projectKnowledge),
       };
 
       if (pendingImageRef.current) {
@@ -394,7 +421,23 @@ export function useEngSilvaVoice() {
     activeRef.current = true;
 
     // Load memory before starting
-    await loadMemory();
+    const loadedMemory = await loadMemory();
+
+    // Load project knowledge if obra_id is available
+    try {
+      const obraId = memoryRef.current?.profile?.current_obra_id;
+      if (obraId) {
+        const { data: knowledgeData } = await supabase.functions.invoke('eng-silva-knowledge', {
+          body: { action: 'load', obra_id: obraId },
+        });
+        if (knowledgeData?.knowledge) {
+          setProjectKnowledge(knowledgeData.knowledge);
+          console.log(`ENG-SILVA: Loaded knowledge for ${knowledgeData.knowledge.length} documents`);
+        }
+      }
+    } catch (err) {
+      console.error('ENG-SILVA: Failed to load project knowledge:', err);
+    }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({

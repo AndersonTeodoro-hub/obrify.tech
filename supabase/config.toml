@@ -38,3 +38,6 @@ verify_jwt = false
 
 [functions.incompaticheck-analyze]
 verify_jwt = false
+
+[functions.eng-silva-knowledge]
+verify_jwt = false
