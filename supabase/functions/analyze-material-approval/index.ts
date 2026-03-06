@@ -71,7 +71,7 @@ serve(async (req) => {
       text: `Analisa este Pedido de Aprovação de Materiais (PAM/FAM) para a categoria "${material_category}".
 ${projectContext}
 
-Compara o material proposto no PDM com:
+Compara o material proposto no PAM com:
 1. As especificações do MQT (se fornecido)
 2. O conhecimento do projecto que tens em memória
 3. As normas portuguesas e europeias aplicáveis
