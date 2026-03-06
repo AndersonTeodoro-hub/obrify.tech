@@ -103,7 +103,7 @@ Responde APENAS com JSON (sem markdown, sem backticks):
   "norms_referenced": ["EN 206", "NP EN 10080"]
 }
 
-Sê rigoroso na análise. Se faltarem dados no PDM para uma avaliação completa, indica como "a_verificar". Se o material não cumpre as especificações, rejeita com justificação clara.`,
+Sê rigoroso na análise. Se faltarem dados no PAM para uma avaliação completa, indica como "a_verificar". Se o material não cumpre as especificações, rejeita com justificação clara.`,
     });
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
