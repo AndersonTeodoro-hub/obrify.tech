@@ -65,6 +65,7 @@ const App = () => (
                 <Route path="nonconformities" element={<NonConformities />} />
                 <Route path="incompaticheck" element={<IncompatiCheck />} />
                 <Route path="project-knowledge" element={<ProjectKnowledge />} />
+                <Route path="material-approvals" element={<MaterialApprovals />} />
                 <Route path="reports" element={<Reports />} />
                 <Route path="drone" element={<Drone />} />
                 <Route path="settings" element={<Settings />} />
