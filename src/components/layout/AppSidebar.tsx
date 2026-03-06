@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  LayoutDashboard, Building2, HardHat, Camera, ClipboardCheck, BarChart3, Plane, Settings, LogOut, AlertTriangle, Search, BookOpen,
+  LayoutDashboard, Building2, HardHat, Camera, ClipboardCheck, BarChart3, Plane, Settings, LogOut, AlertTriangle, Search, BookOpen, FileCheck,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { supabase } from '@/integrations/supabase/client';
