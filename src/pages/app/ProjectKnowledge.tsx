@@ -466,26 +466,36 @@ export default function ProjectKnowledge() {
                         <CollapsibleContent>
                           {doc.processed && doc.summary && (
                             <div className="ml-10 mr-3 mb-3 p-3 rounded-lg bg-muted/30 border text-sm space-y-2">
-                              <p className="text-foreground leading-relaxed">{doc.summary}</p>
-                              {doc.key_elements && doc.key_elements.length > 0 && (
-                                <div className="pt-2 border-t">
-                                  <p className="text-xs font-medium text-muted-foreground mb-1">
-                                    {doc.key_elements.length} elementos extraídos
-                                  </p>
-                                  <div className="flex flex-wrap gap-1">
-                                    {doc.key_elements.slice(0, 12).map((el: any, i: number) => (
-                                      <Badge key={i} variant="outline" className="text-xs">
-                                        {el.type}: {el.id}
-                                      </Badge>
-                                    ))}
-                                    {doc.key_elements.length > 12 && (
-                                      <Badge variant="outline" className="text-xs">
-                                        +{doc.key_elements.length - 12}
-                                      </Badge>
-                                    )}
-                                  </div>
-                                </div>
+                              {doc.summary.trim().startsWith('{') || doc.summary.trim().startsWith('[') ? (
+                                <p className="text-muted-foreground italic">Resumo em processamento...</p>
+                              ) : (
+                                <p className="text-foreground leading-relaxed">{doc.summary}</p>
                               )}
+                              {(() => {
+                                const validElements = (doc.key_elements || []).filter(
+                                  (el: any) => el && typeof el === 'object' && typeof el.type === 'string' && typeof el.id === 'string'
+                                );
+                                if (validElements.length === 0) return null;
+                                return (
+                                  <div className="pt-2 border-t">
+                                    <p className="text-xs font-medium text-muted-foreground mb-1">
+                                      {validElements.length} elementos extraídos
+                                    </p>
+                                    <div className="flex flex-wrap gap-1">
+                                      {validElements.slice(0, 12).map((el: any, i: number) => (
+                                        <Badge key={i} variant="outline" className="text-xs">
+                                          {el.type}: {el.id}
+                                        </Badge>
+                                      ))}
+                                      {validElements.length > 12 && (
+                                        <Badge variant="outline" className="text-xs">
+                                          +{validElements.length - 12}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
                             </div>
                           )}
                         </CollapsibleContent>

@@ -86,29 +86,40 @@ Tens acesso aos resultados da análise de incompatibilidades feita pelo Incompat
   }
 
   // Project knowledge injection
-  if (projectKnowledge && projectKnowledge.length > 0) {
-    const limited = projectKnowledge.slice(0, 15);
-    prompt += `\n\nCONHECIMENTO COMPLETO DO PROJECTO (${limited.length} documentos analisados):`;
+  const knowledge = projectKnowledge;
+  if (knowledge && knowledge.length > 0) {
+    const limitedDocs = knowledge.slice(0, 15);
+    let knowledgeText = `\n\nCONHECIMENTO DO PROJECTO (${knowledge.length} documentos):`;
 
     const bySpecialty: Record<string, any[]> = {};
-    limited.forEach(doc => {
+    limitedDocs.forEach(doc => {
       if (!bySpecialty[doc.specialty]) bySpecialty[doc.specialty] = [];
       bySpecialty[doc.specialty].push(doc);
     });
 
     Object.entries(bySpecialty).forEach(([specialty, docs]) => {
-      prompt += `\n\n--- ${specialty.toUpperCase()} ---`;
+      knowledgeText += `\n--- ${specialty.toUpperCase()} ---`;
       docs.forEach(doc => {
-        const shortSummary = doc.summary.split(' ').slice(0, 150).join(' ');
-        prompt += `\n📄 ${doc.document_name}: ${shortSummary}`;
+        const words = (doc.summary || '').split(' ');
+        const shortSummary = words.slice(0, 100).join(' ');
+        knowledgeText += `\n${doc.document_name}: ${shortSummary}`;
         if (doc.key_elements && doc.key_elements.length > 0) {
-          const elements = doc.key_elements.slice(0, 8);
-          prompt += `\n   Elementos: ${elements.map((e: any) => `${e.type} ${e.id}`).join(', ')}`;
+          const elements = doc.key_elements.slice(0, 5);
+          const validElements = elements.filter((e: any) => e && e.type && e.id);
+          if (validElements.length > 0) {
+            knowledgeText += ` | Elementos: ${validElements.map((e: any) => `${e.type}:${e.id}`).join(', ')}`;
+          }
         }
       });
     });
 
-    prompt += `\n\nTens conhecimento completo do projecto. Quando o fiscal perguntar sobre qualquer elemento (pilares, sapatas, tubagens, cotas, eixos), responde com precisão usando esta informação. Refere os documentos de origem quando relevante. Não digas que não tens informação se ela está aqui.`;
+    // Hard limit on total knowledge text
+    if (knowledgeText.length > 4000) {
+      knowledgeText = knowledgeText.substring(0, 4000) + '\n[... truncado]';
+    }
+
+    knowledgeText += `\n\nUsa este conhecimento para responder com precisão. Refere documentos quando relevante.`;
+    prompt += knowledgeText;
   }
 
   prompt += `\n\nEXTRAÇÃO DE PERFIL:
