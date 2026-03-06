@@ -50,6 +50,7 @@ LIMITES:
 IMPORTANTE: Estás numa conversa por VOZ. Responde sempre como se estivesses ao telefone com um colega. Curto, directo, natural. Nada de texto formatado.`;
 
 function buildSystemPrompt(memory: { profile: any; summaries: any[] }, projectKnowledge: any[]): string {
+  console.log("ENG-SILVA: Building prompt with", projectKnowledge.length, "knowledge docs");
   let prompt = BASE_SYSTEM_PROMPT;
 
   const { profile, summaries } = memory;
@@ -145,6 +146,7 @@ export function useEngSilvaVoice() {
   const startListeningRef = useRef<(() => void) | null>(null);
   const memoryRef = useRef(memory);
   const pendingImageRef = useRef<string | null>(null);
+  const projectKnowledgeRef = useRef<any[]>([]);
 
   const setPendingImage = useCallback((base64: string) => {
     pendingImageRef.current = base64;
@@ -320,7 +322,7 @@ export function useEngSilvaVoice() {
       const chatBody: any = {
         message: userText,
         conversation_history: conversationRef.current,
-        system: buildSystemPrompt(memoryRef.current, projectKnowledge),
+        system: buildSystemPrompt(memoryRef.current, projectKnowledgeRef.current),
       };
 
       if (pendingImageRef.current) {
@@ -432,6 +434,7 @@ export function useEngSilvaVoice() {
         });
         if (knowledgeData?.knowledge) {
           setProjectKnowledge(knowledgeData.knowledge);
+          projectKnowledgeRef.current = knowledgeData.knowledge;
           console.log(`ENG-SILVA: Loaded knowledge for ${knowledgeData.knowledge.length} documents`);
         }
       }
