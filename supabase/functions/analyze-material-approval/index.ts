@@ -176,10 +176,11 @@ ${getAnalysisPrompt(material_category)}`,
       headers: {
         "x-api-key": anthropicKey,
         "anthropic-version": "2023-06-01",
+        "anthropic-beta": "pdfs-2024-09-25",
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-5-20250929",
+        model: "claude-sonnet-4-20250514",
         max_tokens: 4000,
         messages: [{ role: "user", content }],
         system: `És o Eng. Silva, engenheiro civil sénior com 30+ anos de experiência em fiscalização de obras em Portugal. Estás a analisar um Pedido de Aprovação de Materiais (PAM) submetido por um empreiteiro. A tua análise deve ser rigorosa, técnica e baseada nas normas portuguesas e europeias. Verifica se o material proposto cumpre as especificações do projecto e as normas aplicáveis. Responde em português europeu.`,
@@ -187,7 +188,9 @@ ${getAnalysisPrompt(material_category)}`,
     });
 
     if (!response.ok) {
-      throw new Error(`Claude API error: ${response.status}`);
+      const errBody = await response.text();
+      console.error("PAM: Claude API error body:", errBody);
+      throw new Error(`Claude API error: ${response.status} - ${errBody.substring(0, 300)}`);
     }
 
     const result = await response.json();
