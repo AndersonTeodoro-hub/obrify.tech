@@ -29,6 +29,7 @@ import InspectionDetail from "./pages/app/InspectionDetail";
 import NonConformities from "./pages/app/NonConformities";
 import IncompatiCheck from "./pages/app/IncompatiCheck";
 import ProjectKnowledge from "./pages/app/ProjectKnowledge";
+import MaterialApprovals from "./pages/app/MaterialApprovals";
 import AcceptInvite from "./pages/AcceptInvite";
 
 const queryClient = new QueryClient();
