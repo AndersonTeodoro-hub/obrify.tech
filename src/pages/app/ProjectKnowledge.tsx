@@ -534,20 +534,29 @@ export default function ProjectKnowledge() {
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-medium mb-2 block">Especialidade</label>
+              <label className="text-sm font-medium mb-2 block">Tipo de Documento</label>
               <Select value={uploadSpecialty} onValueChange={setUploadSpecialty}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Selecione a especialidade" />
+                  <SelectValue placeholder="Selecione o tipo de documento" />
                 </SelectTrigger>
                 <SelectContent>
-                  {SPECIALTIES.map(s => (
-                    <SelectItem key={s} value={s}>{s}</SelectItem>
-                  ))}
+                  <SelectGroup>
+                    <SelectLabel>Projectos e Especialidades</SelectLabel>
+                    {PROJECT_SPECIALTIES.map(s => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                  <SelectGroup>
+                    <SelectLabel>Documentos da Obra</SelectLabel>
+                    {DOCUMENT_TYPES.map(s => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                  </SelectGroup>
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <label className="text-sm font-medium mb-2 block">Ficheiros PDF</label>
+              <label className="text-sm font-medium mb-2 block">Ficheiros</label>
               <div
                 className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors"
                 onClick={() => document.getElementById('knowledge-file-input')?.click()}
@@ -556,12 +565,13 @@ export default function ProjectKnowledge() {
                 <p className="text-sm text-muted-foreground">
                   {uploadFiles.length > 0
                     ? `${uploadFiles.length} ficheiro(s) seleccionado(s)`
-                    : 'Clique para seleccionar PDFs'}
+                    : 'Arraste ficheiros para aqui'}
                 </p>
+                <p className="text-xs text-muted-foreground mt-1">PDF · JPG · PNG — máx. 2GB</p>
                 <input
                   id="knowledge-file-input"
                   type="file"
-                  accept=".pdf"
+                  accept=".pdf,.jpg,.jpeg,.png"
                   multiple
                   className="hidden"
                   onChange={(e) => setUploadFiles(Array.from(e.target.files || []))}
@@ -569,11 +579,14 @@ export default function ProjectKnowledge() {
               </div>
               {uploadFiles.length > 0 && (
                 <div className="mt-2 space-y-1">
-                  {uploadFiles.map((f, i) => (
-                    <p key={i} className="text-xs text-muted-foreground">
-                      📄 {f.name} ({formatFileSize(f.size)})
-                    </p>
-                  ))}
+                  {uploadFiles.map((f, i) => {
+                    const isImage = getFileMimeType(f.name).startsWith('image/');
+                    return (
+                      <p key={i} className="text-xs text-muted-foreground">
+                        {isImage ? '🖼️' : '📄'} {f.name} ({formatFileSize(f.size)})
+                      </p>
+                    );
+                  })}
                 </div>
               )}
             </div>
