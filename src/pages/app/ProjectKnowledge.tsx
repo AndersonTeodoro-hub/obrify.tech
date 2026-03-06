@@ -23,11 +23,24 @@ import {
 import { format } from 'date-fns';
 import { pt } from 'date-fns/locale';
 
-const SPECIALTIES = [
+const PROJECT_SPECIALTIES = [
   'Topografia', 'Arquitectura', 'Estrutural', 'Fundações', 'Rede Enterrada',
   'AVAC', 'Águas e Esgotos', 'Electricidade', 'Telecomunicações', 'Gás',
-  'Segurança Contra Incêndios', 'Acústica', 'Térmica', 'Outros',
+  'Segurança Contra Incêndios', 'Acústica', 'Térmica',
 ];
+
+const DOCUMENT_TYPES = [
+  'Contrato', 'Caderno de Encargos', 'Condições Técnicas', 'Mapa de Quantidades (MQT)',
+  'Memória Descritiva', 'Acta de Reunião', 'Relatório Fotográfico', 'Pormenores Construtivos',
+  'Mapa de Acabamentos', 'Plano de Segurança', 'Plano de Qualidade', 'Correspondência', 'Outros',
+];
+
+function getFileMimeType(fileName: string): string {
+  const ext = fileName.split('.').pop()?.toLowerCase();
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  if (ext === 'png') return 'image/png';
+  return 'application/pdf';
+}
 
 interface Obra {
   id: string;
