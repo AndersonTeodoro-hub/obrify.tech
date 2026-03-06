@@ -136,7 +136,7 @@ export default function MaterialApprovals() {
   const processApproval = async (approval: Approval) => {
     try {
       const { data: pdmData } = await supabase.storage.from('material-approvals').download(approval.pdm_file_path);
-      if (!pdmData) throw new Error('Failed to download PDM');
+      if (!pdmData) throw new Error('Failed to download PAM');
       const pdmBase64 = await blobToBase64(pdmData);
 
       let mqtBase64: string | null = null;
@@ -228,7 +228,7 @@ export default function MaterialApprovals() {
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
             <FileCheck className="w-7 h-7 text-primary" /> Aprovação de Materiais
           </h1>
-          <p className="text-muted-foreground mt-1">Análise automática de PDM/FAM com base no projecto</p>
+          <p className="text-muted-foreground mt-1">Análise automática de PAM/FAM com base no projecto</p>
         </div>
         <Card className="max-w-lg mx-auto mt-12">
           <CardContent className="p-8 text-center space-y-4">
@@ -477,7 +477,7 @@ export default function MaterialApprovals() {
               </Select>
             </div>
             <div>
-              <label className="text-sm font-medium text-foreground">PDM / Ficha Técnica *</label>
+              <label className="text-sm font-medium text-foreground">PAM / Ficha Técnica *</label>
               <div
                 className="mt-1 border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition"
                 onClick={() => document.getElementById('pdm-input')?.click()}
@@ -490,7 +490,7 @@ export default function MaterialApprovals() {
                 ) : (
                   <>
                     <Upload className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
-                    <p className="text-sm text-muted-foreground">Arraste o PDF do pedido de aprovação ou ficha técnica</p>
+                    <p className="text-sm text-muted-foreground">Arraste o PDF do pedido de aprovação (PAM) ou ficha técnica</p>
                   </>
                 )}
               </div>

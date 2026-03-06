@@ -52,7 +52,7 @@ serve(async (req) => {
     });
     content.push({
       type: "text",
-      text: "[Documento acima: PEDIDO DE APROVAÇÃO DE MATERIAL (PDM) — ficha técnica do material proposto pelo empreiteiro]",
+      text: "[Documento acima: PEDIDO DE APROVAÇÃO DE MATERIAIS (PAM) — ficha técnica do material proposto pelo empreiteiro]",
     });
 
     if (mqt_base64) {
@@ -68,10 +68,10 @@ serve(async (req) => {
 
     content.push({
       type: "text",
-      text: `Analisa este Pedido de Aprovação de Material (PDM/FAM) para a categoria "${material_category}".
+      text: `Analisa este Pedido de Aprovação de Materiais (PAM/FAM) para a categoria "${material_category}".
 ${projectContext}
 
-Compara o material proposto no PDM com:
+Compara o material proposto no PAM com:
 1. As especificações do MQT (se fornecido)
 2. O conhecimento do projecto que tens em memória
 3. As normas portuguesas e europeias aplicáveis
@@ -103,7 +103,7 @@ Responde APENAS com JSON (sem markdown, sem backticks):
   "norms_referenced": ["EN 206", "NP EN 10080"]
 }
 
-Sê rigoroso na análise. Se faltarem dados no PDM para uma avaliação completa, indica como "a_verificar". Se o material não cumpre as especificações, rejeita com justificação clara.`,
+Sê rigoroso na análise. Se faltarem dados no PAM para uma avaliação completa, indica como "a_verificar". Se o material não cumpre as especificações, rejeita com justificação clara.`,
     });
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -117,7 +117,7 @@ Sê rigoroso na análise. Se faltarem dados no PDM para uma avaliação completa
         model: "claude-sonnet-4-5-20250929",
         max_tokens: 4000,
         messages: [{ role: "user", content }],
-        system: `És o Eng. Silva, engenheiro civil sénior com 30+ anos de experiência em fiscalização de obras em Portugal. Estás a analisar um Pedido de Aprovação de Material (PDM/FAM) submetido por um empreiteiro. A tua análise deve ser rigorosa, técnica e baseada nas normas portuguesas e europeias. Verifica se o material proposto cumpre as especificações do projecto e as normas aplicáveis. Responde em português europeu.`,
+        system: `És o Eng. Silva, engenheiro civil sénior com 30+ anos de experiência em fiscalização de obras em Portugal. Estás a analisar um Pedido de Aprovação de Materiais (PAM/FAM) submetido por um empreiteiro. A tua análise deve ser rigorosa, técnica e baseada nas normas portuguesas e europeias. Verifica se o material proposto cumpre as especificações do projecto e as normas aplicáveis. Responde em português europeu.`,
       }),
     });
 
