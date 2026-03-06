@@ -228,7 +228,7 @@ export default function MaterialApprovals() {
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
             <FileCheck className="w-7 h-7 text-primary" /> Aprovação de Materiais
           </h1>
-          <p className="text-muted-foreground mt-1">Análise automática de PDM/FAM com base no projecto</p>
+          <p className="text-muted-foreground mt-1">Análise automática de PAM/FAM com base no projecto</p>
         </div>
         <Card className="max-w-lg mx-auto mt-12">
           <CardContent className="p-8 text-center space-y-4">
