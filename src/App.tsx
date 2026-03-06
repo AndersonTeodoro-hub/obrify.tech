@@ -63,6 +63,7 @@ const App = () => (
                 <Route path="inspections/:inspectionId" element={<InspectionDetail />} />
                 <Route path="nonconformities" element={<NonConformities />} />
                 <Route path="incompaticheck" element={<IncompatiCheck />} />
+                <Route path="project-knowledge" element={<ProjectKnowledge />} />
                 <Route path="reports" element={<Reports />} />
                 <Route path="drone" element={<Drone />} />
                 <Route path="settings" element={<Settings />} />

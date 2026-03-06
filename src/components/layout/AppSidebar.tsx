@@ -47,6 +47,7 @@ export function AppSidebar() {
 
   const toolItems = [
     { title: 'Análise de Incompatibilidades', url: '/app/incompaticheck', icon: Search, badge: 'Novo' },
+    { title: 'Conhecimento do Projecto', url: '/app/project-knowledge', icon: BookOpen },
   ];
 
   const futureItems = [
