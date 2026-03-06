@@ -27,16 +27,25 @@ serve(async (req) => {
     const { action } = body;
 
     if (action === "process_document") {
-      const { document_id, document_name, specialty, pdf_base64 } = body;
-      console.log(`KNOWLEDGE: Processing ${document_name} (${specialty})`);
+      const { document_id, document_name, specialty, file_base64, file_type, pdf_base64 } = body;
+      console.log(`KNOWLEDGE: Processing ${document_name} (${specialty}), type: ${file_type || 'application/pdf'}`);
 
       const content: any[] = [];
+      const actualBase64 = file_base64 || pdf_base64;
+      const actualType = file_type || 'application/pdf';
 
-      if (pdf_base64) {
-        content.push({
-          type: "document",
-          source: { type: "base64", media_type: "application/pdf", data: pdf_base64 },
-        });
+      if (actualBase64) {
+        if (actualType.startsWith('image/')) {
+          content.push({
+            type: "image",
+            source: { type: "base64", media_type: actualType, data: actualBase64 },
+          });
+        } else {
+          content.push({
+            type: "document",
+            source: { type: "base64", media_type: "application/pdf", data: actualBase64 },
+          });
+        }
       }
 
       content.push({

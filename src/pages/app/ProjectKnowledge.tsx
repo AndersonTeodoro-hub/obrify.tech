@@ -12,7 +12,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import {
   Collapsible, CollapsibleContent, CollapsibleTrigger,
@@ -23,11 +23,24 @@ import {
 import { format } from 'date-fns';
 import { pt } from 'date-fns/locale';
 
-const SPECIALTIES = [
+const PROJECT_SPECIALTIES = [
   'Topografia', 'Arquitectura', 'Estrutural', 'Fundações', 'Rede Enterrada',
   'AVAC', 'Águas e Esgotos', 'Electricidade', 'Telecomunicações', 'Gás',
-  'Segurança Contra Incêndios', 'Acústica', 'Térmica', 'Outros',
+  'Segurança Contra Incêndios', 'Acústica', 'Térmica',
 ];
+
+const DOCUMENT_TYPES = [
+  'Contrato', 'Caderno de Encargos', 'Condições Técnicas', 'Mapa de Quantidades (MQT)',
+  'Memória Descritiva', 'Acta de Reunião', 'Relatório Fotográfico', 'Pormenores Construtivos',
+  'Mapa de Acabamentos', 'Plano de Segurança', 'Plano de Qualidade', 'Correspondência', 'Outros',
+];
+
+function getFileMimeType(fileName: string): string {
+  const ext = fileName.split('.').pop()?.toLowerCase();
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  if (ext === 'png') return 'image/png';
+  return 'application/pdf';
+}
 
 interface Obra {
   id: string;
@@ -137,13 +150,16 @@ export default function ProjectKnowledge() {
           .upload(filePath, file);
         if (uploadError) throw uploadError;
 
+        const mimeType = getFileMimeType(file.name);
+        const docType = mimeType.startsWith('image/') ? mimeType.split('/')[1] : 'pdf';
+
         const { data: insertData, error: insertError } = await supabase
           .from('eng_silva_project_knowledge')
           .insert({
             obra_id: selectedObra.id,
             user_id: user.id,
             document_name: file.name,
-            document_type: 'pdf',
+            document_type: docType,
             specialty: uploadSpecialty,
             summary: '',
             file_path: filePath,
@@ -177,20 +193,23 @@ export default function ProjectKnowledge() {
   const processDocument = async (docId: string, file: File | null, docName: string, specialty: string) => {
     setProcessingId(docId);
     try {
-      let pdf_base64: string | null = null;
+      let file_base64: string | null = null;
+      let file_type = 'application/pdf';
 
       if (file) {
+        file_type = getFileMimeType(file.name);
         const buffer = await file.arrayBuffer();
         const bytes = new Uint8Array(buffer);
         let binary = '';
         for (let i = 0; i < bytes.length; i++) {
           binary += String.fromCharCode(bytes[i]);
         }
-        pdf_base64 = btoa(binary);
+        file_base64 = btoa(binary);
       } else {
         // Download from storage
         const doc = documents.find(d => d.id === docId);
         if (doc?.file_path) {
+          file_type = getFileMimeType(doc.document_name);
           const { data: fileData } = await supabase.storage
             .from('project-knowledge')
             .download(doc.file_path);
@@ -201,12 +220,12 @@ export default function ProjectKnowledge() {
             for (let i = 0; i < bytes.length; i++) {
               binary += String.fromCharCode(bytes[i]);
             }
-            pdf_base64 = btoa(binary);
+            file_base64 = btoa(binary);
           }
         }
       }
 
-      if (!pdf_base64) {
+      if (!file_base64) {
         toast.error('Não foi possível ler o ficheiro');
         return;
       }
@@ -217,7 +236,8 @@ export default function ProjectKnowledge() {
           document_id: docId,
           document_name: docName,
           specialty,
-          pdf_base64,
+          file_base64,
+          file_type,
         },
       });
 
@@ -379,7 +399,7 @@ export default function ProjectKnowledge() {
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <BookOpen className="w-12 h-12 text-muted-foreground mb-4" />
                 <p className="text-muted-foreground">Nenhum documento carregado</p>
-                <p className="text-sm text-muted-foreground mt-1">Carregue PDFs para o Eng. Silva aprender sobre esta obra</p>
+                <p className="text-sm text-muted-foreground mt-1">Carregue documentos para o Eng. Silva aprender sobre esta obra</p>
               </CardContent>
             </Card>
           ) : (
@@ -514,20 +534,29 @@ export default function ProjectKnowledge() {
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-medium mb-2 block">Especialidade</label>
+              <label className="text-sm font-medium mb-2 block">Tipo de Documento</label>
               <Select value={uploadSpecialty} onValueChange={setUploadSpecialty}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Selecione a especialidade" />
+                  <SelectValue placeholder="Selecione o tipo de documento" />
                 </SelectTrigger>
                 <SelectContent>
-                  {SPECIALTIES.map(s => (
-                    <SelectItem key={s} value={s}>{s}</SelectItem>
-                  ))}
+                  <SelectGroup>
+                    <SelectLabel>Projectos e Especialidades</SelectLabel>
+                    {PROJECT_SPECIALTIES.map(s => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                  <SelectGroup>
+                    <SelectLabel>Documentos da Obra</SelectLabel>
+                    {DOCUMENT_TYPES.map(s => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                  </SelectGroup>
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <label className="text-sm font-medium mb-2 block">Ficheiros PDF</label>
+              <label className="text-sm font-medium mb-2 block">Ficheiros</label>
               <div
                 className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors"
                 onClick={() => document.getElementById('knowledge-file-input')?.click()}
@@ -536,12 +565,13 @@ export default function ProjectKnowledge() {
                 <p className="text-sm text-muted-foreground">
                   {uploadFiles.length > 0
                     ? `${uploadFiles.length} ficheiro(s) seleccionado(s)`
-                    : 'Clique para seleccionar PDFs'}
+                    : 'Arraste ficheiros para aqui'}
                 </p>
+                <p className="text-xs text-muted-foreground mt-1">PDF · JPG · PNG — máx. 2GB</p>
                 <input
                   id="knowledge-file-input"
                   type="file"
-                  accept=".pdf"
+                  accept=".pdf,.jpg,.jpeg,.png"
                   multiple
                   className="hidden"
                   onChange={(e) => setUploadFiles(Array.from(e.target.files || []))}
@@ -549,11 +579,14 @@ export default function ProjectKnowledge() {
               </div>
               {uploadFiles.length > 0 && (
                 <div className="mt-2 space-y-1">
-                  {uploadFiles.map((f, i) => (
-                    <p key={i} className="text-xs text-muted-foreground">
-                      📄 {f.name} ({formatFileSize(f.size)})
-                    </p>
-                  ))}
+                  {uploadFiles.map((f, i) => {
+                    const isImage = getFileMimeType(f.name).startsWith('image/');
+                    return (
+                      <p key={i} className="text-xs text-muted-foreground">
+                        {isImage ? '🖼️' : '📄'} {f.name} ({formatFileSize(f.size)})
+                      </p>
+                    );
+                  })}
                 </div>
               )}
             </div>
