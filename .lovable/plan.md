@@ -1,93 +1,52 @@
 
 
-# Fix: Mudar todas as políticas RLS de RESTRICTIVE para PERMISSIVE
+# Plan: "Aprovação de Materiais" (FAM-PDM) Page
 
-## Problema
+## Overview
+New tool page for material approval analysis using AI. Follows the same patterns as ProjectKnowledge (obra selection, file upload, edge function processing).
 
-Todas as políticas RLS nas tabelas `organizations` e `memberships` estão como **RESTRICTIVE** (`Permissive: No`). Em PostgreSQL, políticas RESTRICTIVE exigem que TODAS passem (lógica AND), enquanto PERMISSIVE exige que QUALQUER uma passe (lógica OR). Isto bloqueia a criação de organizações.
+## Changes
 
-## Migração SQL (um único ficheiro)
+### 1. Database Migration
+- Create `material_approvals` table with columns for PDM/MQT files, AI analysis (JSONB), status, reviewer notes, final decision
+- Use validation trigger instead of CHECK constraint for status (to avoid immutability issues)
+- RLS: user-owned CRUD (`auth.uid() = user_id`)
+- Create `material-approvals` storage bucket (private) with authenticated user RLS
 
-```sql
--- ============================================
--- FIX: Mudar políticas de RESTRICTIVE para PERMISSIVE
--- ============================================
+### 2. Edge Function `supabase/functions/analyze-material-approval/index.ts`
+- Receives `approval_id`, `pdm_base64`, optional `mqt_base64`, `material_category`, `obra_id`, `user_id`
+- Loads project knowledge from `eng_silva_project_knowledge` for context
+- Sends PDM + MQT PDFs to Claude claude-sonnet-4-5 with structured analysis prompt
+- Extracts: recommendation, compliance checks, issues, conditions, norms
+- Updates `material_approvals` record with results
+- Saves summary to Eng. Silva memory via `eng-silva-memory` function
+- Add to `config.toml` with `verify_jwt = false`
 
--- 1. DROP todas as políticas da tabela organizations
-DROP POLICY IF EXISTS "Authenticated users can create organizations" ON public.organizations;
-DROP POLICY IF EXISTS "Members can view their organizations" ON public.organizations;
-DROP POLICY IF EXISTS "Admins can update organizations" ON public.organizations;
-DROP POLICY IF EXISTS "Admins can delete organizations" ON public.organizations;
+### 3. New Page `src/pages/app/MaterialApprovals.tsx`
+- Route: `/app/material-approvals`
+- Reuses `incompaticheck_obras` for obra selection (same pattern as ProjectKnowledge)
+- Stats bar: total, approved, approved w/ reservations, rejected, pending
+- Upload modal: category dropdown (14 options), PDM file upload, optional MQT file upload
+- Approval cards list: category badge, filename, date, status badge (color-coded)
+- Expandable analysis view: material proposed/specified, compliance checks table, issues, conditions, justification, norms, confidence bar
+- Action buttons: Confirm Approval / Confirm w/ Reservations / Reject / Add Notes
+- Processing flow: upload → insert record → download & base64 → call edge function → update status
 
--- 2. Recriar como PERMISSIVE (default)
-CREATE POLICY "Authenticated users can create organizations"
-  ON public.organizations FOR INSERT
-  TO authenticated
-  WITH CHECK (auth.uid() IS NOT NULL);
+### 4. Route + Sidebar
+- Add route in `App.tsx`
+- Add sidebar item under "Ferramentas" in `AppSidebar.tsx` with `ClipboardCheck` icon (but use `FileCheck` to avoid conflict with existing ClipboardCheck usage) and label "Aprovação de Materiais"
 
-CREATE POLICY "Members can view their organizations"
-  ON public.organizations FOR SELECT
-  TO authenticated
-  USING (is_org_member(auth.uid(), id));
+## Files
+1. **Migration SQL** — table + storage bucket + RLS + validation trigger
+2. **Create** `supabase/functions/analyze-material-approval/index.ts`
+3. **Edit** `supabase/config.toml`
+4. **Create** `src/pages/app/MaterialApprovals.tsx`
+5. **Edit** `src/App.tsx` — add route
+6. **Edit** `src/components/layout/AppSidebar.tsx` — add sidebar link
 
-CREATE POLICY "Admins can update organizations"
-  ON public.organizations FOR UPDATE
-  TO authenticated
-  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
-
-CREATE POLICY "Admins can delete organizations"
-  ON public.organizations FOR DELETE
-  TO authenticated
-  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
-
--- 3. DROP todas as políticas da tabela memberships
-DROP POLICY IF EXISTS "Users can insert memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Admins can insert memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Members can view memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Admins can update memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Admins can delete memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Users can view own memberships" ON public.memberships;
-
--- 4. Recriar TODAS as políticas de memberships como PERMISSIVE
-CREATE POLICY "Users can insert memberships"
-  ON public.memberships FOR INSERT
-  TO authenticated
-  WITH CHECK (
-    auth.uid() = user_id
-    AND (
-      has_org_role(auth.uid(), org_id, 'admin'::membership_role)
-      OR NOT EXISTS (
-        SELECT 1 FROM public.memberships m
-        WHERE m.org_id = memberships.org_id
-      )
-    )
-  );
-
-CREATE POLICY "Members can view memberships"
-  ON public.memberships FOR SELECT
-  TO authenticated
-  USING (
-    auth.uid() = user_id
-    OR has_org_role(auth.uid(), org_id, 'admin'::membership_role)
-  );
-
-CREATE POLICY "Admins can update memberships"
-  ON public.memberships FOR UPDATE
-  TO authenticated
-  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
-
-CREATE POLICY "Admins can delete memberships"
-  ON public.memberships FOR DELETE
-  TO authenticated
-  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
-```
-
-## Resumo
-
-| Tabela | Acção |
-|---|---|
-| `organizations` | Drop 4 políticas RESTRICTIVE, recriar 4 como PERMISSIVE |
-| `memberships` | Drop todas as políticas, recriar 4 como PERMISSIVE (INSERT, SELECT, UPDATE, DELETE) |
-
-Nenhuma alteração de código necessária — apenas a migração da base de dados.
+## Notes
+- No existing code modified except adding route + sidebar entry
+- Uses ANTHROPIC_API_KEY (already configured)
+- Status validation via trigger, not CHECK constraint
+- Eng. Silva memory integration: saves approval summaries for voice conversations
 
