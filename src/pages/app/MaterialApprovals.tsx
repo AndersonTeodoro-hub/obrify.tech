@@ -3,7 +3,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -11,8 +11,9 @@ import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import {
-  FileCheck, Plus, Upload, ChevronDown, ChevronUp, Trash2, CheckCircle2, AlertTriangle, XCircle, Clock, Loader2, Building2, ArrowLeft,
+  FileCheck, Plus, Upload, ChevronDown, ChevronUp, Trash2, CheckCircle2, AlertTriangle, XCircle, Clock, Loader2, Building2, ArrowLeft, FileText, Award, Factory, X, Download,
 } from 'lucide-react';
+import { generateMaterialApprovalPDF } from '@/utils/material-approval-pdf';
 
 const CATEGORIES = [
   'Betão (classes)', 'Aço (armaduras)', 'Cofragem', 'Impermeabilização',
@@ -28,6 +29,8 @@ type Approval = {
   material_category: string; status: string; ai_analysis: any; ai_recommendation: string | null;
   reviewer_notes: string | null; final_decision: string | null; decided_by: string | null;
   decided_at: string | null; created_at: string; updated_at: string;
+  certificates?: Array<{ name: string; path: string; size: number }>;
+  manufacturer_docs?: Array<{ name: string; path: string; size: number }>;
 };
 
 export default function MaterialApprovals() {
@@ -42,7 +45,8 @@ export default function MaterialApprovals() {
   const [newModalOpen, setNewModalOpen] = useState(false);
   const [category, setCategory] = useState('');
   const [pdmFile, setPdmFile] = useState<File | null>(null);
-  const [mqtFile, setMqtFile] = useState<File | null>(null);
+  const [certFiles, setCertFiles] = useState<File[]>([]);
+  const [mfgFiles, setMfgFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   // Expanded card
@@ -86,45 +90,61 @@ export default function MaterialApprovals() {
     } catch {}
   };
 
+  const sanitizeFilename = (name: string) => name.replace(/[^a-zA-Z0-9._-]/g, '_');
+
   // Submit new approval
   const handleSubmit = async () => {
     if (!user || !selectedObra || !pdmFile || !category) return;
     setSubmitting(true);
     try {
       const ts = Date.now();
-      const pdmPath = `${user.id}/${selectedObra.id}/${ts}_pdm_${pdmFile.name}`;
+      const basePath = `${user.id}/${selectedObra.id}/${ts}`;
+
+      // 1. Upload PAM
+      const pdmPath = `${basePath}_pam_${sanitizeFilename(pdmFile.name)}`;
       const { error: upErr } = await supabase.storage.from('material-approvals').upload(pdmPath, pdmFile);
       if (upErr) throw upErr;
 
-      let mqtPath: string | null = null;
-      if (mqtFile) {
-        mqtPath = `${user.id}/${selectedObra.id}/${ts}_mqt_${mqtFile.name}`;
-        const { error: mqtErr } = await supabase.storage.from('material-approvals').upload(mqtPath, mqtFile);
-        if (mqtErr) throw mqtErr;
+      // 2. Upload certificates
+      const certificatesJson: Array<{ name: string; path: string; size: number }> = [];
+      for (const cf of certFiles) {
+        const cfPath = `${basePath}_cert_${sanitizeFilename(cf.name)}`;
+        const { error } = await supabase.storage.from('material-approvals').upload(cfPath, cf);
+        if (error) throw error;
+        certificatesJson.push({ name: cf.name, path: cfPath, size: cf.size });
       }
 
+      // 3. Upload manufacturer docs
+      const mfgDocsJson: Array<{ name: string; path: string; size: number }> = [];
+      for (const mf of mfgFiles) {
+        const mfPath = `${basePath}_mfg_${sanitizeFilename(mf.name)}`;
+        const { error } = await supabase.storage.from('material-approvals').upload(mfPath, mf);
+        if (error) throw error;
+        mfgDocsJson.push({ name: mf.name, path: mfPath, size: mf.size });
+      }
+
+      // 4. Insert record
       const { data: record, error: insErr } = await supabase.from('material_approvals').insert({
         obra_id: selectedObra.id,
         user_id: user.id,
         pdm_name: pdmFile.name,
         pdm_file_path: pdmPath,
         pdm_file_size: pdmFile.size,
-        mqt_name: mqtFile?.name || null,
-        mqt_file_path: mqtPath,
-        mqt_file_size: mqtFile?.size || null,
         material_category: category,
         status: 'pending',
+        certificates: certificatesJson as any,
+        manufacturer_docs: mfgDocsJson as any,
       }).select().single();
       if (insErr) throw insErr;
 
       setNewModalOpen(false);
       setPdmFile(null);
-      setMqtFile(null);
+      setCertFiles([]);
+      setMfgFiles([]);
       setCategory('');
       toast.success('Pedido criado. A iniciar análise...');
       await loadApprovals();
 
-      // Process in background
       processApproval(record as unknown as Approval);
     } catch (err: any) {
       toast.error('Erro ao submeter: ' + err.message);
@@ -135,21 +155,43 @@ export default function MaterialApprovals() {
 
   const processApproval = async (approval: Approval) => {
     try {
+      // Download PAM
       const { data: pdmData } = await supabase.storage.from('material-approvals').download(approval.pdm_file_path);
       if (!pdmData) throw new Error('Failed to download PAM');
       const pdmBase64 = await blobToBase64(pdmData);
 
-      let mqtBase64: string | null = null;
-      if (approval.mqt_file_path) {
-        const { data: mqtData } = await supabase.storage.from('material-approvals').download(approval.mqt_file_path);
-        if (mqtData) mqtBase64 = await blobToBase64(mqtData);
+      // Download certificates
+      const certificatesBase64: Array<{ name: string; base64: string; type: string }> = [];
+      const certs = (approval as any).certificates || [];
+      for (const cert of certs) {
+        try {
+          const { data } = await supabase.storage.from('material-approvals').download(cert.path);
+          if (data) {
+            const b64 = await blobToBase64(data);
+            certificatesBase64.push({ name: cert.name, base64: b64, type: data.type });
+          }
+        } catch { /* skip failed downloads */ }
+      }
+
+      // Download manufacturer docs
+      const mfgDocsBase64: Array<{ name: string; base64: string; type: string }> = [];
+      const mfgDocs = (approval as any).manufacturer_docs || [];
+      for (const mdoc of mfgDocs) {
+        try {
+          const { data } = await supabase.storage.from('material-approvals').download(mdoc.path);
+          if (data) {
+            const b64 = await blobToBase64(data);
+            mfgDocsBase64.push({ name: mdoc.name, base64: b64, type: data.type });
+          }
+        } catch { /* skip failed downloads */ }
       }
 
       await supabase.functions.invoke('analyze-material-approval', {
         body: {
           approval_id: approval.id,
           pdm_base64: pdmBase64,
-          mqt_base64: mqtBase64,
+          certificates_base64: certificatesBase64,
+          manufacturer_docs_base64: mfgDocsBase64,
           material_category: approval.material_category,
           obra_id: approval.obra_id,
           user_id: user!.id,
@@ -191,10 +233,16 @@ export default function MaterialApprovals() {
     await loadApprovals();
   };
 
-  const handleDelete = async (id: string, pdmPath: string, mqtPath: string | null) => {
-    await supabase.storage.from('material-approvals').remove([pdmPath]);
-    if (mqtPath) await supabase.storage.from('material-approvals').remove([mqtPath]);
-    await supabase.from('material_approvals').delete().eq('id', id);
+  const handleDelete = async (approval: Approval) => {
+    const pathsToRemove = [approval.pdm_file_path];
+    if (approval.mqt_file_path) pathsToRemove.push(approval.mqt_file_path);
+    const certs = (approval as any).certificates || [];
+    certs.forEach((c: any) => { if (c.path) pathsToRemove.push(c.path); });
+    const mfgDocs = (approval as any).manufacturer_docs || [];
+    mfgDocs.forEach((m: any) => { if (m.path) pathsToRemove.push(m.path); });
+
+    await supabase.storage.from('material-approvals').remove(pathsToRemove);
+    await supabase.from('material_approvals').delete().eq('id', approval.id);
     toast.success('Pedido eliminado');
     await loadApprovals();
   };
@@ -220,6 +268,84 @@ export default function MaterialApprovals() {
     }
   };
 
+  // Upload box component
+  const UploadBox = ({ icon: Icon, title, subtitle, accept, multiple, files, onFilesChange }: {
+    icon: any; title: string; subtitle: string; accept: string; multiple?: boolean;
+    files: File | File[] | null; onFilesChange: (files: File | File[] | null) => void;
+  }) => {
+    const inputId = `upload-${title.replace(/\s/g, '')}`;
+    const fileList = Array.isArray(files) ? files : files ? [files] : [];
+
+    return (
+      <div>
+        <div
+          className="border-2 border-dashed border-border rounded-lg p-4 cursor-pointer hover:border-primary/50 transition flex items-center gap-3"
+          style={{ minHeight: '72px' }}
+          onClick={() => document.getElementById(inputId)?.click()}
+          onDragOver={e => e.preventDefault()}
+          onDrop={e => {
+            e.preventDefault();
+            const droppedFiles = Array.from(e.dataTransfer.files);
+            if (multiple) {
+              onFilesChange([...(Array.isArray(files) ? files : []), ...droppedFiles]);
+            } else {
+              onFilesChange(droppedFiles[0] || null);
+            }
+          }}
+        >
+          <input
+            id={inputId}
+            type="file"
+            accept={accept}
+            multiple={multiple}
+            className="hidden"
+            onChange={e => {
+              const selected = Array.from(e.target.files || []);
+              if (multiple) {
+                onFilesChange([...(Array.isArray(files) ? files : []), ...selected]);
+              } else {
+                onFilesChange(selected[0] || null);
+              }
+              e.target.value = '';
+            }}
+          />
+          <Icon className="w-6 h-6 text-muted-foreground shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground">{title}</p>
+            <p className="text-xs text-muted-foreground">{subtitle}</p>
+          </div>
+          <Upload className="w-4 h-4 text-muted-foreground shrink-0" />
+        </div>
+        {fileList.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {fileList.map((f, i) => (
+              <div key={i} className="flex items-center gap-2 text-sm bg-muted/50 rounded px-3 py-1.5">
+                <FileText className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                <span className="flex-1 truncate text-foreground">{f.name}</span>
+                <span className="text-xs text-muted-foreground">{(f.size / 1024 / 1024).toFixed(1)} MB</span>
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    if (multiple && Array.isArray(files)) {
+                      const updated = [...files];
+                      updated.splice(i, 1);
+                      onFilesChange(updated);
+                    } else {
+                      onFilesChange(null);
+                    }
+                  }}
+                  className="text-muted-foreground hover:text-destructive transition"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // No obra selected
   if (!selectedObra) {
     return (
@@ -228,7 +354,7 @@ export default function MaterialApprovals() {
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
             <FileCheck className="w-7 h-7 text-primary" /> Aprovação de Materiais
           </h1>
-          <p className="text-muted-foreground mt-1">Análise automática de PAM/FAM com base no projecto</p>
+          <p className="text-muted-foreground mt-1">Análise automática de PAM com base no projecto</p>
         </div>
         <Card className="max-w-lg mx-auto mt-12">
           <CardContent className="p-8 text-center space-y-4">
@@ -432,25 +558,35 @@ export default function MaterialApprovals() {
                         )}
 
                         {/* Action buttons */}
-                        {!a.final_decision && (
-                          <div className="flex flex-wrap gap-2">
-                            <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => { setDecisionId(a.id); handleDecision(a.id, 'approved'); }}>
-                              <CheckCircle2 className="w-3 h-3 mr-1" /> Confirmar Aprovação
-                            </Button>
-                            <Button size="sm" className="bg-amber-500 hover:bg-amber-600 text-white" onClick={() => { setDecisionId(a.id); handleDecision(a.id, 'approved_with_reservations'); }}>
-                              <AlertTriangle className="w-3 h-3 mr-1" /> Aprovar c/ Reservas
-                            </Button>
-                            <Button size="sm" variant="destructive" onClick={() => { setDecisionId(a.id); handleDecision(a.id, 'rejected'); }}>
-                              <XCircle className="w-3 h-3 mr-1" /> Rejeitar
-                            </Button>
-                            <Button size="sm" variant="outline" onClick={() => setDecisionId(a.id)}>Adicionar Notas</Button>
-                          </div>
-                        )}
+                        <div className="flex flex-wrap gap-2">
+                          {!a.final_decision && (
+                            <>
+                              <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => { setDecisionId(a.id); handleDecision(a.id, 'approved'); }}>
+                                <CheckCircle2 className="w-3 h-3 mr-1" /> Confirmar Aprovação
+                              </Button>
+                              <Button size="sm" className="bg-amber-500 hover:bg-amber-600 text-white" onClick={() => { setDecisionId(a.id); handleDecision(a.id, 'approved_with_reservations'); }}>
+                                <AlertTriangle className="w-3 h-3 mr-1" /> Aprovar c/ Reservas
+                              </Button>
+                              <Button size="sm" variant="destructive" onClick={() => { setDecisionId(a.id); handleDecision(a.id, 'rejected'); }}>
+                                <XCircle className="w-3 h-3 mr-1" /> Rejeitar
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => setDecisionId(a.id)}>Adicionar Notas</Button>
+                            </>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1"
+                            onClick={() => generateMaterialApprovalPDF(a, analysis, selectedObra.nome)}
+                          >
+                            <Download className="w-3 h-3" /> Exportar PDF
+                          </Button>
+                        </div>
                       </>
                     )}
 
                     <div className="flex justify-end">
-                      <Button size="sm" variant="ghost" className="text-destructive" onClick={() => handleDelete(a.id, a.pdm_file_path, a.mqt_file_path)}>
+                      <Button size="sm" variant="ghost" className="text-destructive" onClick={() => handleDelete(a)}>
                         <Trash2 className="w-3 h-3 mr-1" /> Eliminar
                       </Button>
                     </div>
@@ -476,41 +612,39 @@ export default function MaterialApprovals() {
                 </SelectContent>
               </Select>
             </div>
-            <div>
-              <label className="text-sm font-medium text-foreground">PAM / Ficha Técnica *</label>
-              <div
-                className="mt-1 border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition"
-                onClick={() => document.getElementById('pdm-input')?.click()}
-                onDragOver={e => e.preventDefault()}
-                onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f?.type === 'application/pdf') setPdmFile(f); }}
-              >
-                <input id="pdm-input" type="file" accept=".pdf" className="hidden" onChange={e => { if (e.target.files?.[0]) setPdmFile(e.target.files[0]); }} />
-                {pdmFile ? (
-                  <p className="text-sm text-foreground">{pdmFile.name} ({(pdmFile.size / 1024 / 1024).toFixed(1)} MB)</p>
-                ) : (
-                  <>
-                    <Upload className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
-                    <p className="text-sm text-muted-foreground">Arraste o PDF do pedido de aprovação (PAM) ou ficha técnica</p>
-                  </>
-                )}
-              </div>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-foreground">MQT / Caderno de Encargos (opcional)</label>
-              <div
-                className="mt-1 border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition"
-                onClick={() => document.getElementById('mqt-input')?.click()}
-                onDragOver={e => e.preventDefault()}
-                onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f?.type === 'application/pdf') setMqtFile(f); }}
-              >
-                <input id="mqt-input" type="file" accept=".pdf" className="hidden" onChange={e => { if (e.target.files?.[0]) setMqtFile(e.target.files[0]); }} />
-                {mqtFile ? (
-                  <p className="text-sm text-foreground">{mqtFile.name} ({(mqtFile.size / 1024 / 1024).toFixed(1)} MB)</p>
-                ) : (
-                  <p className="text-sm text-muted-foreground">Arraste o MQT ou caderno de encargos para comparação</p>
-                )}
-              </div>
-            </div>
+
+            <UploadBox
+              icon={FileText}
+              title="PAM / Ficha Técnica *"
+              subtitle="PDF do pedido de aprovação do empreiteiro"
+              accept=".pdf"
+              files={pdmFile}
+              onFilesChange={(f) => setPdmFile(f as File | null)}
+            />
+
+            <UploadBox
+              icon={Award}
+              title="Certificados e Laudos"
+              subtitle="Certificados CE, laudos, relatórios de ensaio"
+              accept=".pdf,.jpg,.jpeg,.png"
+              multiple
+              files={certFiles}
+              onFilesChange={(f) => setCertFiles(f as File[])}
+            />
+
+            <UploadBox
+              icon={Factory}
+              title="Documentos do Fabricante"
+              subtitle="Fichas técnicas, catálogos, declarações de desempenho"
+              accept=".pdf,.jpg,.jpeg,.png"
+              multiple
+              files={mfgFiles}
+              onFilesChange={(f) => setMfgFiles(f as File[])}
+            />
+
+            <p className="text-xs text-muted-foreground bg-muted/50 rounded-lg p-3">
+              💡 O MQT e o Contrato são consultados automaticamente a partir do Conhecimento do Projecto.
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setNewModalOpen(false)}>Cancelar</Button>
