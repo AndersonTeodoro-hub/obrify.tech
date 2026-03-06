@@ -477,7 +477,7 @@ export default function MaterialApprovals() {
               </Select>
             </div>
             <div>
-              <label className="text-sm font-medium text-foreground">PDM / Ficha Técnica *</label>
+              <label className="text-sm font-medium text-foreground">PAM / Ficha Técnica *</label>
               <div
                 className="mt-1 border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition"
                 onClick={() => document.getElementById('pdm-input')?.click()}
