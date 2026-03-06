@@ -50,6 +50,7 @@ LIMITES:
 IMPORTANTE: Estás numa conversa por VOZ. Responde sempre como se estivesses ao telefone com um colega. Curto, directo, natural. Nada de texto formatado.`;
 
 function buildSystemPrompt(memory: { profile: any; summaries: any[] }, projectKnowledge: any[]): string {
+  console.log("ENG-SILVA: Building prompt with", projectKnowledge.length, "knowledge docs");
   let prompt = BASE_SYSTEM_PROMPT;
 
   const { profile, summaries } = memory;
