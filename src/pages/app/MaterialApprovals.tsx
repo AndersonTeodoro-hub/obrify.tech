@@ -230,6 +230,14 @@ export default function MaterialApprovals() {
         } catch { /* skip failed downloads */ }
       }
 
+      console.log("PAM: Sending to edge function:", JSON.stringify({
+        has_pdm: !!pdmBase64,
+        has_mqt: !!mqtBase64,
+        has_contract: !!contractBase64,
+        certs: certificatesBase64.length,
+        mfg_docs: mfgDocsBase64.length,
+      }));
+
       await supabase.functions.invoke('analyze-material-approval', {
         body: {
           approval_id: approval.id,
