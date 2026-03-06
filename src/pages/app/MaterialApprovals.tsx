@@ -136,7 +136,7 @@ export default function MaterialApprovals() {
   const processApproval = async (approval: Approval) => {
     try {
       const { data: pdmData } = await supabase.storage.from('material-approvals').download(approval.pdm_file_path);
-      if (!pdmData) throw new Error('Failed to download PDM');
+      if (!pdmData) throw new Error('Failed to download PAM');
       const pdmBase64 = await blobToBase64(pdmData);
 
       let mqtBase64: string | null = null;
