@@ -49,7 +49,7 @@ LIMITES:
 
 IMPORTANTE: Estás numa conversa por VOZ. Responde sempre como se estivesses ao telefone com um colega. Curto, directo, natural. Nada de texto formatado.`;
 
-function buildSystemPrompt(memory: { profile: any; summaries: any[] }): string {
+function buildSystemPrompt(memory: { profile: any; summaries: any[] }, projectKnowledge: any[]): string {
   let prompt = BASE_SYSTEM_PROMPT;
 
   const { profile, summaries } = memory;
@@ -82,6 +82,32 @@ Tens acesso aos resultados da análise de incompatibilidades feita pelo Incompat
 - Podes sugerir a ordem de prioridade para resolver os problemas (alta primeiro)
 - Fala naturalmente como se tivesses analisado os projectos tu próprio`;
     }
+  }
+
+  // Project knowledge injection
+  if (projectKnowledge && projectKnowledge.length > 0) {
+    const limited = projectKnowledge.slice(0, 15);
+    prompt += `\n\nCONHECIMENTO COMPLETO DO PROJECTO (${limited.length} documentos analisados):`;
+
+    const bySpecialty: Record<string, any[]> = {};
+    limited.forEach(doc => {
+      if (!bySpecialty[doc.specialty]) bySpecialty[doc.specialty] = [];
+      bySpecialty[doc.specialty].push(doc);
+    });
+
+    Object.entries(bySpecialty).forEach(([specialty, docs]) => {
+      prompt += `\n\n--- ${specialty.toUpperCase()} ---`;
+      docs.forEach(doc => {
+        const shortSummary = doc.summary.split(' ').slice(0, 150).join(' ');
+        prompt += `\n📄 ${doc.document_name}: ${shortSummary}`;
+        if (doc.key_elements && doc.key_elements.length > 0) {
+          const elements = doc.key_elements.slice(0, 8);
+          prompt += `\n   Elementos: ${elements.map((e: any) => `${e.type} ${e.id}`).join(', ')}`;
+        }
+      });
+    });
+
+    prompt += `\n\nTens conhecimento completo do projecto. Quando o fiscal perguntar sobre qualquer elemento (pilares, sapatas, tubagens, cotas, eixos), responde com precisão usando esta informação. Refere os documentos de origem quando relevante. Não digas que não tens informação se ela está aqui.`;
   }
 
   prompt += `\n\nEXTRAÇÃO DE PERFIL:
