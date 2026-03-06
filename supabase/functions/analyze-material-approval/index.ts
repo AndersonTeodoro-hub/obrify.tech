@@ -68,7 +68,7 @@ serve(async (req) => {
 
     content.push({
       type: "text",
-      text: `Analisa este Pedido de Aprovação de Material (PDM/FAM) para a categoria "${material_category}".
+      text: `Analisa este Pedido de Aprovação de Materiais (PAM/FAM) para a categoria "${material_category}".
 ${projectContext}
 
 Compara o material proposto no PDM com:
