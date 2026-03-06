@@ -1,31 +1,93 @@
 
 
-# Plan: Improve eng-silva-knowledge Edge Function Reliability
+# Fix: Mudar todas as políticas RLS de RESTRICTIVE para PERMISSIVE
 
-## File: `supabase/functions/eng-silva-knowledge/index.ts`
+## Problema
 
-### 1. Add `callClaudeWithRetry` helper function (before `serve()`)
-- Retry loop with max 3 attempts, exponential backoff (2s × attempt)
-- Moves the Claude API call logic out of the main handler
-- Includes the "JSON only" instruction in the system prompt
-- `max_tokens` increased from 4000 to 6000
+Todas as políticas RLS nas tabelas `organizations` e `memberships` estão como **RESTRICTIVE** (`Permissive: No`). Em PostgreSQL, políticas RESTRICTIVE exigem que TODAS passem (lógica AND), enquanto PERMISSIVE exige que QUALQUER uma passe (lógica OR). Isto bloqueia a criação de organizações.
 
-### 2. Update analysis prompt (line 53-71)
-- Change "máximo 300 palavras" → "máximo 500 palavras"
-- Add paragraph for contracts/cadernos de encargos/memórias descritivas requesting extraction of parties, values, deadlines, conditions, material specs, penalties, etc.
+## Migração SQL (um único ficheiro)
 
-### 3. Replace JSON parsing block (lines 98-104) with robust 3-tier fallback
-- Tier 1: Standard `JSON.parse` after cleaning markdown
-- Tier 2: Regex extract `{...}` from response
-- Tier 3: Use raw text as summary (capped at 2000 chars)
-- After parsing: validate summary quality — if too short or equals the old error message, fire a simpler fallback prompt (plain text, no JSON) via `callClaudeWithRetry` with 2 attempts
+```sql
+-- ============================================
+-- FIX: Mudar políticas de RESTRICTIVE para PERMISSIVE
+-- ============================================
 
-### 4. Update DB record write (lines 106-114)
-- Always update even if partial — set `document_type` to `full_analysis`, `text_summary`, or `minimal` based on result quality
-- Default summary: "Documento carregado. Análise pendente."
+-- 1. DROP todas as políticas da tabela organizations
+DROP POLICY IF EXISTS "Authenticated users can create organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Members can view their organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can update organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can delete organizations" ON public.organizations;
 
-### 5. Image file handling already works (lines 37-49)
-- Add extra normalization for `file_type` values like `'jpg'`/`'png'` (not full MIME) to convert to `image/jpeg`/`image/png`
+-- 2. Recriar como PERMISSIVE (default)
+CREATE POLICY "Authenticated users can create organizations"
+  ON public.organizations FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() IS NOT NULL);
 
-Single file edit. No DB migration needed — `document_type` column already exists on `eng_silva_project_knowledge`.
+CREATE POLICY "Members can view their organizations"
+  ON public.organizations FOR SELECT
+  TO authenticated
+  USING (is_org_member(auth.uid(), id));
+
+CREATE POLICY "Admins can update organizations"
+  ON public.organizations FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+
+CREATE POLICY "Admins can delete organizations"
+  ON public.organizations FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+
+-- 3. DROP todas as políticas da tabela memberships
+DROP POLICY IF EXISTS "Users can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Members can view memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can update memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can delete memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Users can view own memberships" ON public.memberships;
+
+-- 4. Recriar TODAS as políticas de memberships como PERMISSIVE
+CREATE POLICY "Users can insert memberships"
+  ON public.memberships FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+    AND (
+      has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+      OR NOT EXISTS (
+        SELECT 1 FROM public.memberships m
+        WHERE m.org_id = memberships.org_id
+      )
+    )
+  );
+
+CREATE POLICY "Members can view memberships"
+  ON public.memberships FOR SELECT
+  TO authenticated
+  USING (
+    auth.uid() = user_id
+    OR has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+  );
+
+CREATE POLICY "Admins can update memberships"
+  ON public.memberships FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+
+CREATE POLICY "Admins can delete memberships"
+  ON public.memberships FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+```
+
+## Resumo
+
+| Tabela | Acção |
+|---|---|
+| `organizations` | Drop 4 políticas RESTRICTIVE, recriar 4 como PERMISSIVE |
+| `memberships` | Drop todas as políticas, recriar 4 como PERMISSIVE (INSERT, SELECT, UPDATE, DELETE) |
+
+Nenhuma alteração de código necessária — apenas a migração da base de dados.
 
