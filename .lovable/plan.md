@@ -1,58 +1,93 @@
 
 
-# Fix: analyze-material-approval Edge Function Robustness
+# Fix: Mudar todas as políticas RLS de RESTRICTIVE para PERMISSIVE
 
-The function code structure is sound but lacks defensive handling for missing/optional parameters. The client-side (`processApproval`) correctly sends `user_id`, `certificates_base64`, and `manufacturer_docs_base64`, but the edge function should handle cases where these are missing or malformed.
+## Problema
 
-## Changes to `supabase/functions/analyze-material-approval/index.ts`
+Todas as políticas RLS nas tabelas `organizations` e `memberships` estão como **RESTRICTIVE** (`Permissive: No`). Em PostgreSQL, políticas RESTRICTIVE exigem que TODAS passem (lógica AND), enquanto PERMISSIVE exige que QUALQUER uma passe (lógica OR). Isto bloqueia a criação de organizações.
 
-1. **Parse request body with defaults** — destructure with fallback empty arrays for optional fields
-2. **Wrap knowledge query in try-catch** — prevent crash if query fails
-3. **Add diagnostic logging** at entry point with request shape
-4. **Guard against missing `user_id`** — skip knowledge query if no user_id provided
-5. **Ensure outer try-catch logs error details clearly**
+## Migração SQL (um único ficheiro)
 
-Specific edits (lines 53-69):
+```sql
+-- ============================================
+-- FIX: Mudar políticas de RESTRICTIVE para PERMISSIVE
+-- ============================================
 
-```typescript
-const body = await req.json();
-const approval_id = body.approval_id;
-const pdm_base64 = body.pdm_base64;
-const certificates_base64 = body.certificates_base64 || [];
-const manufacturer_docs_base64 = body.manufacturer_docs_base64 || [];
-const material_category = body.material_category;
-const obra_id = body.obra_id;
-const user_id = body.user_id;
+-- 1. DROP todas as políticas da tabela organizations
+DROP POLICY IF EXISTS "Authenticated users can create organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Members can view their organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can update organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can delete organizations" ON public.organizations;
 
-console.log("PAM: Request received:", JSON.stringify({
-  approval_id, obra_id, material_category,
-  has_pdm: !!pdm_base64,
-  certs: certificates_base64?.length || 0,
-  mfg_docs: manufacturer_docs_base64?.length || 0,
-  has_user_id: !!user_id,
-}));
+-- 2. Recriar como PERMISSIVE (default)
+CREATE POLICY "Authenticated users can create organizations"
+  ON public.organizations FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() IS NOT NULL);
+
+CREATE POLICY "Members can view their organizations"
+  ON public.organizations FOR SELECT
+  TO authenticated
+  USING (is_org_member(auth.uid(), id));
+
+CREATE POLICY "Admins can update organizations"
+  ON public.organizations FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+
+CREATE POLICY "Admins can delete organizations"
+  ON public.organizations FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+
+-- 3. DROP todas as políticas da tabela memberships
+DROP POLICY IF EXISTS "Users can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Members can view memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can update memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can delete memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Users can view own memberships" ON public.memberships;
+
+-- 4. Recriar TODAS as políticas de memberships como PERMISSIVE
+CREATE POLICY "Users can insert memberships"
+  ON public.memberships FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+    AND (
+      has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+      OR NOT EXISTS (
+        SELECT 1 FROM public.memberships m
+        WHERE m.org_id = memberships.org_id
+      )
+    )
+  );
+
+CREATE POLICY "Members can view memberships"
+  ON public.memberships FOR SELECT
+  TO authenticated
+  USING (
+    auth.uid() = user_id
+    OR has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+  );
+
+CREATE POLICY "Admins can update memberships"
+  ON public.memberships FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+
+CREATE POLICY "Admins can delete memberships"
+  ON public.memberships FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
 ```
 
-Replace knowledge query (lines 64-69) with try-catch:
+## Resumo
 
-```typescript
-let knowledge: any[] = [];
-try {
-  if (obra_id && user_id) {
-    const { data } = await supabase
-      .from("eng_silva_project_knowledge")
-      .select("document_name, specialty, summary, key_elements")
-      .eq("obra_id", obra_id)
-      .eq("user_id", user_id)
-      .eq("processed", true);
-    knowledge = data || [];
-  }
-} catch (err) {
-  console.error("PAM: Knowledge load failed:", err);
-}
-```
+| Tabela | Acção |
+|---|---|
+| `organizations` | Drop 4 políticas RESTRICTIVE, recriar 4 como PERMISSIVE |
+| `memberships` | Drop todas as políticas, recriar 4 como PERMISSIVE (INSERT, SELECT, UPDATE, DELETE) |
 
-Then use `knowledge` variable (already an array) in the existing context-building loop — just change `if (knowledge &&` to `if (knowledge.length > 0)`.
-
-No changes needed to the client-side code — it already sends all required fields correctly.
+Nenhuma alteração de código necessária — apenas a migração da base de dados.
 
