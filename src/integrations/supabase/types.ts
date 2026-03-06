@@ -1751,6 +1751,72 @@ export type Database = {
           },
         ]
       }
+      material_approvals: {
+        Row: {
+          ai_analysis: Json | null
+          ai_recommendation: string | null
+          created_at: string | null
+          decided_at: string | null
+          decided_by: string | null
+          final_decision: string | null
+          id: string
+          material_category: string
+          mqt_file_path: string | null
+          mqt_file_size: number | null
+          mqt_name: string | null
+          obra_id: string
+          pdm_file_path: string
+          pdm_file_size: number | null
+          pdm_name: string
+          reviewer_notes: string | null
+          status: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          ai_analysis?: Json | null
+          ai_recommendation?: string | null
+          created_at?: string | null
+          decided_at?: string | null
+          decided_by?: string | null
+          final_decision?: string | null
+          id?: string
+          material_category: string
+          mqt_file_path?: string | null
+          mqt_file_size?: number | null
+          mqt_name?: string | null
+          obra_id: string
+          pdm_file_path: string
+          pdm_file_size?: number | null
+          pdm_name: string
+          reviewer_notes?: string | null
+          status?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          ai_analysis?: Json | null
+          ai_recommendation?: string | null
+          created_at?: string | null
+          decided_at?: string | null
+          decided_by?: string | null
+          final_decision?: string | null
+          id?: string
+          material_category?: string
+          mqt_file_path?: string | null
+          mqt_file_size?: number | null
+          mqt_name?: string | null
+          obra_id?: string
+          pdm_file_path?: string
+          pdm_file_size?: number | null
+          pdm_name?: string
+          reviewer_notes?: string | null
+          status?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       memberships: {
         Row: {
           created_at: string
