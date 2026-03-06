@@ -1755,11 +1755,13 @@ export type Database = {
         Row: {
           ai_analysis: Json | null
           ai_recommendation: string | null
+          certificates: Json | null
           created_at: string | null
           decided_at: string | null
           decided_by: string | null
           final_decision: string | null
           id: string
+          manufacturer_docs: Json | null
           material_category: string
           mqt_file_path: string | null
           mqt_file_size: number | null
@@ -1776,11 +1778,13 @@ export type Database = {
         Insert: {
           ai_analysis?: Json | null
           ai_recommendation?: string | null
+          certificates?: Json | null
           created_at?: string | null
           decided_at?: string | null
           decided_by?: string | null
           final_decision?: string | null
           id?: string
+          manufacturer_docs?: Json | null
           material_category: string
           mqt_file_path?: string | null
           mqt_file_size?: number | null
@@ -1797,11 +1801,13 @@ export type Database = {
         Update: {
           ai_analysis?: Json | null
           ai_recommendation?: string | null
+          certificates?: Json | null
           created_at?: string | null
           decided_at?: string | null
           decided_by?: string | null
           final_decision?: string | null
           id?: string
+          manufacturer_docs?: Json | null
           material_category?: string
           mqt_file_path?: string | null
           mqt_file_size?: number | null
