@@ -193,20 +193,23 @@ export default function ProjectKnowledge() {
   const processDocument = async (docId: string, file: File | null, docName: string, specialty: string) => {
     setProcessingId(docId);
     try {
-      let pdf_base64: string | null = null;
+      let file_base64: string | null = null;
+      let file_type = 'application/pdf';
 
       if (file) {
+        file_type = getFileMimeType(file.name);
         const buffer = await file.arrayBuffer();
         const bytes = new Uint8Array(buffer);
         let binary = '';
         for (let i = 0; i < bytes.length; i++) {
           binary += String.fromCharCode(bytes[i]);
         }
-        pdf_base64 = btoa(binary);
+        file_base64 = btoa(binary);
       } else {
         // Download from storage
         const doc = documents.find(d => d.id === docId);
         if (doc?.file_path) {
+          file_type = getFileMimeType(doc.document_name);
           const { data: fileData } = await supabase.storage
             .from('project-knowledge')
             .download(doc.file_path);
@@ -217,12 +220,12 @@ export default function ProjectKnowledge() {
             for (let i = 0; i < bytes.length; i++) {
               binary += String.fromCharCode(bytes[i]);
             }
-            pdf_base64 = btoa(binary);
+            file_base64 = btoa(binary);
           }
         }
       }
 
-      if (!pdf_base64) {
+      if (!file_base64) {
         toast.error('Não foi possível ler o ficheiro');
         return;
       }
@@ -233,7 +236,8 @@ export default function ProjectKnowledge() {
           document_id: docId,
           document_name: docName,
           specialty,
-          pdf_base64,
+          file_base64,
+          file_type,
         },
       });
 
