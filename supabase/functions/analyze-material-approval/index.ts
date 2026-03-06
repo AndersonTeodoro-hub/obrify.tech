@@ -52,7 +52,7 @@ serve(async (req) => {
     });
     content.push({
       type: "text",
-      text: "[Documento acima: PEDIDO DE APROVAÇÃO DE MATERIAL (PDM) — ficha técnica do material proposto pelo empreiteiro]",
+      text: "[Documento acima: PEDIDO DE APROVAÇÃO DE MATERIAIS (PAM) — ficha técnica do material proposto pelo empreiteiro]",
     });
 
     if (mqt_base64) {
