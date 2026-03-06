@@ -490,7 +490,7 @@ export default function MaterialApprovals() {
                 ) : (
                   <>
                     <Upload className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
-                    <p className="text-sm text-muted-foreground">Arraste o PDF do pedido de aprovação ou ficha técnica</p>
+                    <p className="text-sm text-muted-foreground">Arraste o PDF do pedido de aprovação (PAM) ou ficha técnica</p>
                   </>
                 )}
               </div>
