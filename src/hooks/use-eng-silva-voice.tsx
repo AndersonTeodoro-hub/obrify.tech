@@ -320,7 +320,7 @@ export function useEngSilvaVoice() {
       const chatBody: any = {
         message: userText,
         conversation_history: conversationRef.current,
-        system: buildSystemPrompt(memoryRef.current),
+        system: buildSystemPrompt(memoryRef.current, projectKnowledge),
       };
 
       if (pendingImageRef.current) {
