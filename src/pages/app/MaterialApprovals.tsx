@@ -63,9 +63,10 @@ export default function MaterialApprovals() {
   // Decision
   const [decisionNotes, setDecisionNotes] = useState('');
   const [pendingDecision, setPendingDecision] = useState<{ id: string; decision: string } | null>(null);
+  const [decisionFiscalName, setDecisionFiscalName] = useState(() => localStorage.getItem('pam_fiscal_name') || '');
 
   // Fiscal notes
-  const [fiscalNote, setFiscalNote] = useState('');
+  const [fiscalNotes, setFiscalNotes] = useState<Record<string, string>>({});
   const [savingNote, setSavingNote] = useState(false);
 
   // PDF export modal
