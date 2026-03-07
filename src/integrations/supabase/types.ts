@@ -1762,6 +1762,7 @@ export type Database = {
           decided_at: string | null
           decided_by: string | null
           final_decision: string | null
+          fiscal_notes: Json | null
           id: string
           manufacturer_docs: Json | null
           material_category: string
@@ -1787,6 +1788,7 @@ export type Database = {
           decided_at?: string | null
           decided_by?: string | null
           final_decision?: string | null
+          fiscal_notes?: Json | null
           id?: string
           manufacturer_docs?: Json | null
           material_category: string
@@ -1812,6 +1814,7 @@ export type Database = {
           decided_at?: string | null
           decided_by?: string | null
           final_decision?: string | null
+          fiscal_notes?: Json | null
           id?: string
           manufacturer_docs?: Json | null
           material_category?: string

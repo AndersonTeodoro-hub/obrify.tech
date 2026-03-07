@@ -1,0 +1,1 @@
+ALTER TABLE public.material_approvals ADD COLUMN IF NOT EXISTS fiscal_notes JSONB DEFAULT '[]'::jsonb;
