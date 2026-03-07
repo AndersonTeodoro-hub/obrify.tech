@@ -663,8 +663,8 @@ export default function MaterialApprovals() {
                           <div className="flex gap-2">
                             <Textarea
                               placeholder="Escreva uma observação..."
-                              value={expandedId === a.id ? fiscalNote : ''}
-                              onChange={e => setFiscalNote(e.target.value)}
+                              value={fiscalNotes[a.id] || ''}
+                              onChange={e => setFiscalNotes(prev => ({ ...prev, [a.id]: e.target.value }))}
                               rows={2}
                               className="flex-1"
                             />
@@ -672,7 +672,7 @@ export default function MaterialApprovals() {
                               size="sm"
                               variant="outline"
                               className="shrink-0 self-end"
-                              disabled={!fiscalNote.trim() || savingNote}
+                              disabled={!(fiscalNotes[a.id] || '').trim() || savingNote}
                               onClick={() => handleSaveFiscalNote(a.id)}
                             >
                               {savingNote ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Guardar'}
