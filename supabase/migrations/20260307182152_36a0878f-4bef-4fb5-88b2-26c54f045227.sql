@@ -1,1 +1,0 @@
-ALTER TABLE public.material_approvals ADD COLUMN fiscal_name TEXT;

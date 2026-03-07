@@ -56,9 +56,7 @@ const MAX_Y = PAGE_H - MB - 5;    // 272 — trigger new page before this
 export function generateMaterialApprovalPDF(
   approval: ApprovalData,
   analysis: AnalysisData,
-  obraName: string,
-  fiscalName?: string,
-  fiscalCompany?: string
+  obraName: string
 ) {
   const doc = new jsPDF('p', 'mm', 'a4');
   const now = new Date();
@@ -81,26 +79,16 @@ export function generateMaterialApprovalPDF(
     doc.setFont('helvetica', 'normal');
     doc.text('OBRIFY — Fiscalização Inteligente', PAGE_W - MR, MT + 6, { align: 'right' });
 
-    // Second line — obra + date
+    // Second line
     doc.setFontSize(9);
     doc.setTextColor(100, 116, 139);
     const subLine = `${obraName}  •  Gerado em ${dateStr} às ${timeStr}`;
     const subLines = doc.splitTextToSize(subLine, CW);
     doc.text(subLines, ML, MT + 13);
-    let infoY = MT + 13 + subLines.length * 4;
-
-    // Fiscal info lines
-    if (fiscalName) {
-      doc.text(`Técnico Fiscal: ${fiscalName}`, ML, infoY);
-      infoY += 4;
-    }
-    if (fiscalCompany) {
-      doc.text(`Empresa: ${fiscalCompany}`, ML, infoY);
-      infoY += 4;
-    }
+    const subH = subLines.length * 4;
 
     // Separator line
-    const lineY = infoY + 1;
+    const lineY = MT + 14 + subH;
     doc.setDrawColor(203, 213, 225);
     doc.setLineWidth(0.4);
     doc.line(ML, lineY, PAGE_W - MR, lineY);
@@ -344,17 +332,12 @@ export function generateMaterialApprovalPDF(
     doc.text(`Decisão: ${decLabel}`, ML + 4, y);
     y += 6;
 
-    {
+    if (approval.decided_by) {
       doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(100, 116, 139);
       const decDate = approval.decided_at ? new Date(approval.decided_at).toLocaleDateString('pt-PT') : '';
-      const fiscalLabel = fiscalName ? `Técnico Fiscal: ${fiscalName}${fiscalCompany ? ` — ${fiscalCompany}` : ''}` : '';
-      if (fiscalLabel && decDate) {
-        addWrappedText(`${fiscalLabel} em ${decDate}`, ML + 4, CW - 8, 9);
-      } else if (fiscalLabel) {
-        addWrappedText(fiscalLabel, ML + 4, CW - 8, 9);
-      }
+      addWrappedText(`Por: ${approval.decided_by} em ${decDate}`, ML + 4, CW - 8, 9);
     }
 
     if (approval.reviewer_notes) {
