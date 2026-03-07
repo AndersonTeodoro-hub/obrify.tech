@@ -320,17 +320,18 @@ export default function MaterialApprovals() {
   };
 
   const handleSaveFiscalNote = async (approvalId: string) => {
-    if (!fiscalNote.trim()) return;
+    const noteText = (fiscalNotes[approvalId] || '').trim();
+    if (!noteText) return;
     setSavingNote(true);
     try {
       const approval = approvals.find(a => a.id === approvalId);
       const existing: FiscalNote[] = (approval?.fiscal_notes as FiscalNote[]) || [];
-      const updated = [...existing, { note: fiscalNote.trim(), created_at: new Date().toISOString() }];
+      const updated = [...existing, { note: noteText, created_at: new Date().toISOString() }];
       await supabase.from('material_approvals').update({
         fiscal_notes: updated as any,
         updated_at: new Date().toISOString(),
       }).eq('id', approvalId);
-      setFiscalNote('');
+      setFiscalNotes(prev => ({ ...prev, [approvalId]: '' }));
       toast.success('Observação guardada');
       await loadApprovals();
     } catch (err: any) {
