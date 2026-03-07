@@ -735,7 +735,7 @@ export default function MaterialApprovals() {
                             size="sm"
                             variant="outline"
                             className="gap-1"
-                            onClick={() => generateMaterialApprovalPDF(a, analysis, selectedObra.nome)}
+                            onClick={() => openPdfModal(a)}
                           >
                             <Download className="w-3 h-3" /> Exportar PDF
                           </Button>
