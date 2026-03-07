@@ -699,7 +699,11 @@ export default function MaterialApprovals() {
                           {a.final_decision ? (
                             <div className="bg-muted/50 rounded-lg p-3">
                               <p className="text-sm"><span className="font-medium text-foreground">Decisão:</span> {a.final_decision === 'approved' ? 'Aprovado' : a.final_decision === 'approved_with_reservations' ? 'Aprovado c/ Reservas' : 'Rejeitado'}</p>
-                              {a.decided_by && <p className="text-xs text-muted-foreground">Técnico Fiscal: {a.fiscal_name || a.decided_by} em {a.decided_at ? new Date(a.decided_at).toLocaleDateString('pt-PT') : ''}</p>}
+                              {(a.fiscal_name || a.decided_by) && (
+                                <p className="text-xs text-muted-foreground">
+                                  Técnico Fiscal: {a.fiscal_name || (a.decided_by && !a.decided_by.includes('@') ? a.decided_by : '—')} em {a.decided_at ? new Date(a.decided_at).toLocaleDateString('pt-PT') : ''}
+                                </p>
+                              )}
                               {a.reviewer_notes && <p className="text-sm text-muted-foreground mt-1">Justificação: {a.reviewer_notes}</p>}
                             </div>
                           ) : (
