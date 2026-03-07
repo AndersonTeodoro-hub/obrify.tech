@@ -57,9 +57,13 @@ export default function MaterialApprovals() {
   // Expanded card
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // Decision modal
-  const [decisionId, setDecisionId] = useState<string | null>(null);
+  // Decision
   const [decisionNotes, setDecisionNotes] = useState('');
+  const [pendingDecision, setPendingDecision] = useState<{ id: string; decision: string } | null>(null);
+
+  // Fiscal notes
+  const [fiscalNote, setFiscalNote] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
 
   // Load obras
   useEffect(() => {
