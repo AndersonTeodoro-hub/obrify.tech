@@ -1,65 +1,93 @@
 
 
-# Separar Observações do Fiscal da Decisão Final
+# Fix: Mudar todas as políticas RLS de RESTRICTIVE para PERMISSIVE
 
-## Problema actual
-O botão "Adicionar Notas" abre um modal que, ao guardar, força uma decisão (`handleDecision` é chamado com `approved` por defeito na linha 733). Notas e decisão estão misturadas.
+## Problema
 
-## Alterações
+Todas as políticas RLS nas tabelas `organizations` e `memberships` estão como **RESTRICTIVE** (`Permissive: No`). Em PostgreSQL, políticas RESTRICTIVE exigem que TODAS passem (lógica AND), enquanto PERMISSIVE exige que QUALQUER uma passe (lógica OR). Isto bloqueia a criação de organizações.
 
-### 1. Base de dados — nova coluna `fiscal_notes`
-Adicionar coluna `fiscal_notes JSONB DEFAULT '[]'` à tabela `material_approvals`. Formato: array de objectos `{ note: string, created_at: string }`.
+## Migração SQL (um único ficheiro)
 
-### 2. Frontend — `MaterialApprovals.tsx`
+```sql
+-- ============================================
+-- FIX: Mudar políticas de RESTRICTIVE para PERMISSIVE
+-- ============================================
 
-**Novo estado:**
-- `fiscalNote` (string) — texto da nota actual
-- `savingNote` (boolean) — loading ao guardar
+-- 1. DROP todas as políticas da tabela organizations
+DROP POLICY IF EXISTS "Authenticated users can create organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Members can view their organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can update organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can delete organizations" ON public.organizations;
 
-**Nova função `handleSaveFiscalNote(approvalId)`:**
-- Lê `fiscal_notes` actual do approval
-- Faz append do novo objecto `{ note, created_at }` ao array
-- Faz `UPDATE` na tabela `material_approvals` apenas do campo `fiscal_notes`
-- NÃO altera status, final_decision, nem nenhum outro campo
+-- 2. Recriar como PERMISSIVE (default)
+CREATE POLICY "Authenticated users can create organizations"
+  ON public.organizations FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() IS NOT NULL);
 
-**Remover** o botão "Adicionar Notas" que abre o modal de decisão (linha 627). Remover o modal de notas do revisor (linhas 727-736).
+CREATE POLICY "Members can view their organizations"
+  ON public.organizations FOR SELECT
+  TO authenticated
+  USING (is_org_member(auth.uid(), id));
 
-**Novo layout dentro do card expandido (após a análise IA):**
+CREATE POLICY "Admins can update organizations"
+  ON public.organizations FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
 
-```text
-┌─────────────────────────────────────────┐
-│  RESULTADO DA ANÁLISE IA                │
-│  (material proposto, compliance, etc.)  │
-├─────────────────────────────────────────┤
-│  OBSERVAÇÕES DO FISCAL                  │
-│  [textarea] [Guardar Observação]        │
-│  • 07/03/2026 09:30 — "Aguardar..."     │
-│  • 07/03/2026 10:15 — "Confirmar..."    │
-├─────────────────────────────────────────┤
-│  DECISÃO FINAL                          │
-│  [Aprovado] [Aprovado c/Reservas]       │
-│  [Rejeitado]                            │
-│  Justificação: [textarea]               │
-│  [Confirmar Decisão]                    │
-│  (ou exibir decisão já tomada)          │
-├─────────────────────────────────────────┤
-│  [Exportar PDF] [Eliminar]              │
-└─────────────────────────────────────────┘
+CREATE POLICY "Admins can delete organizations"
+  ON public.organizations FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+
+-- 3. DROP todas as políticas da tabela memberships
+DROP POLICY IF EXISTS "Users can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Members can view memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can update memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can delete memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Users can view own memberships" ON public.memberships;
+
+-- 4. Recriar TODAS as políticas de memberships como PERMISSIVE
+CREATE POLICY "Users can insert memberships"
+  ON public.memberships FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+    AND (
+      has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+      OR NOT EXISTS (
+        SELECT 1 FROM public.memberships m
+        WHERE m.org_id = memberships.org_id
+      )
+    )
+  );
+
+CREATE POLICY "Members can view memberships"
+  ON public.memberships FOR SELECT
+  TO authenticated
+  USING (
+    auth.uid() = user_id
+    OR has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+  );
+
+CREATE POLICY "Admins can update memberships"
+  ON public.memberships FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+
+CREATE POLICY "Admins can delete memberships"
+  ON public.memberships FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
 ```
 
-**Secção "Observações do Fiscal"** (inline, sem modal):
-- Textarea + botão "Guardar Observação"
-- Lista de observações existentes (`fiscal_notes` do approval) com data/hora formatada
-- Disponível sempre, independentemente de haver decisão final
+## Resumo
 
-**Secção "Decisão Final"** (inline, sem modal):
-- Se não há decisão: 3 botões de decisão + textarea de justificação + botão "Confirmar Decisão"
-- Se já há decisão: mostrar resumo (como actualmente) com decisão, autor, data e justificação
-- `handleDecision` usa o `decisionNotes` como `reviewer_notes` (justificação da decisão)
+| Tabela | Acção |
+|---|---|
+| `organizations` | Drop 4 políticas RESTRICTIVE, recriar 4 como PERMISSIVE |
+| `memberships` | Drop todas as políticas, recriar 4 como PERMISSIVE (INSERT, SELECT, UPDATE, DELETE) |
 
-**Actualizar tipo `Approval`:** adicionar `fiscal_notes: Array<{ note: string; created_at: string }> | null`
-
-### 3. Ficheiros alterados
-- **Migration SQL** — adicionar coluna `fiscal_notes`
-- **`src/pages/app/MaterialApprovals.tsx`** — refactoring do layout expandido e lógica
+Nenhuma alteração de código necessária — apenas a migração da base de dados.
 

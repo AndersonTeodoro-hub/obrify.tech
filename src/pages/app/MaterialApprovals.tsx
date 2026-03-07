@@ -23,6 +23,7 @@ const CATEGORIES = [
 ];
 
 type Obra = { id: string; nome: string; cidade: string | null };
+type FiscalNote = { note: string; created_at: string };
 type Approval = {
   id: string; obra_id: string; pdm_name: string; pdm_file_path: string; pdm_file_size: number | null;
   mqt_name: string | null; mqt_file_path: string | null; mqt_file_size: number | null;
@@ -32,6 +33,7 @@ type Approval = {
   decided_at: string | null; created_at: string; updated_at: string;
   certificates?: Array<{ name: string; path: string; size: number }>;
   manufacturer_docs?: Array<{ name: string; path: string; size: number }>;
+  fiscal_notes?: FiscalNote[] | null;
 };
 
 export default function MaterialApprovals() {
@@ -55,9 +57,13 @@ export default function MaterialApprovals() {
   // Expanded card
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // Decision modal
-  const [decisionId, setDecisionId] = useState<string | null>(null);
+  // Decision
   const [decisionNotes, setDecisionNotes] = useState('');
+  const [pendingDecision, setPendingDecision] = useState<{ id: string; decision: string } | null>(null);
+
+  // Fiscal notes
+  const [fiscalNote, setFiscalNote] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
 
   // Load obras
   useEffect(() => {
@@ -272,18 +278,39 @@ export default function MaterialApprovals() {
     });
 
   // Decision actions
-  const handleDecision = async (id: string, decision: string) => {
+  const handleDecision = async (id: string, decision: string, notes: string) => {
     await supabase.from('material_approvals').update({
       final_decision: decision,
       decided_by: user?.email || user?.id,
       decided_at: new Date().toISOString(),
-      reviewer_notes: decisionNotes || null,
+      reviewer_notes: notes || null,
       updated_at: new Date().toISOString(),
     }).eq('id', id);
-    setDecisionId(null);
+    setPendingDecision(null);
     setDecisionNotes('');
     toast.success('Decisão registada');
     await loadApprovals();
+  };
+
+  const handleSaveFiscalNote = async (approvalId: string) => {
+    if (!fiscalNote.trim()) return;
+    setSavingNote(true);
+    try {
+      const approval = approvals.find(a => a.id === approvalId);
+      const existing: FiscalNote[] = (approval?.fiscal_notes as FiscalNote[]) || [];
+      const updated = [...existing, { note: fiscalNote.trim(), created_at: new Date().toISOString() }];
+      await supabase.from('material_approvals').update({
+        fiscal_notes: updated as any,
+        updated_at: new Date().toISOString(),
+      }).eq('id', approvalId);
+      setFiscalNote('');
+      toast.success('Observação guardada');
+      await loadApprovals();
+    } catch (err: any) {
+      toast.error('Erro ao guardar: ' + err.message);
+    } finally {
+      setSavingNote(false);
+    }
   };
 
   const handleDelete = async (approval: Approval) => {
@@ -602,31 +629,85 @@ export default function MaterialApprovals() {
 
                         <Separator />
 
-                        {/* Final decision display */}
-                        {a.final_decision && (
-                          <div className="bg-muted/50 rounded-lg p-3">
-                            <p className="text-sm"><span className="font-medium text-foreground">Decisão final:</span> {a.final_decision === 'approved' ? 'Aprovado' : a.final_decision === 'approved_with_reservations' ? 'Aprovado c/ Reservas' : 'Rejeitado'}</p>
-                            {a.decided_by && <p className="text-xs text-muted-foreground">Por: {a.decided_by} em {a.decided_at ? new Date(a.decided_at).toLocaleDateString('pt-PT') : ''}</p>}
-                            {a.reviewer_notes && <p className="text-sm text-muted-foreground mt-1">{a.reviewer_notes}</p>}
+                        {/* OBSERVAÇÕES DO FISCAL */}
+                        <div>
+                          <h4 className="text-sm font-semibold text-foreground mb-2">Observações do Fiscal</h4>
+                          <div className="flex gap-2">
+                            <Textarea
+                              placeholder="Escreva uma observação..."
+                              value={expandedId === a.id ? fiscalNote : ''}
+                              onChange={e => setFiscalNote(e.target.value)}
+                              rows={2}
+                              className="flex-1"
+                            />
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="shrink-0 self-end"
+                              disabled={!fiscalNote.trim() || savingNote}
+                              onClick={() => handleSaveFiscalNote(a.id)}
+                            >
+                              {savingNote ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Guardar'}
+                            </Button>
                           </div>
-                        )}
-
-                        {/* Action buttons */}
-                        <div className="flex flex-wrap gap-2">
-                          {!a.final_decision && (
-                            <>
-                              <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => { setDecisionId(a.id); handleDecision(a.id, 'approved'); }}>
-                                <CheckCircle2 className="w-3 h-3 mr-1" /> Confirmar Aprovação
-                              </Button>
-                              <Button size="sm" className="bg-amber-500 hover:bg-amber-600 text-white" onClick={() => { setDecisionId(a.id); handleDecision(a.id, 'approved_with_reservations'); }}>
-                                <AlertTriangle className="w-3 h-3 mr-1" /> Aprovar c/ Reservas
-                              </Button>
-                              <Button size="sm" variant="destructive" onClick={() => { setDecisionId(a.id); handleDecision(a.id, 'rejected'); }}>
-                                <XCircle className="w-3 h-3 mr-1" /> Rejeitar
-                              </Button>
-                              <Button size="sm" variant="outline" onClick={() => setDecisionId(a.id)}>Adicionar Notas</Button>
-                            </>
+                          {((a.fiscal_notes as FiscalNote[]) || []).length > 0 && (
+                            <div className="mt-2 space-y-1">
+                              {([...((a.fiscal_notes as FiscalNote[]) || [])]).reverse().map((fn, i) => (
+                                <div key={i} className="text-sm bg-muted/50 rounded px-3 py-1.5">
+                                  <span className="text-xs text-muted-foreground">{new Date(fn.created_at).toLocaleDateString('pt-PT')} {new Date(fn.created_at).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}</span>
+                                  <span className="mx-2 text-muted-foreground">—</span>
+                                  <span className="text-foreground">{fn.note}</span>
+                                </div>
+                              ))}
+                            </div>
                           )}
+                        </div>
+
+                        <Separator />
+
+                        {/* DECISÃO FINAL */}
+                        <div>
+                          <h4 className="text-sm font-semibold text-foreground mb-2">Decisão Final</h4>
+                          {a.final_decision ? (
+                            <div className="bg-muted/50 rounded-lg p-3">
+                              <p className="text-sm"><span className="font-medium text-foreground">Decisão:</span> {a.final_decision === 'approved' ? 'Aprovado' : a.final_decision === 'approved_with_reservations' ? 'Aprovado c/ Reservas' : 'Rejeitado'}</p>
+                              {a.decided_by && <p className="text-xs text-muted-foreground">Por: {a.decided_by} em {a.decided_at ? new Date(a.decided_at).toLocaleDateString('pt-PT') : ''}</p>}
+                              {a.reviewer_notes && <p className="text-sm text-muted-foreground mt-1">Justificação: {a.reviewer_notes}</p>}
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              <div className="flex flex-wrap gap-2">
+                                <Button size="sm" className={`gap-1 ${pendingDecision?.id === a.id && pendingDecision.decision === 'approved' ? 'bg-green-700 text-white' : 'bg-green-600 hover:bg-green-700 text-white'}`} onClick={() => setPendingDecision({ id: a.id, decision: 'approved' })}>
+                                  <CheckCircle2 className="w-3 h-3" /> Aprovado
+                                </Button>
+                                <Button size="sm" className={`gap-1 ${pendingDecision?.id === a.id && pendingDecision.decision === 'approved_with_reservations' ? 'bg-amber-600 text-white' : 'bg-amber-500 hover:bg-amber-600 text-white'}`} onClick={() => setPendingDecision({ id: a.id, decision: 'approved_with_reservations' })}>
+                                  <AlertTriangle className="w-3 h-3" /> Aprovado c/ Reservas
+                                </Button>
+                                <Button size="sm" variant="destructive" className={`gap-1 ${pendingDecision?.id === a.id && pendingDecision.decision === 'rejected' ? 'ring-2 ring-destructive' : ''}`} onClick={() => setPendingDecision({ id: a.id, decision: 'rejected' })}>
+                                  <XCircle className="w-3 h-3" /> Rejeitado
+                                </Button>
+                              </div>
+                              {pendingDecision?.id === a.id && (
+                                <div className="space-y-2">
+                                  <Textarea
+                                    placeholder="Justificação da decisão (opcional)..."
+                                    value={decisionNotes}
+                                    onChange={e => setDecisionNotes(e.target.value)}
+                                    rows={2}
+                                  />
+                                  <Button size="sm" onClick={() => handleDecision(a.id, pendingDecision.decision, decisionNotes)}>
+                                    Confirmar Decisão
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        <Separator />
+
+                        {/* Export + Delete */}
+                        <div className="flex flex-wrap gap-2">
                           <Button
                             size="sm"
                             variant="outline"
@@ -719,18 +800,6 @@ export default function MaterialApprovals() {
             <Button onClick={handleSubmit} disabled={!category || !pdmFile || submitting}>
               {submitting ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> A submeter...</> : 'Submeter para Análise'}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Decision notes modal */}
-      <Dialog open={!!decisionId} onOpenChange={() => setDecisionId(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Notas do Revisor</DialogTitle></DialogHeader>
-          <Textarea placeholder="Adicione notas ou observações..." value={decisionNotes} onChange={e => setDecisionNotes(e.target.value)} rows={4} />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDecisionId(null)}>Fechar</Button>
-            <Button onClick={() => { if (decisionId) handleDecision(decisionId, approvals.find(a => a.id === decisionId)?.final_decision || 'approved'); }}>Guardar Notas</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
