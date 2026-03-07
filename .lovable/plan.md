@@ -1,44 +1,93 @@
 
 
-# Substituir email por nome do fiscal no PDF e na interface
+# Fix: Mudar todas as políticas RLS de RESTRICTIVE para PERMISSIVE
 
-## Alterações
+## Problema
 
-### 1. Base de dados — nova coluna `fiscal_name`
-Adicionar `fiscal_name TEXT` à tabela `material_approvals` para guardar o nome do técnico fiscal (em vez do email).
+Todas as políticas RLS nas tabelas `organizations` e `memberships` estão como **RESTRICTIVE** (`Permissive: No`). Em PostgreSQL, políticas RESTRICTIVE exigem que TODAS passem (lógica AND), enquanto PERMISSIVE exige que QUALQUER uma passe (lógica OR). Isto bloqueia a criação de organizações.
 
-### 2. `src/pages/app/MaterialApprovals.tsx`
+## Migração SQL (um único ficheiro)
 
-**Novo estado + modal de exportação:**
-- `pdfModalOpen`, `pdfModalApproval` — controlar modal antes de exportar
-- `fiscalName` (string) — pre-fill de localStorage `'pam_fiscal_name'` ou eng_silva_memory profile.name
-- `fiscalCompany` (string) — pre-fill de localStorage `'pam_fiscal_company'` ou `'DDN'`
+```sql
+-- ============================================
+-- FIX: Mudar políticas de RESTRICTIVE para PERMISSIVE
+-- ============================================
 
-**Fluxo do "Exportar PDF":**
-1. Clique abre modal com inputs (Técnico Fiscal obrigatório, Empresa opcional)
-2. Ao confirmar, guarda em localStorage, chama `generateMaterialApprovalPDF` com novos parâmetros `fiscalName` e `fiscalCompany`
+-- 1. DROP todas as políticas da tabela organizations
+DROP POLICY IF EXISTS "Authenticated users can create organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Members can view their organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can update organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can delete organizations" ON public.organizations;
 
-**`handleDecision` — gravar nome em vez de email:**
-- `decided_by: fiscalName || localStorage.getItem('pam_fiscal_name') || user?.email` → usa nome do fiscal
-- Também gravar `fiscal_name` na coluna nova
+-- 2. Recriar como PERMISSIVE (default)
+CREATE POLICY "Authenticated users can create organizations"
+  ON public.organizations FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() IS NOT NULL);
 
-**Interface — onde mostra "Por: email":**
-- Linha 674: substituir `a.decided_by` (que agora será o nome) — garantir que nunca mostra email
+CREATE POLICY "Members can view their organizations"
+  ON public.organizations FOR SELECT
+  TO authenticated
+  USING (is_org_member(auth.uid(), id));
 
-### 3. `src/utils/material-approval-pdf.ts`
+CREATE POLICY "Admins can update organizations"
+  ON public.organizations FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
 
-**Interface `ApprovalData`:** adicionar `fiscal_name?: string | null` e `fiscal_company?: string | null`
+CREATE POLICY "Admins can delete organizations"
+  ON public.organizations FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
 
-**Função `generateMaterialApprovalPDF`:** aceitar parâmetros adicionais `fiscalName` e `fiscalCompany`
+-- 3. DROP todas as políticas da tabela memberships
+DROP POLICY IF EXISTS "Users can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Members can view memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can update memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can delete memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Users can view own memberships" ON public.memberships;
 
-**Cabeçalho:** adicionar linhas "Técnico Fiscal: Anderson Teodoro" e "Empresa: DDN"
+-- 4. Recriar TODAS as políticas de memberships como PERMISSIVE
+CREATE POLICY "Users can insert memberships"
+  ON public.memberships FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+    AND (
+      has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+      OR NOT EXISTS (
+        SELECT 1 FROM public.memberships m
+        WHERE m.org_id = memberships.org_id
+      )
+    )
+  );
 
-**Decisão Final:** substituir `Por: ${approval.decided_by}` por `Técnico Fiscal: ${fiscalName} — ${fiscalCompany}`
+CREATE POLICY "Members can view memberships"
+  ON public.memberships FOR SELECT
+  TO authenticated
+  USING (
+    auth.uid() = user_id
+    OR has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+  );
 
-**Remover** qualquer referência a email em todo o PDF.
+CREATE POLICY "Admins can update memberships"
+  ON public.memberships FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
 
-### 4. Ficheiros alterados
-- Migration SQL — `ALTER TABLE material_approvals ADD COLUMN fiscal_name TEXT`
-- `src/pages/app/MaterialApprovals.tsx` — modal de exportação + lógica
-- `src/utils/material-approval-pdf.ts` — novos parâmetros no cabeçalho e decisão
+CREATE POLICY "Admins can delete memberships"
+  ON public.memberships FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+```
+
+## Resumo
+
+| Tabela | Acção |
+|---|---|
+| `organizations` | Drop 4 políticas RESTRICTIVE, recriar 4 como PERMISSIVE |
+| `memberships` | Drop todas as políticas, recriar 4 como PERMISSIVE (INSERT, SELECT, UPDATE, DELETE) |
+
+Nenhuma alteração de código necessária — apenas a migração da base de dados.
 

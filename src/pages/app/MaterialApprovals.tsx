@@ -4,15 +4,17 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import {
-  FileCheck, Plus, Upload, ChevronDown, ChevronUp, Trash2, CheckCircle2, AlertTriangle, XCircle, Clock, Loader2, Building2, ArrowLeft, FileText, Award, Factory, X, Download, ScrollText, FileSignature,
+  FileCheck, Plus, Upload, ChevronDown, ChevronUp, Trash2, CheckCircle2, AlertTriangle, XCircle, Clock, Loader2, Building2, ArrowLeft, FileText, Award, Factory, X, Download, ScrollText, FileSignature, User,
 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { generateMaterialApprovalPDF } from '@/utils/material-approval-pdf';
 
 const CATEGORIES = [
@@ -26,6 +28,7 @@ type Obra = { id: string; nome: string; cidade: string | null };
 type FiscalNote = { note: string; created_at: string };
 type Approval = {
   id: string; obra_id: string; pdm_name: string; pdm_file_path: string; pdm_file_size: number | null;
+  fiscal_name?: string | null;
   mqt_name: string | null; mqt_file_path: string | null; mqt_file_size: number | null;
   contract_file_path: string | null; contract_file_name: string | null;
   material_category: string; status: string; ai_analysis: any; ai_recommendation: string | null;
@@ -64,6 +67,12 @@ export default function MaterialApprovals() {
   // Fiscal notes
   const [fiscalNote, setFiscalNote] = useState('');
   const [savingNote, setSavingNote] = useState(false);
+
+  // PDF export modal
+  const [pdfModalOpen, setPdfModalOpen] = useState(false);
+  const [pdfModalApproval, setPdfModalApproval] = useState<Approval | null>(null);
+  const [pdfFiscalName, setPdfFiscalName] = useState(() => localStorage.getItem('pam_fiscal_name') || '');
+  const [pdfFiscalCompany, setPdfFiscalCompany] = useState(() => localStorage.getItem('pam_fiscal_company') || 'DDN');
 
   // Load obras
   useEffect(() => {
@@ -279,17 +288,32 @@ export default function MaterialApprovals() {
 
   // Decision actions
   const handleDecision = async (id: string, decision: string, notes: string) => {
+    const fiscalName = pdfFiscalName || localStorage.getItem('pam_fiscal_name') || '';
     await supabase.from('material_approvals').update({
       final_decision: decision,
-      decided_by: user?.email || user?.id,
+      decided_by: fiscalName || null,
+      fiscal_name: fiscalName || null,
       decided_at: new Date().toISOString(),
       reviewer_notes: notes || null,
       updated_at: new Date().toISOString(),
-    }).eq('id', id);
+    } as any).eq('id', id);
     setPendingDecision(null);
     setDecisionNotes('');
     toast.success('Decisão registada');
     await loadApprovals();
+  };
+
+  const openPdfModal = (approval: Approval) => {
+    setPdfModalApproval(approval);
+    setPdfModalOpen(true);
+  };
+
+  const confirmExportPdf = () => {
+    if (!pdfFiscalName.trim() || !pdfModalApproval || !selectedObra) return;
+    localStorage.setItem('pam_fiscal_name', pdfFiscalName.trim());
+    localStorage.setItem('pam_fiscal_company', pdfFiscalCompany.trim());
+    generateMaterialApprovalPDF(pdfModalApproval, pdfModalApproval.ai_analysis, selectedObra.nome, pdfFiscalName.trim(), pdfFiscalCompany.trim());
+    setPdfModalOpen(false);
   };
 
   const handleSaveFiscalNote = async (approvalId: string) => {
@@ -671,7 +695,7 @@ export default function MaterialApprovals() {
                           {a.final_decision ? (
                             <div className="bg-muted/50 rounded-lg p-3">
                               <p className="text-sm"><span className="font-medium text-foreground">Decisão:</span> {a.final_decision === 'approved' ? 'Aprovado' : a.final_decision === 'approved_with_reservations' ? 'Aprovado c/ Reservas' : 'Rejeitado'}</p>
-                              {a.decided_by && <p className="text-xs text-muted-foreground">Por: {a.decided_by} em {a.decided_at ? new Date(a.decided_at).toLocaleDateString('pt-PT') : ''}</p>}
+                              {a.decided_by && <p className="text-xs text-muted-foreground">Técnico Fiscal: {a.fiscal_name || a.decided_by} em {a.decided_at ? new Date(a.decided_at).toLocaleDateString('pt-PT') : ''}</p>}
                               {a.reviewer_notes && <p className="text-sm text-muted-foreground mt-1">Justificação: {a.reviewer_notes}</p>}
                             </div>
                           ) : (
@@ -712,7 +736,7 @@ export default function MaterialApprovals() {
                             size="sm"
                             variant="outline"
                             className="gap-1"
-                            onClick={() => generateMaterialApprovalPDF(a, analysis, selectedObra.nome)}
+                            onClick={() => openPdfModal(a)}
                           >
                             <Download className="w-3 h-3" /> Exportar PDF
                           </Button>
@@ -799,6 +823,44 @@ export default function MaterialApprovals() {
             <Button variant="outline" onClick={() => setNewModalOpen(false)}>Cancelar</Button>
             <Button onClick={handleSubmit} disabled={!category || !pdmFile || submitting}>
               {submitting ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> A submeter...</> : 'Submeter para Análise'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* PDF Export Modal */}
+      <Dialog open={pdfModalOpen} onOpenChange={setPdfModalOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Exportar PDF</DialogTitle>
+            <DialogDescription>Preencha os dados do técnico fiscal para o relatório.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="pdf-fiscal-name">Técnico Fiscal *</Label>
+              <Input
+                id="pdf-fiscal-name"
+                placeholder="Nome do técnico fiscal"
+                value={pdfFiscalName}
+                onChange={e => setPdfFiscalName(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="pdf-fiscal-company">Empresa / Entidade</Label>
+              <Input
+                id="pdf-fiscal-company"
+                placeholder="Empresa (opcional)"
+                value={pdfFiscalCompany}
+                onChange={e => setPdfFiscalCompany(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPdfModalOpen(false)}>Cancelar</Button>
+            <Button onClick={confirmExportPdf} disabled={!pdfFiscalName.trim()}>
+              <Download className="w-4 h-4 mr-2" /> Exportar PDF
             </Button>
           </DialogFooter>
         </DialogContent>
