@@ -56,7 +56,9 @@ const MAX_Y = PAGE_H - MB - 5;    // 272 — trigger new page before this
 export function generateMaterialApprovalPDF(
   approval: ApprovalData,
   analysis: AnalysisData,
-  obraName: string
+  obraName: string,
+  fiscalName?: string,
+  fiscalCompany?: string
 ) {
   const doc = new jsPDF('p', 'mm', 'a4');
   const now = new Date();
