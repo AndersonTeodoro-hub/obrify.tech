@@ -81,16 +81,26 @@ export function generateMaterialApprovalPDF(
     doc.setFont('helvetica', 'normal');
     doc.text('OBRIFY — Fiscalização Inteligente', PAGE_W - MR, MT + 6, { align: 'right' });
 
-    // Second line
+    // Second line — obra + date
     doc.setFontSize(9);
     doc.setTextColor(100, 116, 139);
     const subLine = `${obraName}  •  Gerado em ${dateStr} às ${timeStr}`;
     const subLines = doc.splitTextToSize(subLine, CW);
     doc.text(subLines, ML, MT + 13);
-    const subH = subLines.length * 4;
+    let infoY = MT + 13 + subLines.length * 4;
+
+    // Fiscal info lines
+    if (fiscalName) {
+      doc.text(`Técnico Fiscal: ${fiscalName}`, ML, infoY);
+      infoY += 4;
+    }
+    if (fiscalCompany) {
+      doc.text(`Empresa: ${fiscalCompany}`, ML, infoY);
+      infoY += 4;
+    }
 
     // Separator line
-    const lineY = MT + 14 + subH;
+    const lineY = infoY + 1;
     doc.setDrawColor(203, 213, 225);
     doc.setLineWidth(0.4);
     doc.line(ML, lineY, PAGE_W - MR, lineY);
