@@ -28,6 +28,7 @@ type Obra = { id: string; nome: string; cidade: string | null };
 type FiscalNote = { note: string; created_at: string };
 type Approval = {
   id: string; obra_id: string; pdm_name: string; pdm_file_path: string; pdm_file_size: number | null;
+  fiscal_name?: string | null;
   mqt_name: string | null; mqt_file_path: string | null; mqt_file_size: number | null;
   contract_file_path: string | null; contract_file_name: string | null;
   material_category: string; status: string; ai_analysis: any; ai_recommendation: string | null;
