@@ -289,11 +289,13 @@ export default function MaterialApprovals() {
 
   // Decision actions
   const handleDecision = async (id: string, decision: string, notes: string) => {
-    const fiscalName = pdfFiscalName || localStorage.getItem('pam_fiscal_name') || '';
+    const fiscalName = decisionFiscalName.trim();
+    if (!fiscalName) return;
+    localStorage.setItem('pam_fiscal_name', fiscalName);
     await supabase.from('material_approvals').update({
       final_decision: decision,
-      decided_by: fiscalName || null,
-      fiscal_name: fiscalName || null,
+      decided_by: fiscalName,
+      fiscal_name: fiscalName,
       decided_at: new Date().toISOString(),
       reviewer_notes: notes || null,
       updated_at: new Date().toISOString(),
