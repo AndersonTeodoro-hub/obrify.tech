@@ -1,75 +1,93 @@
 
 
-# 6 Correcções — MaterialApprovals.tsx + material-approval-pdf.ts
+# Fix: Mudar todas as políticas RLS de RESTRICTIVE para PERMISSIVE
 
-**Note**: Contrary to user's assumption, the PDF export modal states (`pdfModalOpen`, etc.) do NOT currently exist. Line 715 calls `generateMaterialApprovalPDF` directly. All states need to be created.
+## Problema
 
----
+Todas as políticas RLS nas tabelas `organizations` e `memberships` estão como **RESTRICTIVE** (`Permissive: No`). Em PostgreSQL, políticas RESTRICTIVE exigem que TODAS passem (lógica AND), enquanto PERMISSIVE exige que QUALQUER uma passe (lógica OR). Isto bloqueia a criação de organizações.
 
-## Files changed (2 only)
-- `src/pages/app/MaterialApprovals.tsx`
-- `src/utils/material-approval-pdf.ts`
+## Migração SQL (um único ficheiro)
 
----
+```sql
+-- ============================================
+-- FIX: Mudar políticas de RESTRICTIVE para PERMISSIVE
+-- ============================================
 
-## 1. PDF: Header overlaps table on page 2
+-- 1. DROP todas as políticas da tabela organizations
+DROP POLICY IF EXISTS "Authenticated users can create organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Members can view their organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can update organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can delete organizations" ON public.organizations;
 
-**File**: `material-approval-pdf.ts` lines 207-228
+-- 2. Recriar como PERMISSIVE (default)
+CREATE POLICY "Authenticated users can create organizations"
+  ON public.organizations FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() IS NOT NULL);
 
-Add `margin.top: MT + 30` to the `autoTable` config so continuation pages reserve space for the header. Fix `didDrawPage` to only draw header on pages after the first table page.
+CREATE POLICY "Members can view their organizations"
+  ON public.organizations FOR SELECT
+  TO authenticated
+  USING (is_org_member(auth.uid(), id));
 
-## 2. Logo upload in PDF export modal + states
+CREATE POLICY "Admins can update organizations"
+  ON public.organizations FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
 
-**File**: `MaterialApprovals.tsx`
+CREATE POLICY "Admins can delete organizations"
+  ON public.organizations FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
 
-Add new states (lines ~60-66 area):
-- `pdfModalOpen` (boolean), `pdfModalApproval` (Approval | null)
-- `pdfFiscalName` (string, init from `localStorage.getItem('pam_fiscal_name') || ''`)
-- `pdfFiscalCompany` (string, init from `localStorage.getItem('pam_fiscal_company') || 'DDN'`)
-- `pdfLogo` (string | null, init from `localStorage.getItem('pam_fiscal_logo')`)
+-- 3. DROP todas as políticas da tabela memberships
+DROP POLICY IF EXISTS "Users can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Members can view memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can update memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can delete memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Users can view own memberships" ON public.memberships;
 
-Add `Input` to imports from `@/components/ui/input`.
+-- 4. Recriar TODAS as políticas de memberships como PERMISSIVE
+CREATE POLICY "Users can insert memberships"
+  ON public.memberships FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+    AND (
+      has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+      OR NOT EXISTS (
+        SELECT 1 FROM public.memberships m
+        WHERE m.org_id = memberships.org_id
+      )
+    )
+  );
 
-Replace direct PDF call (line 715) with `setPdfModalApproval(a); setPdfModalOpen(true)`.
+CREATE POLICY "Members can view memberships"
+  ON public.memberships FOR SELECT
+  TO authenticated
+  USING (
+    auth.uid() = user_id
+    OR has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+  );
 
-Add new Dialog before closing `</div>` with:
-- Logo upload area (accept PNG/JPG), convert to base64, save to localStorage `pam_fiscal_logo`, show preview with remove button
-- "Técnico Fiscal" Input (required)
-- "Empresa" Input (optional, pre-fill "DDN")
-- Cancel / Export buttons (export disabled if no fiscal name)
-- On confirm: save to localStorage, call `generateMaterialApprovalPDF` with extra params
+CREATE POLICY "Admins can update memberships"
+  ON public.memberships FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
 
-## 3. Logo in PDF header
+CREATE POLICY "Admins can delete memberships"
+  ON public.memberships FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+```
 
-**File**: `material-approval-pdf.ts`
+## Resumo
 
-Add optional params to function signature: `fiscalName?: string`, `fiscalCompany?: string`, `logoBase64?: string`.
+| Tabela | Acção |
+|---|---|
+| `organizations` | Drop 4 políticas RESTRICTIVE, recriar 4 como PERMISSIVE |
+| `memberships` | Drop todas as políticas, recriar 4 como PERMISSIVE (INSERT, SELECT, UPDATE, DELETE) |
 
-In `addHeader`: if `logoBase64`, try/catch `doc.addImage(logoBase64, 'PNG', ML, MT, 20, 12)` and shift title to `ML + 24`. Add fiscal name/company lines in header subtext.
-
-## 4. Mandatory "Técnico Fiscal" in Decision Final
-
-**File**: `MaterialApprovals.tsx`
-
-Add state `decisionFiscalName` (init from localStorage `pam_fiscal_name`).
-
-In decision form (lines 690-702): add `Input` for "Técnico Fiscal" before textarea. Disable "Confirmar Decisão" if `!decisionFiscalName.trim()`.
-
-Update `handleDecision` (line 281-293): use `decisionFiscalName` for `decided_by` and add `fiscal_name` field. Save to localStorage.
-
-## 5. Never show email in decision display
-
-Line 674: replace `a.decided_by` with logic that checks `(a as any).fiscal_name || (a.decided_by?.includes('@') ? '—' : a.decided_by)`.
-
-In PDF (line 340): same logic — if `decided_by` contains `@`, show fiscal_name or `'—'`.
-
-## 6. Fiscal notes isolated per card
-
-Change `fiscalNote` from `string` to `Record<string, string>` (keyed by approval id).
-
-Update:
-- Line 638 value: `fiscalNote[a.id] || ''`
-- Line 639 onChange: `setFiscalNote(prev => ({ ...prev, [a.id]: e.target.value }))`
-- Line 647 disabled: `!(fiscalNote[a.id]?.trim()) || savingNote`
-- `handleSaveFiscalNote` (line 296): use `fiscalNote[approvalId]`, clear only that key
+Nenhuma alteração de código necessária — apenas a migração da base de dados.
 
