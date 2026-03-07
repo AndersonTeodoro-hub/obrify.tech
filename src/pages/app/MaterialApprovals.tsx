@@ -827,6 +827,44 @@ export default function MaterialApprovals() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* PDF Export Modal */}
+      <Dialog open={pdfModalOpen} onOpenChange={setPdfModalOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Exportar PDF</DialogTitle>
+            <DialogDescription>Preencha os dados do técnico fiscal para o relatório.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="pdf-fiscal-name">Técnico Fiscal *</Label>
+              <Input
+                id="pdf-fiscal-name"
+                placeholder="Nome do técnico fiscal"
+                value={pdfFiscalName}
+                onChange={e => setPdfFiscalName(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="pdf-fiscal-company">Empresa / Entidade</Label>
+              <Input
+                id="pdf-fiscal-company"
+                placeholder="Empresa (opcional)"
+                value={pdfFiscalCompany}
+                onChange={e => setPdfFiscalCompany(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPdfModalOpen(false)}>Cancelar</Button>
+            <Button onClick={confirmExportPdf} disabled={!pdfFiscalName.trim()}>
+              <Download className="w-4 h-4 mr-2" /> Exportar PDF
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
