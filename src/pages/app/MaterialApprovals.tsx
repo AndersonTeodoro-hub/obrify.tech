@@ -721,13 +721,21 @@ export default function MaterialApprovals() {
                               </div>
                               {pendingDecision?.id === a.id && (
                                 <div className="space-y-2">
+                                  <div>
+                                    <Label className="text-xs">Técnico Fiscal *</Label>
+                                    <Input
+                                      placeholder="Nome do técnico fiscal"
+                                      value={decisionFiscalName}
+                                      onChange={e => setDecisionFiscalName(e.target.value)}
+                                    />
+                                  </div>
                                   <Textarea
                                     placeholder="Justificação da decisão (opcional)..."
                                     value={decisionNotes}
                                     onChange={e => setDecisionNotes(e.target.value)}
                                     rows={2}
                                   />
-                                  <Button size="sm" onClick={() => handleDecision(a.id, pendingDecision.decision, decisionNotes)}>
+                                  <Button size="sm" disabled={!decisionFiscalName.trim()} onClick={() => handleDecision(a.id, pendingDecision.decision, decisionNotes)}>
                                     Confirmar Decisão
                                   </Button>
                                 </div>
