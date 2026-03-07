@@ -63,10 +63,9 @@ export default function MaterialApprovals() {
   // Decision
   const [decisionNotes, setDecisionNotes] = useState('');
   const [pendingDecision, setPendingDecision] = useState<{ id: string; decision: string } | null>(null);
-  const [decisionFiscalName, setDecisionFiscalName] = useState(() => localStorage.getItem('pam_fiscal_name') || '');
 
   // Fiscal notes
-  const [fiscalNotes, setFiscalNotes] = useState<Record<string, string>>({});
+  const [fiscalNote, setFiscalNote] = useState('');
   const [savingNote, setSavingNote] = useState(false);
 
   // PDF export modal
@@ -289,13 +288,11 @@ export default function MaterialApprovals() {
 
   // Decision actions
   const handleDecision = async (id: string, decision: string, notes: string) => {
-    const fiscalName = decisionFiscalName.trim();
-    if (!fiscalName) return;
-    localStorage.setItem('pam_fiscal_name', fiscalName);
+    const fiscalName = pdfFiscalName || localStorage.getItem('pam_fiscal_name') || '';
     await supabase.from('material_approvals').update({
       final_decision: decision,
-      decided_by: fiscalName,
-      fiscal_name: fiscalName,
+      decided_by: fiscalName || null,
+      fiscal_name: fiscalName || null,
       decided_at: new Date().toISOString(),
       reviewer_notes: notes || null,
       updated_at: new Date().toISOString(),
@@ -320,18 +317,17 @@ export default function MaterialApprovals() {
   };
 
   const handleSaveFiscalNote = async (approvalId: string) => {
-    const noteText = (fiscalNotes[approvalId] || '').trim();
-    if (!noteText) return;
+    if (!fiscalNote.trim()) return;
     setSavingNote(true);
     try {
       const approval = approvals.find(a => a.id === approvalId);
       const existing: FiscalNote[] = (approval?.fiscal_notes as FiscalNote[]) || [];
-      const updated = [...existing, { note: noteText, created_at: new Date().toISOString() }];
+      const updated = [...existing, { note: fiscalNote.trim(), created_at: new Date().toISOString() }];
       await supabase.from('material_approvals').update({
         fiscal_notes: updated as any,
         updated_at: new Date().toISOString(),
       }).eq('id', approvalId);
-      setFiscalNotes(prev => ({ ...prev, [approvalId]: '' }));
+      setFiscalNote('');
       toast.success('Observação guardada');
       await loadApprovals();
     } catch (err: any) {
@@ -663,8 +659,8 @@ export default function MaterialApprovals() {
                           <div className="flex gap-2">
                             <Textarea
                               placeholder="Escreva uma observação..."
-                              value={fiscalNotes[a.id] || ''}
-                              onChange={e => setFiscalNotes(prev => ({ ...prev, [a.id]: e.target.value }))}
+                              value={expandedId === a.id ? fiscalNote : ''}
+                              onChange={e => setFiscalNote(e.target.value)}
                               rows={2}
                               className="flex-1"
                             />
@@ -672,7 +668,7 @@ export default function MaterialApprovals() {
                               size="sm"
                               variant="outline"
                               className="shrink-0 self-end"
-                              disabled={!(fiscalNotes[a.id] || '').trim() || savingNote}
+                              disabled={!fiscalNote.trim() || savingNote}
                               onClick={() => handleSaveFiscalNote(a.id)}
                             >
                               {savingNote ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Guardar'}
@@ -699,11 +695,7 @@ export default function MaterialApprovals() {
                           {a.final_decision ? (
                             <div className="bg-muted/50 rounded-lg p-3">
                               <p className="text-sm"><span className="font-medium text-foreground">Decisão:</span> {a.final_decision === 'approved' ? 'Aprovado' : a.final_decision === 'approved_with_reservations' ? 'Aprovado c/ Reservas' : 'Rejeitado'}</p>
-                              {(a.fiscal_name || a.decided_by) && (
-                                <p className="text-xs text-muted-foreground">
-                                  Técnico Fiscal: {a.fiscal_name || (a.decided_by && !a.decided_by.includes('@') ? a.decided_by : '—')} em {a.decided_at ? new Date(a.decided_at).toLocaleDateString('pt-PT') : ''}
-                                </p>
-                              )}
+                              {a.decided_by && <p className="text-xs text-muted-foreground">Técnico Fiscal: {a.fiscal_name || a.decided_by} em {a.decided_at ? new Date(a.decided_at).toLocaleDateString('pt-PT') : ''}</p>}
                               {a.reviewer_notes && <p className="text-sm text-muted-foreground mt-1">Justificação: {a.reviewer_notes}</p>}
                             </div>
                           ) : (
@@ -721,21 +713,13 @@ export default function MaterialApprovals() {
                               </div>
                               {pendingDecision?.id === a.id && (
                                 <div className="space-y-2">
-                                  <div>
-                                    <Label className="text-xs">Técnico Fiscal *</Label>
-                                    <Input
-                                      placeholder="Nome do técnico fiscal"
-                                      value={decisionFiscalName}
-                                      onChange={e => setDecisionFiscalName(e.target.value)}
-                                    />
-                                  </div>
                                   <Textarea
                                     placeholder="Justificação da decisão (opcional)..."
                                     value={decisionNotes}
                                     onChange={e => setDecisionNotes(e.target.value)}
                                     rows={2}
                                   />
-                                  <Button size="sm" disabled={!decisionFiscalName.trim()} onClick={() => handleDecision(a.id, pendingDecision.decision, decisionNotes)}>
+                                  <Button size="sm" onClick={() => handleDecision(a.id, pendingDecision.decision, decisionNotes)}>
                                     Confirmar Decisão
                                   </Button>
                                 </div>
