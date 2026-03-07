@@ -67,6 +67,12 @@ export default function MaterialApprovals() {
   const [fiscalNote, setFiscalNote] = useState('');
   const [savingNote, setSavingNote] = useState(false);
 
+  // PDF export modal
+  const [pdfModalOpen, setPdfModalOpen] = useState(false);
+  const [pdfModalApproval, setPdfModalApproval] = useState<Approval | null>(null);
+  const [pdfFiscalName, setPdfFiscalName] = useState(() => localStorage.getItem('pam_fiscal_name') || '');
+  const [pdfFiscalCompany, setPdfFiscalCompany] = useState(() => localStorage.getItem('pam_fiscal_company') || 'DDN');
+
   // Load obras
   useEffect(() => {
     if (!user) return;
