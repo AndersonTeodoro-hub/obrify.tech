@@ -287,17 +287,32 @@ export default function MaterialApprovals() {
 
   // Decision actions
   const handleDecision = async (id: string, decision: string, notes: string) => {
+    const fiscalName = pdfFiscalName || localStorage.getItem('pam_fiscal_name') || '';
     await supabase.from('material_approvals').update({
       final_decision: decision,
-      decided_by: user?.email || user?.id,
+      decided_by: fiscalName || null,
+      fiscal_name: fiscalName || null,
       decided_at: new Date().toISOString(),
       reviewer_notes: notes || null,
       updated_at: new Date().toISOString(),
-    }).eq('id', id);
+    } as any).eq('id', id);
     setPendingDecision(null);
     setDecisionNotes('');
     toast.success('Decisão registada');
     await loadApprovals();
+  };
+
+  const openPdfModal = (approval: Approval) => {
+    setPdfModalApproval(approval);
+    setPdfModalOpen(true);
+  };
+
+  const confirmExportPdf = () => {
+    if (!pdfFiscalName.trim() || !pdfModalApproval || !selectedObra) return;
+    localStorage.setItem('pam_fiscal_name', pdfFiscalName.trim());
+    localStorage.setItem('pam_fiscal_company', pdfFiscalCompany.trim());
+    generateMaterialApprovalPDF(pdfModalApproval, pdfModalApproval.ai_analysis, selectedObra.nome, pdfFiscalName.trim(), pdfFiscalCompany.trim());
+    setPdfModalOpen(false);
   };
 
   const handleSaveFiscalNote = async (approvalId: string) => {
