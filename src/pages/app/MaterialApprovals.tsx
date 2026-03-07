@@ -23,6 +23,7 @@ const CATEGORIES = [
 ];
 
 type Obra = { id: string; nome: string; cidade: string | null };
+type FiscalNote = { note: string; created_at: string };
 type Approval = {
   id: string; obra_id: string; pdm_name: string; pdm_file_path: string; pdm_file_size: number | null;
   mqt_name: string | null; mqt_file_path: string | null; mqt_file_size: number | null;
@@ -32,6 +33,7 @@ type Approval = {
   decided_at: string | null; created_at: string; updated_at: string;
   certificates?: Array<{ name: string; path: string; size: number }>;
   manufacturer_docs?: Array<{ name: string; path: string; size: number }>;
+  fiscal_notes?: FiscalNote[] | null;
 };
 
 export default function MaterialApprovals() {
