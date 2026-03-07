@@ -278,18 +278,39 @@ export default function MaterialApprovals() {
     });
 
   // Decision actions
-  const handleDecision = async (id: string, decision: string) => {
+  const handleDecision = async (id: string, decision: string, notes: string) => {
     await supabase.from('material_approvals').update({
       final_decision: decision,
       decided_by: user?.email || user?.id,
       decided_at: new Date().toISOString(),
-      reviewer_notes: decisionNotes || null,
+      reviewer_notes: notes || null,
       updated_at: new Date().toISOString(),
     }).eq('id', id);
-    setDecisionId(null);
+    setPendingDecision(null);
     setDecisionNotes('');
     toast.success('Decisão registada');
     await loadApprovals();
+  };
+
+  const handleSaveFiscalNote = async (approvalId: string) => {
+    if (!fiscalNote.trim()) return;
+    setSavingNote(true);
+    try {
+      const approval = approvals.find(a => a.id === approvalId);
+      const existing: FiscalNote[] = (approval?.fiscal_notes as FiscalNote[]) || [];
+      const updated = [...existing, { note: fiscalNote.trim(), created_at: new Date().toISOString() }];
+      await supabase.from('material_approvals').update({
+        fiscal_notes: updated as any,
+        updated_at: new Date().toISOString(),
+      }).eq('id', approvalId);
+      setFiscalNote('');
+      toast.success('Observação guardada');
+      await loadApprovals();
+    } catch (err: any) {
+      toast.error('Erro ao guardar: ' + err.message);
+    } finally {
+      setSavingNote(false);
+    }
   };
 
   const handleDelete = async (approval: Approval) => {
