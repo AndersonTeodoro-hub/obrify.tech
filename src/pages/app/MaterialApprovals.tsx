@@ -803,18 +803,6 @@ export default function MaterialApprovals() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Decision notes modal */}
-      <Dialog open={!!decisionId} onOpenChange={() => setDecisionId(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Notas do Revisor</DialogTitle></DialogHeader>
-          <Textarea placeholder="Adicione notas ou observações..." value={decisionNotes} onChange={e => setDecisionNotes(e.target.value)} rows={4} />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDecisionId(null)}>Fechar</Button>
-            <Button onClick={() => { if (decisionId) handleDecision(decisionId, approvals.find(a => a.id === decisionId)?.final_decision || 'approved'); }}>Guardar Notas</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
