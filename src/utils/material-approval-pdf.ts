@@ -344,12 +344,17 @@ export function generateMaterialApprovalPDF(
     doc.text(`Decisão: ${decLabel}`, ML + 4, y);
     y += 6;
 
-    if (approval.decided_by) {
+    {
       doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(100, 116, 139);
       const decDate = approval.decided_at ? new Date(approval.decided_at).toLocaleDateString('pt-PT') : '';
-      addWrappedText(`Por: ${approval.decided_by} em ${decDate}`, ML + 4, CW - 8, 9);
+      const fiscalLabel = fiscalName ? `Técnico Fiscal: ${fiscalName}${fiscalCompany ? ` — ${fiscalCompany}` : ''}` : '';
+      if (fiscalLabel && decDate) {
+        addWrappedText(`${fiscalLabel} em ${decDate}`, ML + 4, CW - 8, 9);
+      } else if (fiscalLabel) {
+        addWrappedText(fiscalLabel, ML + 4, CW - 8, 9);
+      }
     }
 
     if (approval.reviewer_notes) {
