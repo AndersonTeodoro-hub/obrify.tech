@@ -9,9 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
+import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import {
-  FileCheck, Plus, Upload, ChevronDown, ChevronUp, Trash2, CheckCircle2, AlertTriangle, XCircle, Clock, Loader2, Building2, ArrowLeft, FileText, Award, Factory, X, Download, ScrollText, FileSignature,
+  FileCheck, Plus, Upload, ChevronDown, ChevronUp, Trash2, CheckCircle2, AlertTriangle, XCircle, Clock, Loader2, Building2, ArrowLeft, FileText, Award, Factory, X, Download, ScrollText, FileSignature, ImageIcon,
 } from 'lucide-react';
 import { generateMaterialApprovalPDF } from '@/utils/material-approval-pdf';
 
@@ -34,6 +35,7 @@ type Approval = {
   certificates?: Array<{ name: string; path: string; size: number }>;
   manufacturer_docs?: Array<{ name: string; path: string; size: number }>;
   fiscal_notes?: FiscalNote[] | null;
+  fiscal_name?: string | null;
 };
 
 export default function MaterialApprovals() {
@@ -60,10 +62,18 @@ export default function MaterialApprovals() {
   // Decision
   const [decisionNotes, setDecisionNotes] = useState('');
   const [pendingDecision, setPendingDecision] = useState<{ id: string; decision: string } | null>(null);
+  const [decisionFiscalName, setDecisionFiscalName] = useState(() => localStorage.getItem('pam_fiscal_name') || '');
 
-  // Fiscal notes
-  const [fiscalNote, setFiscalNote] = useState('');
+  // Fiscal notes — isolated per card
+  const [fiscalNote, setFiscalNote] = useState<Record<string, string>>({});
   const [savingNote, setSavingNote] = useState(false);
+
+  // PDF export modal
+  const [pdfModalOpen, setPdfModalOpen] = useState(false);
+  const [pdfModalApproval, setPdfModalApproval] = useState<Approval | null>(null);
+  const [pdfFiscalName, setPdfFiscalName] = useState(() => localStorage.getItem('pam_fiscal_name') || '');
+  const [pdfFiscalCompany, setPdfFiscalCompany] = useState(() => localStorage.getItem('pam_fiscal_company') || 'DDN');
+  const [pdfLogo, setPdfLogo] = useState<string | null>(() => localStorage.getItem('pam_fiscal_logo'));
 
   // Load obras
   useEffect(() => {
@@ -109,12 +119,10 @@ export default function MaterialApprovals() {
       const ts = Date.now();
       const basePath = `${user.id}/${selectedObra.id}/${ts}`;
 
-      // 1. Upload PAM
       const pdmPath = `${basePath}_pam_${sanitizeFilename(pdmFile.name)}`;
       const { error: upErr } = await supabase.storage.from('material-approvals').upload(pdmPath, pdmFile);
       if (upErr) throw upErr;
 
-      // 2. Upload MQT (optional)
       let mqtPath: string | null = null;
       if (mqtFile) {
         mqtPath = `${basePath}_mqt_${sanitizeFilename(mqtFile.name)}`;
@@ -122,7 +130,6 @@ export default function MaterialApprovals() {
         if (error) throw error;
       }
 
-      // 3. Upload Contract (optional)
       let contractPath: string | null = null;
       if (contractFile) {
         contractPath = `${basePath}_contract_${sanitizeFilename(contractFile.name)}`;
@@ -130,7 +137,6 @@ export default function MaterialApprovals() {
         if (error) throw error;
       }
 
-      // 4. Upload certificates
       const certificatesJson: Array<{ name: string; path: string; size: number }> = [];
       for (const cf of certFiles) {
         const cfPath = `${basePath}_cert_${sanitizeFilename(cf.name)}`;
@@ -139,7 +145,6 @@ export default function MaterialApprovals() {
         certificatesJson.push({ name: cf.name, path: cfPath, size: cf.size });
       }
 
-      // 5. Upload manufacturer docs
       const mfgDocsJson: Array<{ name: string; path: string; size: number }> = [];
       for (const mf of mfgFiles) {
         const mfPath = `${basePath}_mfg_${sanitizeFilename(mf.name)}`;
@@ -148,7 +153,6 @@ export default function MaterialApprovals() {
         mfgDocsJson.push({ name: mf.name, path: mfPath, size: mf.size });
       }
 
-      // 6. Insert record
       const { data: record, error: insErr } = await supabase.from('material_approvals').insert({
         obra_id: selectedObra.id,
         user_id: user.id,
@@ -187,12 +191,10 @@ export default function MaterialApprovals() {
 
   const processApproval = async (approval: Approval) => {
     try {
-      // Download PAM
       const { data: pdmData } = await supabase.storage.from('material-approvals').download(approval.pdm_file_path);
       if (!pdmData) throw new Error('Failed to download PAM');
       const pdmBase64 = await blobToBase64(pdmData);
 
-      // Download MQT (if exists)
       let mqtBase64: string | null = null;
       if (approval.mqt_file_path) {
         try {
@@ -201,7 +203,6 @@ export default function MaterialApprovals() {
         } catch { /* skip */ }
       }
 
-      // Download Contract (if exists)
       let contractBase64: string | null = null;
       if (approval.contract_file_path) {
         try {
@@ -210,7 +211,6 @@ export default function MaterialApprovals() {
         } catch { /* skip */ }
       }
 
-      // Download certificates
       const certificatesBase64: Array<{ name: string; base64: string; type: string }> = [];
       const certs = (approval as any).certificates || [];
       for (const cert of certs) {
@@ -223,7 +223,6 @@ export default function MaterialApprovals() {
         } catch { /* skip failed downloads */ }
       }
 
-      // Download manufacturer docs
       const mfgDocsBase64: Array<{ name: string; base64: string; type: string }> = [];
       const mfgDocs = (approval as any).manufacturer_docs || [];
       for (const mdoc of mfgDocs) {
@@ -279,13 +278,16 @@ export default function MaterialApprovals() {
 
   // Decision actions
   const handleDecision = async (id: string, decision: string, notes: string) => {
+    const fiscalName = decisionFiscalName.trim();
+    localStorage.setItem('pam_fiscal_name', fiscalName);
     await supabase.from('material_approvals').update({
       final_decision: decision,
-      decided_by: user?.email || user?.id,
+      decided_by: fiscalName || null,
+      fiscal_name: fiscalName || null,
       decided_at: new Date().toISOString(),
       reviewer_notes: notes || null,
       updated_at: new Date().toISOString(),
-    }).eq('id', id);
+    } as any).eq('id', id);
     setPendingDecision(null);
     setDecisionNotes('');
     toast.success('Decisão registada');
@@ -293,17 +295,18 @@ export default function MaterialApprovals() {
   };
 
   const handleSaveFiscalNote = async (approvalId: string) => {
-    if (!fiscalNote.trim()) return;
+    const noteText = (fiscalNote[approvalId] || '').trim();
+    if (!noteText) return;
     setSavingNote(true);
     try {
       const approval = approvals.find(a => a.id === approvalId);
       const existing: FiscalNote[] = (approval?.fiscal_notes as FiscalNote[]) || [];
-      const updated = [...existing, { note: fiscalNote.trim(), created_at: new Date().toISOString() }];
+      const updated = [...existing, { note: noteText, created_at: new Date().toISOString() }];
       await supabase.from('material_approvals').update({
         fiscal_notes: updated as any,
         updated_at: new Date().toISOString(),
       }).eq('id', approvalId);
-      setFiscalNote('');
+      setFiscalNote(prev => ({ ...prev, [approvalId]: '' }));
       toast.success('Observação guardada');
       await loadApprovals();
     } catch (err: any) {
@@ -326,6 +329,47 @@ export default function MaterialApprovals() {
     await supabase.from('material_approvals').delete().eq('id', approval.id);
     toast.success('Pedido eliminado');
     await loadApprovals();
+  };
+
+  // Logo upload handler
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64 = reader.result as string;
+      setPdfLogo(base64);
+      localStorage.setItem('pam_fiscal_logo', base64);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const removeLogo = () => {
+    setPdfLogo(null);
+    localStorage.removeItem('pam_fiscal_logo');
+  };
+
+  const handlePdfExport = () => {
+    if (!pdfModalApproval || !selectedObra) return;
+    localStorage.setItem('pam_fiscal_name', pdfFiscalName);
+    localStorage.setItem('pam_fiscal_company', pdfFiscalCompany);
+    generateMaterialApprovalPDF(
+      pdfModalApproval,
+      pdfModalApproval.ai_analysis,
+      selectedObra.nome,
+      pdfFiscalName,
+      pdfFiscalCompany,
+      pdfLogo || undefined
+    );
+    setPdfModalOpen(false);
+  };
+
+  // Helper to get display name (never email)
+  const getDecisionDisplayName = (a: Approval) => {
+    if ((a as any).fiscal_name) return (a as any).fiscal_name;
+    if (a.decided_by && !a.decided_by.includes('@')) return a.decided_by;
+    return '—';
   };
 
   // Stats
@@ -635,8 +679,8 @@ export default function MaterialApprovals() {
                           <div className="flex gap-2">
                             <Textarea
                               placeholder="Escreva uma observação..."
-                              value={expandedId === a.id ? fiscalNote : ''}
-                              onChange={e => setFiscalNote(e.target.value)}
+                              value={fiscalNote[a.id] || ''}
+                              onChange={e => setFiscalNote(prev => ({ ...prev, [a.id]: e.target.value }))}
                               rows={2}
                               className="flex-1"
                             />
@@ -644,7 +688,7 @@ export default function MaterialApprovals() {
                               size="sm"
                               variant="outline"
                               className="shrink-0 self-end"
-                              disabled={!fiscalNote.trim() || savingNote}
+                              disabled={!(fiscalNote[a.id]?.trim()) || savingNote}
                               onClick={() => handleSaveFiscalNote(a.id)}
                             >
                               {savingNote ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Guardar'}
@@ -671,7 +715,7 @@ export default function MaterialApprovals() {
                           {a.final_decision ? (
                             <div className="bg-muted/50 rounded-lg p-3">
                               <p className="text-sm"><span className="font-medium text-foreground">Decisão:</span> {a.final_decision === 'approved' ? 'Aprovado' : a.final_decision === 'approved_with_reservations' ? 'Aprovado c/ Reservas' : 'Rejeitado'}</p>
-                              {a.decided_by && <p className="text-xs text-muted-foreground">Por: {a.decided_by} em {a.decided_at ? new Date(a.decided_at).toLocaleDateString('pt-PT') : ''}</p>}
+                              {<p className="text-xs text-muted-foreground">Técnico Fiscal: {getDecisionDisplayName(a)} em {a.decided_at ? new Date(a.decided_at).toLocaleDateString('pt-PT') : ''}</p>}
                               {a.reviewer_notes && <p className="text-sm text-muted-foreground mt-1">Justificação: {a.reviewer_notes}</p>}
                             </div>
                           ) : (
@@ -689,13 +733,22 @@ export default function MaterialApprovals() {
                               </div>
                               {pendingDecision?.id === a.id && (
                                 <div className="space-y-2">
+                                  <div>
+                                    <label className="text-xs font-medium text-foreground">Técnico Fiscal *</label>
+                                    <Input
+                                      placeholder="Nome do técnico fiscal..."
+                                      value={decisionFiscalName}
+                                      onChange={e => setDecisionFiscalName(e.target.value)}
+                                      className="mt-1"
+                                    />
+                                  </div>
                                   <Textarea
                                     placeholder="Justificação da decisão (opcional)..."
                                     value={decisionNotes}
                                     onChange={e => setDecisionNotes(e.target.value)}
                                     rows={2}
                                   />
-                                  <Button size="sm" onClick={() => handleDecision(a.id, pendingDecision.decision, decisionNotes)}>
+                                  <Button size="sm" disabled={!decisionFiscalName.trim()} onClick={() => handleDecision(a.id, pendingDecision.decision, decisionNotes)}>
                                     Confirmar Decisão
                                   </Button>
                                 </div>
@@ -712,7 +765,10 @@ export default function MaterialApprovals() {
                             size="sm"
                             variant="outline"
                             className="gap-1"
-                            onClick={() => generateMaterialApprovalPDF(a, analysis, selectedObra.nome)}
+                            onClick={() => {
+                              setPdfModalApproval(a);
+                              setPdfModalOpen(true);
+                            }}
                           >
                             <Download className="w-3 h-3" /> Exportar PDF
                           </Button>
@@ -799,6 +855,70 @@ export default function MaterialApprovals() {
             <Button variant="outline" onClick={() => setNewModalOpen(false)}>Cancelar</Button>
             <Button onClick={handleSubmit} disabled={!category || !pdmFile || submitting}>
               {submitting ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> A submeter...</> : 'Submeter para Análise'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* PDF Export Modal */}
+      <Dialog open={pdfModalOpen} onOpenChange={setPdfModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Exportar Relatório PDF</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            {/* Logo upload */}
+            <div>
+              <label className="text-sm font-medium text-foreground">Logo da Empresa</label>
+              {pdfLogo ? (
+                <div className="mt-2 flex items-center gap-3">
+                  <img src={pdfLogo} alt="Logo" className="h-12 w-auto rounded border border-border object-contain" />
+                  <Button size="sm" variant="ghost" className="text-destructive" onClick={removeLogo}>
+                    <X className="w-3 h-3 mr-1" /> Remover
+                  </Button>
+                </div>
+              ) : (
+                <div
+                  className="mt-2 border-2 border-dashed border-border rounded-lg p-4 cursor-pointer hover:border-primary/50 transition flex items-center gap-3"
+                  onClick={() => document.getElementById('pdf-logo-upload')?.click()}
+                >
+                  <ImageIcon className="w-5 h-5 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">Carregar logo (PNG ou JPG)</span>
+                </div>
+              )}
+              <input
+                id="pdf-logo-upload"
+                type="file"
+                accept=".png,.jpg,.jpeg"
+                className="hidden"
+                onChange={handleLogoUpload}
+              />
+            </div>
+
+            {/* Fiscal name */}
+            <div>
+              <label className="text-sm font-medium text-foreground">Técnico Fiscal *</label>
+              <Input
+                placeholder="Nome do técnico fiscal..."
+                value={pdfFiscalName}
+                onChange={e => setPdfFiscalName(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+
+            {/* Company */}
+            <div>
+              <label className="text-sm font-medium text-foreground">Empresa / Entidade</label>
+              <Input
+                placeholder="Nome da empresa..."
+                value={pdfFiscalCompany}
+                onChange={e => setPdfFiscalCompany(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPdfModalOpen(false)}>Cancelar</Button>
+            <Button onClick={handlePdfExport} disabled={!pdfFiscalName.trim()} className="gap-1">
+              <Download className="w-4 h-4" /> Exportar PDF
             </Button>
           </DialogFooter>
         </DialogContent>

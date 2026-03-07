@@ -16,6 +16,7 @@ interface ApprovalData {
   reviewer_notes?: string | null;
   created_at: string;
   fiscal_notes?: FiscalNote[] | null;
+  fiscal_name?: string | null;
 }
 
 interface AnalysisData {
@@ -52,11 +53,15 @@ const CW = PAGE_W - ML - MR; // 160mm content width
 const PAGE_H = 297;
 const FOOTER_Y = PAGE_H - MB + 7; // 284
 const MAX_Y = PAGE_H - MB - 5;    // 272 — trigger new page before this
+const HEADER_RESERVED = 36; // space reserved for header on continuation pages
 
 export function generateMaterialApprovalPDF(
   approval: ApprovalData,
   analysis: AnalysisData,
-  obraName: string
+  obraName: string,
+  fiscalName?: string,
+  fiscalCompany?: string,
+  logoBase64?: string
 ) {
   const doc = new jsPDF('p', 'mm', 'a4');
   const now = new Date();
@@ -68,24 +73,43 @@ export function generateMaterialApprovalPDF(
   // ── Helpers ──
 
   const addHeader = () => {
+    let titleX = ML;
+
+    // Logo
+    if (logoBase64) {
+      try {
+        doc.addImage(logoBase64, 'PNG', ML, MT, 20, 12);
+        titleX = ML + 24;
+      } catch {
+        // ignore logo errors
+      }
+    }
+
     // Title left
     doc.setFontSize(18);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(30, 41, 59);
-    doc.text('Análise PAM', ML, MT + 6);
+    doc.text('Análise PAM', titleX, MT + 6);
 
     // Branding right
     doc.setFontSize(12);
     doc.setFont('helvetica', 'normal');
     doc.text('OBRIFY — Fiscalização Inteligente', PAGE_W - MR, MT + 6, { align: 'right' });
 
-    // Second line
+    // Second line — obra + date
     doc.setFontSize(9);
     doc.setTextColor(100, 116, 139);
     const subLine = `${obraName}  •  Gerado em ${dateStr} às ${timeStr}`;
     const subLines = doc.splitTextToSize(subLine, CW);
-    doc.text(subLines, ML, MT + 13);
-    const subH = subLines.length * 4;
+    doc.text(subLines, titleX, MT + 13);
+    let subH = subLines.length * 4;
+
+    // Fiscal name / company line
+    if (fiscalName) {
+      const fiscalLine = `Técnico Fiscal: ${fiscalName}${fiscalCompany ? ` — ${fiscalCompany}` : ''}`;
+      doc.text(fiscalLine, titleX, MT + 13 + subH);
+      subH += 4;
+    }
 
     // Separator line
     const lineY = MT + 14 + subH;
@@ -111,7 +135,6 @@ export function generateMaterialApprovalPDF(
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(148, 163, 184);
     doc.text('OBRIFY — Fiscalização Inteligente de Obras', ML, FOOTER_Y);
-    // Page number placeholder — will be overwritten in final pass
   };
 
   const addSectionTitle = (title: string) => {
@@ -127,7 +150,6 @@ export function generateMaterialApprovalPDF(
     doc.setFontSize(fontSize);
     const lines = doc.splitTextToSize(text, maxWidth);
     const lineH = fontSize * 0.45;
-    // Check if we need a page break mid-text
     for (let i = 0; i < lines.length; i++) {
       checkSpace(lineH + 1);
       doc.text(lines[i], x, y);
@@ -204,9 +226,11 @@ export function generateMaterialApprovalPDF(
   if (analysis.compliance_checks?.length) {
     addSectionTitle('Verificações de Conformidade');
 
+    const tableStartPage = doc.getNumberOfPages();
+
     autoTable(doc, {
       startY: y,
-      margin: { left: ML, right: MR },
+      margin: { left: ML, right: MR, top: MT + HEADER_RESERVED },
       head: [['Aspecto', 'Estado', 'Detalhe']],
       body: analysis.compliance_checks.map(c => [
         c.aspect,
@@ -220,9 +244,13 @@ export function generateMaterialApprovalPDF(
         1: { cellWidth: CW * 0.2 },
         2: { cellWidth: CW * 0.52 },
       },
-      didDrawPage: () => {
-        // header on new pages created by autoTable
-        y = addHeader();
+      didDrawPage: (data) => {
+        // Draw header on continuation pages (not the first table page)
+        if (data.pageNumber > 1 || doc.getNumberOfPages() > tableStartPage) {
+          const currentPage = doc.getNumberOfPages();
+          doc.setPage(currentPage);
+          addHeader();
+        }
       },
     });
     y = (doc as any).lastAutoTable.finalY + 8;
@@ -232,7 +260,6 @@ export function generateMaterialApprovalPDF(
   if (analysis.issues?.length && analysis.issues[0]) {
     addSectionTitle('Problemas Identificados');
 
-    // Pre-calculate wrapped lines to determine box height
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
     const allLines: string[] = [];
@@ -244,7 +271,7 @@ export function generateMaterialApprovalPDF(
     const boxH = allLines.length * lineH + 10;
 
     checkSpace(boxH);
-    doc.setFillColor(253, 232, 232); // #FDE8E8
+    doc.setFillColor(253, 232, 232);
     doc.roundedRect(ML, y, CW, boxH, 2, 2, 'F');
     y += 5;
     doc.setTextColor(185, 28, 28);
@@ -270,7 +297,7 @@ export function generateMaterialApprovalPDF(
     const boxH = allLines.length * lineH + 10;
 
     checkSpace(boxH);
-    doc.setFillColor(254, 249, 231); // #FEF9E7
+    doc.setFillColor(254, 249, 231);
     doc.roundedRect(ML, y, CW, boxH, 2, 2, 'F');
     y += 5;
     doc.setTextColor(146, 64, 14);
@@ -319,7 +346,6 @@ export function generateMaterialApprovalPDF(
 
     checkSpace(25);
     doc.setFillColor(241, 245, 249);
-    // We'll draw the background after calculating content height
     const boxStartY = y;
     y += 5;
 
@@ -332,12 +358,19 @@ export function generateMaterialApprovalPDF(
     doc.text(`Decisão: ${decLabel}`, ML + 4, y);
     y += 6;
 
-    if (approval.decided_by) {
+    // Resolve display name: fiscal_name > decided_by (only if not email) > fiscalName param
+    const displayName = approval.fiscal_name
+      || (approval.decided_by && !approval.decided_by.includes('@') ? approval.decided_by : null)
+      || fiscalName
+      || null;
+
+    if (displayName) {
       doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(100, 116, 139);
       const decDate = approval.decided_at ? new Date(approval.decided_at).toLocaleDateString('pt-PT') : '';
-      addWrappedText(`Por: ${approval.decided_by} em ${decDate}`, ML + 4, CW - 8, 9);
+      const companyPart = fiscalCompany ? ` — ${fiscalCompany}` : '';
+      addWrappedText(`Técnico Fiscal: ${displayName}${companyPart} em ${decDate}`, ML + 4, CW - 8, 9);
     }
 
     if (approval.reviewer_notes) {
@@ -348,14 +381,10 @@ export function generateMaterialApprovalPDF(
     }
     y += 3;
 
-    // Draw background rect (only on same page — simplified)
     const boxH = y - boxStartY;
     const currentPage = doc.getNumberOfPages();
     doc.setPage(currentPage);
-    // Move content drawing is already done; draw rect behind on same page
     doc.setFillColor(241, 245, 249);
-    // Since jsPDF draws in order, we accept the rect overlapping is not behind.
-    // Alternative: we pre-calc. For simplicity, skip background rect for multi-page decisions.
   }
 
   // ── Confidence bar ──
