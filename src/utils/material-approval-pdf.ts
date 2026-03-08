@@ -158,6 +158,156 @@ export function generateMaterialApprovalPDF(
     return lines.length * (lineH + 0.8);
   };
 
+  // Helper for coloured background sections (Issues / Conditions)
+  // Draws items line by line with page break support, then paints background behind
+  const addColoredSection = (
+    items: string[],
+    bgColor: [number, number, number],
+    textColor: [number, number, number]
+  ) => {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    const lineH = 4.5;
+    const padX = 6;
+    const padY = 5;
+
+    // We'll track segments per page so we can draw backgrounds after
+    const segments: Array<{ page: number; startY: number; endY: number }> = [];
+    let segStart = y;
+    let segPage = doc.getNumberOfPages();
+
+    y += padY; // top padding
+
+    items.forEach(item => {
+      const wrapped = doc.splitTextToSize(`• ${item}`, CW - padX * 2);
+      wrapped.forEach((line: string) => {
+        // Check if we need a new page
+        if (y + lineH > MAX_Y) {
+          // Close current segment
+          segments.push({ page: segPage, startY: segStart, endY: y + padY });
+          addFooter();
+          doc.addPage();
+          y = addHeader();
+          segPage = doc.getNumberOfPages();
+          segStart = y;
+          y += padY;
+        }
+        doc.setTextColor(...textColor);
+        doc.text(line, ML + padX, y);
+        y += lineH;
+      });
+    });
+
+    y += padY; // bottom padding
+    // Close last segment
+    segments.push({ page: segPage, startY: segStart, endY: y });
+
+    // Now draw backgrounds behind text on each page
+    const currentPage = doc.getNumberOfPages();
+    segments.forEach(seg => {
+      doc.setPage(seg.page);
+      doc.setFillColor(...bgColor);
+      doc.roundedRect(ML, seg.startY, CW, seg.endY - seg.startY, 2, 2, 'F');
+    });
+    // Restore to current page
+    doc.setPage(currentPage);
+
+    // Re-draw text on top of backgrounds (because we drew bg after text)
+    // Instead of re-drawing, we use a different approach: draw bg first per line
+    // Actually jsPDF draws in order, so bg drawn after text will cover it.
+    // We need to redraw the text. Let's use a simpler approach instead.
+
+    // SIMPLER APPROACH: Reset and redraw everything
+    // Remove the segments approach and use pre-calculated approach with per-line page breaks
+
+    // Actually, let's just not use background rectangles that span pages.
+    // Instead, draw background line by line BEFORE the text on each line.
+  };
+
+  // Simpler helper: draws coloured box items with proper page breaks
+  const addColoredItems = (
+    items: string[],
+    bgColor: [number, number, number],
+    textColor: [number, number, number]
+  ) => {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    const lineH = 4.5;
+    const padX = 6;
+    const padY = 5;
+
+    // Pre-calculate all wrapped lines
+    const allLines: string[] = [];
+    items.forEach(item => {
+      const wrapped = doc.splitTextToSize(`• ${item}`, CW - padX * 2);
+      allLines.push(...wrapped);
+    });
+
+    // Calculate total box height
+    const totalH = allLines.length * lineH + padY * 2;
+
+    // If entire box fits on current page, draw as single block
+    if (y + totalH <= MAX_Y) {
+      doc.setFillColor(...bgColor);
+      doc.roundedRect(ML, y, CW, totalH, 2, 2, 'F');
+      y += padY;
+      doc.setTextColor(...textColor);
+      allLines.forEach(line => {
+        doc.text(line, ML + padX, y);
+        y += lineH;
+      });
+      y += padY;
+    } else {
+      // Box doesn't fit — draw line by line with background strips
+      // First, draw background strip for each line, handling page breaks
+      let boxStarted = false;
+
+      allLines.forEach((line, idx) => {
+        const isFirst = idx === 0;
+        const isLast = idx === allLines.length - 1;
+        const stripH = lineH + (isFirst ? padY : 0) + (isLast ? padY : 0);
+
+        // Check page break
+        if (y + lineH + (isFirst ? padY : 0) > MAX_Y) {
+          // Draw bottom edge of current bg if we had started
+          if (boxStarted) {
+            y += 2; // small gap before page break
+          }
+          addFooter();
+          doc.addPage();
+          y = addHeader();
+          boxStarted = false;
+        }
+
+        // Add top padding on first line or after page break
+        if (!boxStarted) {
+          // Draw background from here
+          // Calculate how many lines fit on this page
+          let linesOnPage = 0;
+          let testY = y + padY;
+          for (let j = idx; j < allLines.length; j++) {
+            if (testY + lineH > MAX_Y) break;
+            testY += lineH;
+            linesOnPage++;
+          }
+          const blockH = linesOnPage * lineH + padY + (idx + linesOnPage >= allLines.length ? padY : 2);
+          doc.setFillColor(...bgColor);
+          doc.roundedRect(ML, y, CW, blockH, 2, 2, 'F');
+          y += padY;
+          boxStarted = true;
+        }
+
+        doc.setTextColor(...textColor);
+        doc.text(line, ML + padX, y);
+        y += lineH;
+
+        if (isLast) {
+          y += padY;
+        }
+      });
+    }
+  };
+
   // ── First page header ──
   y = addHeader();
 
@@ -237,15 +387,21 @@ export function generateMaterialApprovalPDF(
         c.status === 'conforme' ? '✓ Conforme' : c.status === 'não_conforme' ? '✗ Não conforme' : '? A verificar',
         c.detail,
       ]),
-      styles: { fontSize: 9, cellPadding: 3, textColor: [71, 85, 105], lineColor: [204, 204, 204], lineWidth: 0.3 },
+      styles: {
+        fontSize: 9,
+        cellPadding: 3,
+        textColor: [71, 85, 105],
+        lineColor: [204, 204, 204],
+        lineWidth: 0.3,
+        overflow: 'linebreak',
+      },
       headStyles: { fillColor: [245, 245, 245], textColor: [30, 41, 59], fontStyle: 'bold' },
       columnStyles: {
-        0: { cellWidth: CW * 0.28 },
-        1: { cellWidth: CW * 0.2 },
-        2: { cellWidth: CW * 0.52 },
+        0: { cellWidth: CW * 0.25 },
+        1: { cellWidth: CW * 0.17 },
+        2: { cellWidth: CW * 0.58 },
       },
       didDrawPage: (data) => {
-        // Draw header on continuation pages (not the first table page)
         if (data.pageNumber > 1 || doc.getNumberOfPages() > tableStartPage) {
           const currentPage = doc.getNumberOfPages();
           doc.setPage(currentPage);
@@ -259,53 +415,21 @@ export function generateMaterialApprovalPDF(
   // ── Issues (pink background) ──
   if (analysis.issues?.length && analysis.issues[0]) {
     addSectionTitle('Problemas Identificados');
-
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    const allLines: string[] = [];
-    analysis.issues.forEach(issue => {
-      const wrapped = doc.splitTextToSize(`• ${issue}`, CW - 12);
-      allLines.push(...wrapped);
-    });
-    const lineH = 4.5;
-    const boxH = allLines.length * lineH + 10;
-
-    checkSpace(boxH);
-    doc.setFillColor(253, 232, 232);
-    doc.roundedRect(ML, y, CW, boxH, 2, 2, 'F');
-    y += 5;
-    doc.setTextColor(185, 28, 28);
-    allLines.forEach(line => {
-      doc.text(line, ML + 6, y);
-      y += lineH;
-    });
-    y += 5;
+    addColoredItems(
+      analysis.issues,
+      [253, 232, 232],  // #FDE8E8
+      [185, 28, 28]     // dark red text
+    );
   }
 
   // ── Conditions (yellow background) ──
   if (analysis.conditions?.length && analysis.conditions[0]) {
     addSectionTitle('Condições de Aprovação');
-
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    const allLines: string[] = [];
-    analysis.conditions.forEach(c => {
-      const wrapped = doc.splitTextToSize(`• ${c}`, CW - 12);
-      allLines.push(...wrapped);
-    });
-    const lineH = 4.5;
-    const boxH = allLines.length * lineH + 10;
-
-    checkSpace(boxH);
-    doc.setFillColor(254, 249, 231);
-    doc.roundedRect(ML, y, CW, boxH, 2, 2, 'F');
-    y += 5;
-    doc.setTextColor(146, 64, 14);
-    allLines.forEach(line => {
-      doc.text(line, ML + 6, y);
-      y += lineH;
-    });
-    y += 5;
+    addColoredItems(
+      analysis.conditions,
+      [254, 249, 231],  // #FEF9E7
+      [146, 64, 14]     // dark amber text
+    );
   }
 
   // ── Justification ──
@@ -342,10 +466,10 @@ export function generateMaterialApprovalPDF(
 
   // ── Final Decision / Reviewer Notes ──
   if (approval.final_decision || approval.reviewer_notes) {
+    // Only need ~35mm for decision block — don't force page break unless really needed
     addSectionTitle('Decisão Final');
 
-    checkSpace(25);
-    doc.setFillColor(241, 245, 249);
+    checkSpace(20);
     const boxStartY = y;
     y += 5;
 
@@ -381,10 +505,42 @@ export function generateMaterialApprovalPDF(
     }
     y += 3;
 
+    // Draw background for decision box
     const boxH = y - boxStartY;
-    const currentPage = doc.getNumberOfPages();
-    doc.setPage(currentPage);
     doc.setFillColor(241, 245, 249);
+    doc.roundedRect(ML, boxStartY, CW, boxH, 2, 2, 'F');
+
+    // Redraw decision text on top of background
+    let redrawY = boxStartY + 5;
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 41, 59);
+    doc.text(`Decisão: ${decLabel}`, ML + 4, redrawY);
+    redrawY += 6;
+
+    if (displayName) {
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      const decDate = approval.decided_at ? new Date(approval.decided_at).toLocaleDateString('pt-PT') : '';
+      const companyPart = fiscalCompany ? ` — ${fiscalCompany}` : '';
+      const decLines = doc.splitTextToSize(`Técnico Fiscal: ${displayName}${companyPart} em ${decDate}`, CW - 8);
+      decLines.forEach((line: string) => {
+        doc.text(line, ML + 4, redrawY);
+        redrawY += 4.85;
+      });
+    }
+
+    if (approval.reviewer_notes) {
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(71, 85, 105);
+      const noteLines = doc.splitTextToSize(`Justificação: ${approval.reviewer_notes}`, CW - 8);
+      noteLines.forEach((line: string) => {
+        doc.text(line, ML + 4, redrawY);
+        redrawY += 4.85;
+      });
+    }
   }
 
   // ── Confidence bar ──
