@@ -104,7 +104,7 @@ export function useEngSilvaVoice() {
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [memory, setMemory] = useState<{ profile: any; summaries: any[] }>({ profile: {}, summaries: [] });
-  const [projectKnowledge, setProjectKnowledge] = useState<any[]>([]);
+  
 
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
