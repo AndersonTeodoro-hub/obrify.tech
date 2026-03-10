@@ -296,7 +296,9 @@ export function useEngSilvaVoice() {
       const chatBody: any = {
         message: userText,
         conversation_history: conversationRef.current,
-        system: buildSystemPrompt(memoryRef.current, projectKnowledgeRef.current),
+        system: buildSystemPrompt(memoryRef.current),
+        obra_id: memoryRef.current?.profile?.current_obra_id || null,
+        user_id: (await supabase.auth.getUser())?.data?.user?.id || null,
       };
 
       if (pendingImageRef.current) {
