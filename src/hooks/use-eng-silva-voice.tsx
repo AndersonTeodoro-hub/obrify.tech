@@ -401,23 +401,6 @@ export function useEngSilvaVoice() {
     // Load memory before starting
     const loadedMemory = await loadMemory();
 
-    // Load project knowledge if obra_id is available
-    try {
-      const obraId = memoryRef.current?.profile?.current_obra_id;
-      if (obraId) {
-        const { data: knowledgeData } = await supabase.functions.invoke('eng-silva-knowledge', {
-          body: { action: 'load', obra_id: obraId },
-        });
-        if (knowledgeData?.knowledge) {
-          setProjectKnowledge(knowledgeData.knowledge);
-          projectKnowledgeRef.current = knowledgeData.knowledge;
-          console.log(`ENG-SILVA: Loaded knowledge for ${knowledgeData.knowledge.length} documents`);
-        }
-      }
-    } catch (err) {
-      console.error('ENG-SILVA: Failed to load project knowledge:', err);
-    }
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },

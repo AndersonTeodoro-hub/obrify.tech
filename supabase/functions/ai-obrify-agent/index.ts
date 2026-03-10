@@ -349,7 +349,7 @@ serve(async (req) => {
     const actionResults: unknown[] = [];
     if (actions && actions.length > 0) {
       for (const action of actions) {
-        const result = await executeAction(supabase, action);
+        const result = await executeAction(supabase as any, action);
         actionResults.push({ tool: action.tool, result });
 
         // Log action

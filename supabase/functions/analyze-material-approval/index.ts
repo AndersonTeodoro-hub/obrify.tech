@@ -249,7 +249,7 @@ ${getAnalysisPrompt(material_category)}`,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("PAM ERROR:", error);
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
