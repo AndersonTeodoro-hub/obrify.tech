@@ -212,7 +212,7 @@ async function executeAction(
           .from("project_conflicts").select("*").eq("id", p.conflictId).single();
         if (cErr || !conflict) return { error: "Conflito não encontrado" };
         // Mark conflict as nc_created
-        await supabase.from("project_conflicts")
+        await (supabase as any).from("project_conflicts")
           .update({ status: "nc_created" })
           .eq("id", p.conflictId);
         return { success: true, conflictId: p.conflictId, status: "nc_created" };
