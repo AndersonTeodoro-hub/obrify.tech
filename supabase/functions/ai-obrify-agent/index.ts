@@ -123,7 +123,7 @@ async function executeAction(
       case "SAVE_REPORT": {
         const p = action.params as { reportData?: unknown; type?: string; siteId?: string; orgId?: string; name?: string };
         if (!p.orgId || !p.siteId) return { error: "orgId e siteId são obrigatórios" };
-        const { data: pathData } = await supabase.rpc("get_file_path", {
+        const { data: pathData } = await (supabase as any).rpc("get_file_path", {
           _org_id: p.orgId, _site_id: p.siteId, _file_type: "report",
         });
         const filePath = (pathData || `organizations/${p.orgId}/sites/${p.siteId}/reports/`) + (p.name || `report_${Date.now()}.pdf`);
