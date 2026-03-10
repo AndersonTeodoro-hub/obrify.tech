@@ -120,7 +120,7 @@ export function useEngSilvaVoice() {
   const startListeningRef = useRef<(() => void) | null>(null);
   const memoryRef = useRef(memory);
   const pendingImageRef = useRef<string | null>(null);
-  const projectKnowledgeRef = useRef<any[]>([]);
+  
 
   const setPendingImage = useCallback((base64: string) => {
     pendingImageRef.current = base64;
