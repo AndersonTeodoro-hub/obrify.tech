@@ -1,46 +1,93 @@
 
 
-# Update eng-silva voice hook + Fix build errors
+# Fix: Mudar todas as políticas RLS de RESTRICTIVE para PERMISSIVE
 
-## File 1: `src/hooks/use-eng-silva-voice.tsx`
+## Problema
 
-### Changes:
-1. **`buildSystemPrompt`** — Remove `projectKnowledge` parameter and the entire "Project knowledge injection" block (lines 88-123). Update signature to `(memory: { profile: any; summaries: any[] }): string`. Change console.log to `"ENG-SILVA: Building prompt (knowledge handled by backend)"`.
+Todas as políticas RLS nas tabelas `organizations` e `memberships` estão como **RESTRICTIVE** (`Permissive: No`). Em PostgreSQL, políticas RESTRICTIVE exigem que TODAS passem (lógica AND), enquanto PERMISSIVE exige que QUALQUER uma passe (lógica OR). Isto bloqueia a criação de organizações.
 
-2. **`processAudio` chatBody** (line 333-337) — Add `obra_id` and `user_id`:
-```typescript
-const chatBody: any = {
-  message: userText,
-  conversation_history: conversationRef.current,
-  system: buildSystemPrompt(memoryRef.current),
-  obra_id: memoryRef.current?.profile?.current_obra_id || null,
-  user_id: (await supabase.auth.getUser())?.data?.user?.id || null,
-};
+## Migração SQL (um único ficheiro)
+
+```sql
+-- ============================================
+-- FIX: Mudar políticas de RESTRICTIVE para PERMISSIVE
+-- ============================================
+
+-- 1. DROP todas as políticas da tabela organizations
+DROP POLICY IF EXISTS "Authenticated users can create organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Members can view their organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can update organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can delete organizations" ON public.organizations;
+
+-- 2. Recriar como PERMISSIVE (default)
+CREATE POLICY "Authenticated users can create organizations"
+  ON public.organizations FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() IS NOT NULL);
+
+CREATE POLICY "Members can view their organizations"
+  ON public.organizations FOR SELECT
+  TO authenticated
+  USING (is_org_member(auth.uid(), id));
+
+CREATE POLICY "Admins can update organizations"
+  ON public.organizations FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+
+CREATE POLICY "Admins can delete organizations"
+  ON public.organizations FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+
+-- 3. DROP todas as políticas da tabela memberships
+DROP POLICY IF EXISTS "Users can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Members can view memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can update memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can delete memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Users can view own memberships" ON public.memberships;
+
+-- 4. Recriar TODAS as políticas de memberships como PERMISSIVE
+CREATE POLICY "Users can insert memberships"
+  ON public.memberships FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+    AND (
+      has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+      OR NOT EXISTS (
+        SELECT 1 FROM public.memberships m
+        WHERE m.org_id = memberships.org_id
+      )
+    )
+  );
+
+CREATE POLICY "Members can view memberships"
+  ON public.memberships FOR SELECT
+  TO authenticated
+  USING (
+    auth.uid() = user_id
+    OR has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+  );
+
+CREATE POLICY "Admins can update memberships"
+  ON public.memberships FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+
+CREATE POLICY "Admins can delete memberships"
+  ON public.memberships FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
 ```
 
-3. **`start()` function** (lines 439-454) — Remove the entire knowledge loading block (the try/catch that invokes `eng-silva-knowledge`).
+## Resumo
 
-4. **Remove unused state/refs** — Delete `projectKnowledge` state (line 144) and `projectKnowledgeRef` ref (line 160).
+| Tabela | Acção |
+|---|---|
+| `organizations` | Drop 4 políticas RESTRICTIVE, recriar 4 como PERMISSIVE |
+| `memberships` | Drop todas as políticas, recriar 4 como PERMISSIVE (INSERT, SELECT, UPDATE, DELETE) |
 
-## File 2: `supabase/functions/ai-obrify-agent/index.ts`
-
-Fix 3 type errors by adding `as any` casts on lines 126, 130, and 216 where Supabase types don't match runtime schema, and cast the supabase client on line 352:
-- Line 126: `await (supabase as any).rpc("get_file_path", ...)`
-- Line 130: `await (supabase as any).from("file_organization").insert(...)`
-- Line 216: `await (supabase as any).from("project_conflicts").update(...)`
-- Line 352: `await executeAction(supabase as any, action)`
-
-## Files 3-8: Edge function `error.message` fixes (TS18046)
-
-In each of these 6 files, change the catch block from `} catch (error) {` to `} catch (error: any) {`:
-- `supabase/functions/analyze-material-approval/index.ts` (line 252)
-- `supabase/functions/eng-silva-chat/index.ts` (line 319)
-- `supabase/functions/eng-silva-knowledge/index.ts` (line ~241)
-- `supabase/functions/eng-silva-memory/index.ts` (line ~104)
-- `supabase/functions/eng-silva-stt/index.ts` (line ~41)
-- `supabase/functions/eng-silva-tts/index.ts` (line ~52)
-- `supabase/functions/incompaticheck-analyze/index.ts` (line ~147)
-
-## Files changed (8 total)
-Only the files listed above. No dependency changes.
+Nenhuma alteração de código necessária — apenas a migração da base de dados.
 

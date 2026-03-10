@@ -123,11 +123,11 @@ async function executeAction(
       case "SAVE_REPORT": {
         const p = action.params as { reportData?: unknown; type?: string; siteId?: string; orgId?: string; name?: string };
         if (!p.orgId || !p.siteId) return { error: "orgId e siteId são obrigatórios" };
-        const { data: pathData } = await supabase.rpc("get_file_path", {
+        const { data: pathData } = await (supabase as any).rpc("get_file_path", {
           _org_id: p.orgId, _site_id: p.siteId, _file_type: "report",
         });
         const filePath = (pathData || `organizations/${p.orgId}/sites/${p.siteId}/reports/`) + (p.name || `report_${Date.now()}.pdf`);
-        const { data, error } = await supabase.from("file_organization").insert({
+        const { data, error } = await (supabase as any).from("file_organization").insert({
           organization_id: p.orgId,
           site_id: p.siteId,
           file_path: filePath,
@@ -212,7 +212,7 @@ async function executeAction(
           .from("project_conflicts").select("*").eq("id", p.conflictId).single();
         if (cErr || !conflict) return { error: "Conflito não encontrado" };
         // Mark conflict as nc_created
-        await supabase.from("project_conflicts")
+        await (supabase as any).from("project_conflicts")
           .update({ status: "nc_created" })
           .eq("id", p.conflictId);
         return { success: true, conflictId: p.conflictId, status: "nc_created" };
@@ -349,7 +349,7 @@ serve(async (req) => {
     const actionResults: unknown[] = [];
     if (actions && actions.length > 0) {
       for (const action of actions) {
-        const result = await executeAction(supabase, action);
+        const result = await executeAction(supabase as any, action);
         actionResults.push({ tool: action.tool, result });
 
         // Log action

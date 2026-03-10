@@ -49,8 +49,8 @@ LIMITES:
 
 IMPORTANTE: Estás numa conversa por VOZ. Responde sempre como se estivesses ao telefone com um colega. Curto, directo, natural. Nada de texto formatado.`;
 
-function buildSystemPrompt(memory: { profile: any; summaries: any[] }, projectKnowledge: any[]): string {
-  console.log("ENG-SILVA: Building prompt with", projectKnowledge.length, "knowledge docs");
+function buildSystemPrompt(memory: { profile: any; summaries: any[] }): string {
+  console.log("ENG-SILVA: Building prompt (knowledge handled by backend)");
   let prompt = BASE_SYSTEM_PROMPT;
 
   const { profile, summaries } = memory;
@@ -85,43 +85,6 @@ Tens acesso aos resultados da análise de incompatibilidades feita pelo Incompat
     }
   }
 
-  // Project knowledge injection
-  const knowledge = projectKnowledge;
-  if (knowledge && knowledge.length > 0) {
-    const limitedDocs = knowledge.slice(0, 15);
-    let knowledgeText = `\n\nCONHECIMENTO DO PROJECTO (${knowledge.length} documentos):`;
-
-    const bySpecialty: Record<string, any[]> = {};
-    limitedDocs.forEach(doc => {
-      if (!bySpecialty[doc.specialty]) bySpecialty[doc.specialty] = [];
-      bySpecialty[doc.specialty].push(doc);
-    });
-
-    Object.entries(bySpecialty).forEach(([specialty, docs]) => {
-      knowledgeText += `\n--- ${specialty.toUpperCase()} ---`;
-      docs.forEach(doc => {
-        const words = (doc.summary || '').split(' ');
-        const shortSummary = words.slice(0, 100).join(' ');
-        knowledgeText += `\n${doc.document_name}: ${shortSummary}`;
-        if (doc.key_elements && doc.key_elements.length > 0) {
-          const elements = doc.key_elements.slice(0, 5);
-          const validElements = elements.filter((e: any) => e && e.type && e.id);
-          if (validElements.length > 0) {
-            knowledgeText += ` | Elementos: ${validElements.map((e: any) => `${e.type}:${e.id}`).join(', ')}`;
-          }
-        }
-      });
-    });
-
-    // Hard limit on total knowledge text
-    if (knowledgeText.length > 4000) {
-      knowledgeText = knowledgeText.substring(0, 4000) + '\n[... truncado]';
-    }
-
-    knowledgeText += `\n\nUsa este conhecimento para responder com precisão. Refere documentos quando relevante.`;
-    prompt += knowledgeText;
-  }
-
   prompt += `\n\nEXTRAÇÃO DE PERFIL:
 Se o fiscal mencionar o seu nome, empresa, obra, ou função, inclui no INÍCIO da tua resposta (antes do texto normal) uma linha especial no formato:
 [PERFIL: nome=..., empresa=..., obra=..., funcao=...]
@@ -141,7 +104,7 @@ export function useEngSilvaVoice() {
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [memory, setMemory] = useState<{ profile: any; summaries: any[] }>({ profile: {}, summaries: [] });
-  const [projectKnowledge, setProjectKnowledge] = useState<any[]>([]);
+  
 
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -157,7 +120,7 @@ export function useEngSilvaVoice() {
   const startListeningRef = useRef<(() => void) | null>(null);
   const memoryRef = useRef(memory);
   const pendingImageRef = useRef<string | null>(null);
-  const projectKnowledgeRef = useRef<any[]>([]);
+  
 
   const setPendingImage = useCallback((base64: string) => {
     pendingImageRef.current = base64;
@@ -333,7 +296,9 @@ export function useEngSilvaVoice() {
       const chatBody: any = {
         message: userText,
         conversation_history: conversationRef.current,
-        system: buildSystemPrompt(memoryRef.current, projectKnowledgeRef.current),
+        system: buildSystemPrompt(memoryRef.current),
+        obra_id: memoryRef.current?.profile?.current_obra_id || null,
+        user_id: (await supabase.auth.getUser())?.data?.user?.id || null,
       };
 
       if (pendingImageRef.current) {
@@ -435,23 +400,6 @@ export function useEngSilvaVoice() {
 
     // Load memory before starting
     const loadedMemory = await loadMemory();
-
-    // Load project knowledge if obra_id is available
-    try {
-      const obraId = memoryRef.current?.profile?.current_obra_id;
-      if (obraId) {
-        const { data: knowledgeData } = await supabase.functions.invoke('eng-silva-knowledge', {
-          body: { action: 'load', obra_id: obraId },
-        });
-        if (knowledgeData?.knowledge) {
-          setProjectKnowledge(knowledgeData.knowledge);
-          projectKnowledgeRef.current = knowledgeData.knowledge;
-          console.log(`ENG-SILVA: Loaded knowledge for ${knowledgeData.knowledge.length} documents`);
-        }
-      }
-    } catch (err) {
-      console.error('ENG-SILVA: Failed to load project knowledge:', err);
-    }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
