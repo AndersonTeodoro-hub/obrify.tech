@@ -127,7 +127,7 @@ async function executeAction(
           _org_id: p.orgId, _site_id: p.siteId, _file_type: "report",
         });
         const filePath = (pathData || `organizations/${p.orgId}/sites/${p.siteId}/reports/`) + (p.name || `report_${Date.now()}.pdf`);
-        const { data, error } = await supabase.from("file_organization").insert({
+        const { data, error } = await (supabase as any).from("file_organization").insert({
           organization_id: p.orgId,
           site_id: p.siteId,
           file_path: filePath,
