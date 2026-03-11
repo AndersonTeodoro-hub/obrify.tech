@@ -1,93 +1,53 @@
 
 
-# Fix: Mudar todas as políticas RLS de RESTRICTIVE para PERMISSIVE
+# Relatórios Fotográficos — Bloco 2: PDF Export + Logo
 
-## Problema
+## Important finding
+The `docx` library is **not installed** in the project (not in package.json). Only `jspdf` and `jspdf-autotable` are available. I will implement the PDF export fully, but for DOCX I need to install the `docx` package first.
 
-Todas as políticas RLS nas tabelas `organizations` e `memberships` estão como **RESTRICTIVE** (`Permissive: No`). Em PostgreSQL, políticas RESTRICTIVE exigem que TODAS passem (lógica AND), enquanto PERMISSIVE exige que QUALQUER uma passe (lógica OR). Isto bloqueia a criação de organizações.
+## Files to create/change (3 files)
 
-## Migração SQL (um único ficheiro)
+### 1. NEW: `src/utils/photo-report-pdf.ts`
+PDF generator using jsPDF following existing conventions (25mm margins, 160mm content width, splitTextToSize everywhere).
 
-```sql
--- ============================================
--- FIX: Mudar políticas de RESTRICTIVE para PERMISSIVE
--- ============================================
+- `generatePhotoReportPDF(report, obraName, obraCidade, empreiteiro, fiscalName, fiscalCompany, photoImages, logoBase64?)` 
+- Header on every page: logo (if provided) + title + obra name + date + green separator line (#4A7C59)
+- Page 1: info table (obra, localização, empreiteiro, fiscalização, data, meteo, trabalhadores, equipamentos) + "Trabalhos Realizados" section
+- Photo pages: 2 photos per row (~80mm each), with "Foto N", description, location below each
+- Final section: observations + signature block (2 columns: Técnico Fiscal / Director de Obra)
+- Footer: company name left, "Página X de Y" right
 
--- 1. DROP todas as políticas da tabela organizations
-DROP POLICY IF EXISTS "Authenticated users can create organizations" ON public.organizations;
-DROP POLICY IF EXISTS "Members can view their organizations" ON public.organizations;
-DROP POLICY IF EXISTS "Admins can update organizations" ON public.organizations;
-DROP POLICY IF EXISTS "Admins can delete organizations" ON public.organizations;
+### 2. NEW: `src/utils/photo-report-docx.ts`
+DOCX generator using the `docx` npm package (needs to be installed).
 
--- 2. Recriar como PERMISSIVE (default)
-CREATE POLICY "Authenticated users can create organizations"
-  ON public.organizations FOR INSERT
-  TO authenticated
-  WITH CHECK (auth.uid() IS NOT NULL);
+- Same layout as PDF: header with logo, info table, photo grid 2-col, observations, signatures
+- Photos as `ImageRun` in `TableCell` with 220px fixed width
+- Header/footer on every section
 
-CREATE POLICY "Members can view their organizations"
-  ON public.organizations FOR SELECT
-  TO authenticated
-  USING (is_org_member(auth.uid(), id));
+### 3. EDIT: `src/pages/app/PhotoReports.tsx`
 
-CREATE POLICY "Admins can update organizations"
-  ON public.organizations FOR UPDATE
-  TO authenticated
-  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+**New state:**
+- `reportLogo` (string | null, init from `localStorage.getItem('photo_report_logo')`)
+- `exporting` (boolean)
 
-CREATE POLICY "Admins can delete organizations"
-  ON public.organizations FOR DELETE
-  TO authenticated
-  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+**Logo upload in form** (Section 1, before Obra field):
+- Upload area for PNG/JPG, convert to base64, save to localStorage `photo_report_logo`
+- Preview with remove button
 
--- 3. DROP todas as políticas da tabela memberships
-DROP POLICY IF EXISTS "Users can insert memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Admins can insert memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Members can view memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Admins can update memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Admins can delete memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Users can view own memberships" ON public.memberships;
+**Export buttons in list view** (each report card):
+- "PDF" and "DOCX" icon buttons alongside Edit/Delete
 
--- 4. Recriar TODAS as políticas de memberships como PERMISSIVE
-CREATE POLICY "Users can insert memberships"
-  ON public.memberships FOR INSERT
-  TO authenticated
-  WITH CHECK (
-    auth.uid() = user_id
-    AND (
-      has_org_role(auth.uid(), org_id, 'admin'::membership_role)
-      OR NOT EXISTS (
-        SELECT 1 FROM public.memberships m
-        WHERE m.org_id = memberships.org_id
-      )
-    )
-  );
+**Export buttons in form view** (Section 6, alongside save buttons):
+- "Exportar PDF" and "Exportar DOCX" buttons
+- If report not yet saved, auto-save as draft first
 
-CREATE POLICY "Members can view memberships"
-  ON public.memberships FOR SELECT
-  TO authenticated
-  USING (
-    auth.uid() = user_id
-    OR has_org_role(auth.uid(), org_id, 'admin'::membership_role)
-  );
+**Export logic:**
+1. Download each photo from `photo-reports` bucket via `supabase.storage.from('photo-reports').download(file_path)`
+2. Convert blobs to base64
+3. Call `generatePhotoReportPDF` or `generatePhotoReportDOCX`
+4. Trigger browser download
+5. Skip failed photo downloads gracefully
 
-CREATE POLICY "Admins can update memberships"
-  ON public.memberships FOR UPDATE
-  TO authenticated
-  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
-
-CREATE POLICY "Admins can delete memberships"
-  ON public.memberships FOR DELETE
-  TO authenticated
-  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
-```
-
-## Resumo
-
-| Tabela | Acção |
-|---|---|
-| `organizations` | Drop 4 políticas RESTRICTIVE, recriar 4 como PERMISSIVE |
-| `memberships` | Drop todas as políticas, recriar 4 como PERMISSIVE (INSERT, SELECT, UPDATE, DELETE) |
-
-Nenhuma alteração de código necessária — apenas a migração da base de dados.
+### Dependency
+- Need to install `docx` package for DOCX generation
 
