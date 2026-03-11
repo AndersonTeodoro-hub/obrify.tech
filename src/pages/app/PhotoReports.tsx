@@ -48,7 +48,7 @@ export default function PhotoReports() {
   const [formOpen, setFormOpen] = useState(false);
   const [editingReport, setEditingReport] = useState<Report | null>(null);
   const [reportDate, setReportDate] = useState<Date>(new Date());
-  const [empreiteiro, setEmpreiteiro] = useState('');
+  const [empreiteiro, setEmpreiteiro] = useState(() => localStorage.getItem('photo_report_contractor') || 'Ferreira Build Power');
   const [fiscalName, setFiscalName] = useState(() => localStorage.getItem('pam_fiscal_name') || '');
   const [fiscalCompany, setFiscalCompany] = useState(() => localStorage.getItem('pam_fiscal_company') || 'DDN');
   const [weatherChecks, setWeatherChecks] = useState<Record<string, boolean>>({ sol: false, nublado: false, chuva: false, vento: false });
