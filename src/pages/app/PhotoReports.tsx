@@ -10,7 +10,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { pt } from 'date-fns/locale';
@@ -18,7 +17,10 @@ import { cn } from '@/lib/utils';
 import {
   Camera, Plus, Trash2, Building2, ArrowLeft, CalendarIcon,
   Loader2, ArrowUp, ArrowDown, X, ImageIcon, Edit, FileText,
+  Download, Upload,
 } from 'lucide-react';
+import { generatePhotoReportPDF, type PhotoForExport } from '@/utils/photo-report-pdf';
+import { generatePhotoReportDOCX } from '@/utils/photo-report-docx';
 
 type Obra = { id: string; nome: string; cidade: string | null };
 type PhotoMeta = { file_path: string; description: string; location: string; sort_order: number };
@@ -58,6 +60,10 @@ export default function PhotoReports() {
   const [photos, setPhotos] = useState<LocalPhoto[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  // Logo state
+  const [reportLogo, setReportLogo] = useState<string | null>(() => localStorage.getItem('photo_report_logo'));
+  const [exporting, setExporting] = useState(false);
 
   // Load obras
   useEffect(() => {
@@ -194,9 +200,29 @@ export default function PhotoReports() {
 
   const sanitizeFilename = (name: string) => name.replace(/[^a-zA-Z0-9._-]/g, '_');
 
-  // Save report
-  const handleSave = async (status: 'draft' | 'final') => {
-    if (!user || !selectedObra) return;
+  // Logo upload
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result as string;
+      setReportLogo(base64);
+      localStorage.setItem('photo_report_logo', base64);
+      toast.success('Logo guardada');
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const removeLogo = () => {
+    setReportLogo(null);
+    localStorage.removeItem('photo_report_logo');
+  };
+
+  // Save report (returns saved report for chaining with export)
+  const handleSave = async (status: 'draft' | 'final'): Promise<Report | null> => {
+    if (!user || !selectedObra) return null;
     setSubmitting(true);
     try {
       const reportId = editingReport?.id || crypto.randomUUID();
@@ -216,7 +242,6 @@ export default function PhotoReports() {
             sort_order: photo.sort_order,
           });
         } else if (photo.file_path) {
-          // Existing photo — keep it
           photosMeta.push({
             file_path: photo.file_path,
             description: photo.description,
@@ -231,7 +256,7 @@ export default function PhotoReports() {
 
       const weatherString = buildWeatherString();
 
-      const record = {
+      const record: any = {
         id: reportId,
         obra_id: selectedObra.id,
         user_id: user.id,
@@ -257,8 +282,10 @@ export default function PhotoReports() {
       toast.success(status === 'draft' ? 'Rascunho guardado' : 'Relatório guardado como final');
       setFormOpen(false);
       await loadReports();
+      return { ...record, created_at: editingReport?.created_at || new Date().toISOString() } as Report;
     } catch (err: any) {
       toast.error('Erro ao guardar: ' + err.message);
+      return null;
     } finally {
       setSubmitting(false);
     }
@@ -269,7 +296,6 @@ export default function PhotoReports() {
     const report = reports.find(r => r.id === reportId);
     if (!report) return;
     try {
-      // Delete storage files
       const filePaths = (report.photos || []).map(p => p.file_path);
       if (filePaths.length > 0) {
         await supabase.storage.from('photo-reports').remove(filePaths);
@@ -280,6 +306,75 @@ export default function PhotoReports() {
       await loadReports();
     } catch (err: any) {
       toast.error('Erro: ' + err.message);
+    }
+  };
+
+  // ── Export helpers ──
+  const blobToBase64 = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+
+  const downloadPhotosAsBase64 = async (photosMeta: PhotoMeta[]): Promise<PhotoForExport[]> => {
+    const results: PhotoForExport[] = [];
+    for (const p of photosMeta) {
+      try {
+        const { data, error } = await supabase.storage.from('photo-reports').download(p.file_path);
+        if (error || !data) continue;
+        const base64 = await blobToBase64(data);
+        results.push({
+          base64,
+          description: p.description,
+          location: p.location,
+          sort_order: p.sort_order,
+        });
+      } catch {
+        // skip failed downloads
+      }
+    }
+    return results.sort((a, b) => a.sort_order - b.sort_order);
+  };
+
+  const handleExport = async (report: Report, type: 'pdf' | 'docx') => {
+    if (!selectedObra) return;
+    setExporting(true);
+    try {
+      toast.info(`A preparar ${type.toUpperCase()}...`);
+      const photoImages = await downloadPhotosAsBase64(report.photos || []);
+      const reportData = {
+        report_date: report.report_date,
+        weather: report.weather,
+        workers_count: report.workers_count,
+        equipment: report.equipment,
+        works_done: report.works_done,
+        observations: report.observations,
+      };
+
+      // Get fiscal info from localStorage as fallback
+      const fn = localStorage.getItem('pam_fiscal_name') || '';
+      const fc = localStorage.getItem('pam_fiscal_company') || 'DDN';
+
+      if (type === 'pdf') {
+        generatePhotoReportPDF(reportData, selectedObra.nome, selectedObra.cidade || '', '', fn, fc, photoImages, reportLogo);
+      } else {
+        await generatePhotoReportDOCX(reportData, selectedObra.nome, selectedObra.cidade || '', '', fn, fc, photoImages, reportLogo);
+      }
+      toast.success(`${type.toUpperCase()} exportado com sucesso`);
+    } catch (err: any) {
+      toast.error('Erro na exportação: ' + err.message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Export from form (auto-save first)
+  const handleExportFromForm = async (type: 'pdf' | 'docx') => {
+    const saved = await handleSave('draft');
+    if (saved) {
+      await handleExport(saved, type);
     }
   };
 
@@ -335,26 +430,49 @@ export default function PhotoReports() {
         {/* Section 1 — Header */}
         <Card>
           <CardHeader><CardTitle className="text-base">Dados do Cabeçalho</CardTitle></CardHeader>
-          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <CardContent className="space-y-4">
+            {/* Logo upload */}
             <div>
-              <label className="text-sm font-medium text-muted-foreground">Obra</label>
-              <Input value={selectedObra.nome} disabled />
+              <label className="text-sm font-medium text-muted-foreground mb-2 block">Logo da Empresa</label>
+              {reportLogo ? (
+                <div className="flex items-center gap-4">
+                  <div className="border border-border rounded-lg p-2 bg-muted/30">
+                    <img src={reportLogo} alt="Logo" className="h-12 max-w-[160px] object-contain" />
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={removeLogo} className="text-destructive hover:text-destructive">
+                    <X className="w-4 h-4 mr-1" /> Remover
+                  </Button>
+                </div>
+              ) : (
+                <label className="flex items-center gap-3 border-2 border-dashed border-border rounded-lg p-4 cursor-pointer hover:border-primary/50 transition w-fit">
+                  <Upload className="w-5 h-5 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">Carregar logo (PNG, JPG)</span>
+                  <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleLogoUpload} />
+                </label>
+              )}
             </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Localização</label>
-              <Input value={selectedObra.cidade || '—'} disabled />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Empreiteiro</label>
-              <Input value={empreiteiro} onChange={e => setEmpreiteiro(e.target.value)} placeholder="Nome do empreiteiro" />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Fiscalização</label>
-              <Input value={`${fiscalCompany} — ${fiscalName}`} onChange={e => {
-                const parts = e.target.value.split(' — ');
-                if (parts.length >= 2) { setFiscalCompany(parts[0]); setFiscalName(parts.slice(1).join(' — ')); }
-                else setFiscalName(e.target.value);
-              }} placeholder="DDN — Nome do fiscal" />
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium text-muted-foreground">Obra</label>
+                <Input value={selectedObra.nome} disabled />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-muted-foreground">Localização</label>
+                <Input value={selectedObra.cidade || '—'} disabled />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-muted-foreground">Empreiteiro</label>
+                <Input value={empreiteiro} onChange={e => setEmpreiteiro(e.target.value)} placeholder="Nome do empreiteiro" />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-muted-foreground">Fiscalização</label>
+                <Input value={`${fiscalCompany} — ${fiscalName}`} onChange={e => {
+                  const parts = e.target.value.split(' — ');
+                  if (parts.length >= 2) { setFiscalCompany(parts[0]); setFiscalName(parts.slice(1).join(' — ')); }
+                  else setFiscalName(e.target.value);
+                }} placeholder="DDN — Nome do fiscal" />
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -474,7 +592,13 @@ export default function PhotoReports() {
 
         {/* Section 6 — Buttons */}
         <div className="flex flex-wrap gap-3 justify-end pb-8">
-          <Button variant="outline" onClick={() => setFormOpen(false)} disabled={submitting}>Cancelar</Button>
+          <Button variant="outline" onClick={() => setFormOpen(false)} disabled={submitting || exporting}>Cancelar</Button>
+          <Button variant="outline" onClick={() => handleExportFromForm('pdf')} disabled={submitting || exporting}>
+            {exporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />} Exportar PDF
+          </Button>
+          <Button variant="outline" onClick={() => handleExportFromForm('docx')} disabled={submitting || exporting}>
+            {exporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileText className="w-4 h-4 mr-2" />} Exportar DOCX
+          </Button>
           <Button variant="secondary" onClick={() => handleSave('draft')} disabled={submitting}>
             {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Guardar Rascunho
           </Button>
@@ -532,7 +656,13 @@ export default function PhotoReports() {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="icon" onClick={() => handleExport(report, 'pdf')} title="Exportar PDF" disabled={exporting}>
+                    <Download className="w-4 h-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => handleExport(report, 'docx')} title="Exportar DOCX" disabled={exporting}>
+                    <FileText className="w-4 h-4" />
+                  </Button>
                   <Button variant="ghost" size="icon" onClick={() => openEditForm(report)} title="Editar">
                     <Edit className="w-4 h-4" />
                   </Button>
