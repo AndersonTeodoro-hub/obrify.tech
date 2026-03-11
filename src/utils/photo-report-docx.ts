@@ -2,7 +2,7 @@ import {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
   ImageRun, WidthType, AlignmentType, HeadingLevel, BorderStyle,
   Header, Footer, PageNumber, NumberFormat,
-  TableBorders, ShadingType,
+  ShadingType,
 } from 'docx';
 import type { PhotoForExport, PhotoReportData } from './photo-report-pdf';
 
