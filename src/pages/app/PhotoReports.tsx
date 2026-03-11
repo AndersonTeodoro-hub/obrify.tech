@@ -254,6 +254,7 @@ export default function PhotoReports() {
 
       localStorage.setItem('pam_fiscal_name', fiscalName);
       localStorage.setItem('pam_fiscal_company', fiscalCompany);
+      localStorage.setItem('photo_report_contractor', empreiteiro);
 
       const weatherString = buildWeatherString();
 
