@@ -30,6 +30,7 @@ import NonConformities from "./pages/app/NonConformities";
 import IncompatiCheck from "./pages/app/IncompatiCheck";
 import ProjectKnowledge from "./pages/app/ProjectKnowledge";
 import MaterialApprovals from "./pages/app/MaterialApprovals";
+import PhotoReports from "./pages/app/PhotoReports";
 import AcceptInvite from "./pages/AcceptInvite";
 
 const queryClient = new QueryClient();
