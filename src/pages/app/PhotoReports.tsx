@@ -48,7 +48,7 @@ export default function PhotoReports() {
   const [formOpen, setFormOpen] = useState(false);
   const [editingReport, setEditingReport] = useState<Report | null>(null);
   const [reportDate, setReportDate] = useState<Date>(new Date());
-  const [empreiteiro, setEmpreiteiro] = useState('');
+  const [empreiteiro, setEmpreiteiro] = useState(() => localStorage.getItem('photo_report_contractor') || 'Ferreira Build Power');
   const [fiscalName, setFiscalName] = useState(() => localStorage.getItem('pam_fiscal_name') || '');
   const [fiscalCompany, setFiscalCompany] = useState(() => localStorage.getItem('pam_fiscal_company') || 'DDN');
   const [weatherChecks, setWeatherChecks] = useState<Record<string, boolean>>({ sol: false, nublado: false, chuva: false, vento: false });
@@ -122,7 +122,7 @@ export default function PhotoReports() {
   const openNewForm = () => {
     setEditingReport(null);
     setReportDate(new Date());
-    setEmpreiteiro('');
+    setEmpreiteiro(localStorage.getItem('photo_report_contractor') || 'Ferreira Build Power');
     setWeatherChecks({ sol: false, nublado: false, chuva: false, vento: false });
     setTemperature('');
     setWorkersCount('');
@@ -137,6 +137,7 @@ export default function PhotoReports() {
   const openEditForm = async (report: Report) => {
     setEditingReport(report);
     setReportDate(new Date(report.report_date + 'T00:00:00'));
+    setEmpreiteiro((report as any).contractor || localStorage.getItem('photo_report_contractor') || 'Ferreira Build Power');
     const { checks, temp } = parseWeatherString(report.weather);
     setWeatherChecks(checks);
     setTemperature(temp);
@@ -253,6 +254,7 @@ export default function PhotoReports() {
 
       localStorage.setItem('pam_fiscal_name', fiscalName);
       localStorage.setItem('pam_fiscal_company', fiscalCompany);
+      localStorage.setItem('photo_report_contractor', empreiteiro);
 
       const weatherString = buildWeatherString();
 
@@ -268,6 +270,7 @@ export default function PhotoReports() {
         observations: observations || null,
         photos: photosMeta,
         status,
+        contractor: empreiteiro || null,
         updated_at: new Date().toISOString(),
       };
 
@@ -358,9 +361,9 @@ export default function PhotoReports() {
       const fc = localStorage.getItem('pam_fiscal_company') || 'DDN';
 
       if (type === 'pdf') {
-        generatePhotoReportPDF(reportData, selectedObra.nome, selectedObra.cidade || '', '', fn, fc, photoImages, reportLogo);
+        generatePhotoReportPDF(reportData, selectedObra.nome, selectedObra.cidade || '', (report as any).contractor || '', fn, fc, photoImages, reportLogo);
       } else {
-        await generatePhotoReportDOCX(reportData, selectedObra.nome, selectedObra.cidade || '', '', fn, fc, photoImages, reportLogo);
+        await generatePhotoReportDOCX(reportData, selectedObra.nome, selectedObra.cidade || '', (report as any).contractor || '', fn, fc, photoImages, reportLogo);
       }
       toast.success(`${type.toUpperCase()} exportado com sucesso`);
     } catch (err: any) {

@@ -2039,6 +2039,7 @@ export type Database = {
       }
       photo_reports: {
         Row: {
+          contractor: string | null
           created_at: string
           equipment: string | null
           id: string
@@ -2054,6 +2055,7 @@ export type Database = {
           works_done: string | null
         }
         Insert: {
+          contractor?: string | null
           created_at?: string
           equipment?: string | null
           id?: string
@@ -2069,6 +2071,7 @@ export type Database = {
           works_done?: string | null
         }
         Update: {
+          contractor?: string | null
           created_at?: string
           equipment?: string | null
           id?: string

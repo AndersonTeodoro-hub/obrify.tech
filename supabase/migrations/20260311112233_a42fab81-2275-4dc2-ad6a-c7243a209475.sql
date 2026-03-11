@@ -1,0 +1,1 @@
+ALTER TABLE public.photo_reports ADD COLUMN contractor text;
