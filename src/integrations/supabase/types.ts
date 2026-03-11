@@ -2037,6 +2037,62 @@ export type Database = {
         }
         Relationships: []
       }
+      photo_reports: {
+        Row: {
+          created_at: string
+          equipment: string | null
+          id: string
+          obra_id: string
+          observations: string | null
+          photos: Json | null
+          report_date: string
+          status: string
+          updated_at: string
+          user_id: string
+          weather: string | null
+          workers_count: string | null
+          works_done: string | null
+        }
+        Insert: {
+          created_at?: string
+          equipment?: string | null
+          id?: string
+          obra_id: string
+          observations?: string | null
+          photos?: Json | null
+          report_date: string
+          status?: string
+          updated_at?: string
+          user_id: string
+          weather?: string | null
+          workers_count?: string | null
+          works_done?: string | null
+        }
+        Update: {
+          created_at?: string
+          equipment?: string | null
+          id?: string
+          obra_id?: string
+          observations?: string | null
+          photos?: Json | null
+          report_date?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+          weather?: string | null
+          workers_count?: string | null
+          works_done?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "photo_reports_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_obras"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
