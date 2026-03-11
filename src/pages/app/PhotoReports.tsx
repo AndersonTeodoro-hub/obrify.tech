@@ -270,6 +270,7 @@ export default function PhotoReports() {
         observations: observations || null,
         photos: photosMeta,
         status,
+        contractor: empreiteiro || null,
         updated_at: new Date().toISOString(),
       };
 
