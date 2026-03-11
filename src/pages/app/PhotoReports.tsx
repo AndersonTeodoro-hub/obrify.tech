@@ -122,7 +122,7 @@ export default function PhotoReports() {
   const openNewForm = () => {
     setEditingReport(null);
     setReportDate(new Date());
-    setEmpreiteiro('');
+    setEmpreiteiro(localStorage.getItem('photo_report_contractor') || 'Ferreira Build Power');
     setWeatherChecks({ sol: false, nublado: false, chuva: false, vento: false });
     setTemperature('');
     setWorkersCount('');
