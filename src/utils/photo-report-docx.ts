@@ -56,7 +56,7 @@ export async function generatePhotoReportDOCX(
   }));
 
   // Info table rows
-  const noBorders: typeof TableBorders = {
+  const noBorders = {
     top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
     bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
     left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
