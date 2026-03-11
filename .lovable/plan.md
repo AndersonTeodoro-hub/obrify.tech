@@ -1,50 +1,93 @@
 
 
-# Relatório Fotográfico Diário de Obra — Bloco 1
+# Fix: Mudar todas as políticas RLS de RESTRICTIVE para PERMISSIVE
 
-## Files to change (4 files)
+## Problema
 
-### 1. Database migration
-- Create `photo_reports` table with all specified columns
-- FK to `incompaticheck_obras(id)` and `auth.users(id)` (no direct FK to auth.users — use user_id uuid NOT NULL)
-- RLS: ALL policy where `auth.uid() = user_id`
-- Create storage bucket `photo-reports` (private)
-- Storage RLS policies for authenticated users on their own paths
+Todas as políticas RLS nas tabelas `organizations` e `memberships` estão como **RESTRICTIVE** (`Permissive: No`). Em PostgreSQL, políticas RESTRICTIVE exigem que TODAS passem (lógica AND), enquanto PERMISSIVE exige que QUALQUER uma passe (lógica OR). Isto bloqueia a criação de organizações.
 
-### 2. `src/components/layout/AppSidebar.tsx`
-- Add `{ title: 'Relatórios Fotográficos', url: '/app/photo-reports', icon: Camera }` to `mainItems` array after reports (line 45), using existing `Camera` icon (already imported)
+## Migração SQL (um único ficheiro)
 
-### 3. `src/App.tsx`
-- Import new `PhotoReports` page
-- Add route `<Route path="photo-reports" element={<PhotoReports />} />`
+```sql
+-- ============================================
+-- FIX: Mudar políticas de RESTRICTIVE para PERMISSIVE
+-- ============================================
 
-### 4. `src/pages/app/PhotoReports.tsx` (NEW — ~600 lines)
+-- 1. DROP todas as políticas da tabela organizations
+DROP POLICY IF EXISTS "Authenticated users can create organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Members can view their organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can update organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can delete organizations" ON public.organizations;
 
-**Structure mirrors MaterialApprovals.tsx pattern:**
+-- 2. Recriar como PERMISSIVE (default)
+CREATE POLICY "Authenticated users can create organizations"
+  ON public.organizations FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() IS NOT NULL);
 
-**State:**
-- Obra selection (reuse `incompaticheck_obras` query)
-- Reports list with CRUD
-- Form mode (list / create / edit)
-- Form fields: date, weather, workers, equipment, works_done, observations, photos array, status
-- Photo upload with preview, description, location per photo
+CREATE POLICY "Members can view their organizations"
+  ON public.organizations FOR SELECT
+  TO authenticated
+  USING (is_org_member(auth.uid(), id));
 
-**Obra selector** — same pattern as MaterialApprovals: card to select obra, dialog with obra list
+CREATE POLICY "Admins can update organizations"
+  ON public.organizations FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
 
-**List view** — cards showing date, photo count, status badge (Rascunho/Final), action buttons (Edit, Delete). No PDF/DOCX buttons yet (Bloco 2).
+CREATE POLICY "Admins can delete organizations"
+  ON public.organizations FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
 
-**Form view (fullscreen dialog or inline):**
-- Section 1: Auto-filled obra name, cidade, empreiteiro input, fiscalização pre-filled from localStorage
-- Section 2: DatePicker, weather checkboxes + temperature input, workers input, equipment input
-- Section 3: Works done textarea
-- Section 4: Photo upload area (DropZone pattern), grid 2-col with preview + description + location inputs per photo, remove button, sort_order via up/down buttons
-- Section 5: Observations textarea
-- Section 6: Save Draft / Save Final / Cancel buttons
+-- 3. DROP todas as políticas da tabela memberships
+DROP POLICY IF EXISTS "Users can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Members can view memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can update memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can delete memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Users can view own memberships" ON public.memberships;
 
-**Save logic:**
-- Upload photos to `photo-reports` bucket at `{user_id}/{obra_id}/{report_id}/{filename}`
-- Insert/update `photo_reports` row with photos JSONB array
-- On edit: load existing photos from storage signed URLs for preview
+-- 4. Recriar TODAS as políticas de memberships como PERMISSIVE
+CREATE POLICY "Users can insert memberships"
+  ON public.memberships FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+    AND (
+      has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+      OR NOT EXISTS (
+        SELECT 1 FROM public.memberships m
+        WHERE m.org_id = memberships.org_id
+      )
+    )
+  );
 
-**Delete:** confirm dialog, delete storage files + DB row
+CREATE POLICY "Members can view memberships"
+  ON public.memberships FOR SELECT
+  TO authenticated
+  USING (
+    auth.uid() = user_id
+    OR has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+  );
+
+CREATE POLICY "Admins can update memberships"
+  ON public.memberships FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+
+CREATE POLICY "Admins can delete memberships"
+  ON public.memberships FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+```
+
+## Resumo
+
+| Tabela | Acção |
+|---|---|
+| `organizations` | Drop 4 políticas RESTRICTIVE, recriar 4 como PERMISSIVE |
+| `memberships` | Drop todas as políticas, recriar 4 como PERMISSIVE (INSERT, SELECT, UPDATE, DELETE) |
+
+Nenhuma alteração de código necessária — apenas a migração da base de dados.
 

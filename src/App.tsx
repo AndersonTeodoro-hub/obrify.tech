@@ -30,6 +30,7 @@ import NonConformities from "./pages/app/NonConformities";
 import IncompatiCheck from "./pages/app/IncompatiCheck";
 import ProjectKnowledge from "./pages/app/ProjectKnowledge";
 import MaterialApprovals from "./pages/app/MaterialApprovals";
+import PhotoReports from "./pages/app/PhotoReports";
 import AcceptInvite from "./pages/AcceptInvite";
 
 const queryClient = new QueryClient();
@@ -66,6 +67,7 @@ const App = () => (
                 <Route path="incompaticheck" element={<IncompatiCheck />} />
                 <Route path="project-knowledge" element={<ProjectKnowledge />} />
                 <Route path="material-approvals" element={<MaterialApprovals />} />
+                <Route path="photo-reports" element={<PhotoReports />} />
                 <Route path="reports" element={<Reports />} />
                 <Route path="drone" element={<Drone />} />
                 <Route path="settings" element={<Settings />} />
