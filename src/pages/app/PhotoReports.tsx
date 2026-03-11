@@ -137,6 +137,7 @@ export default function PhotoReports() {
   const openEditForm = async (report: Report) => {
     setEditingReport(report);
     setReportDate(new Date(report.report_date + 'T00:00:00'));
+    setEmpreiteiro((report as any).contractor || localStorage.getItem('photo_report_contractor') || 'Ferreira Build Power');
     const { checks, temp } = parseWeatherString(report.weather);
     setWeatherChecks(checks);
     setTemperature(temp);
