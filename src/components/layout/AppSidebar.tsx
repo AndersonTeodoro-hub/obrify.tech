@@ -43,6 +43,7 @@ export function AppSidebar() {
     { title: t('nav.inspections'), url: '/app/inspections', icon: ClipboardCheck },
     { title: t('nav.nonconformities'), url: '/app/nonconformities', icon: AlertTriangle },
     { title: t('nav.reports'), url: '/app/reports', icon: BarChart3 },
+    { title: 'Relatórios Fotográficos', url: '/app/photo-reports', icon: Camera },
   ];
 
   const toolItems = [
