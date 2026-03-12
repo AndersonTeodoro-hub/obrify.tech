@@ -223,6 +223,14 @@ export default function MaterialApprovals() {
         } catch { /* skip */ }
       }
 
+      let ceBase64: string | null = null;
+      if ((approval as any).ce_file_path) {
+        try {
+          const { data } = await supabase.storage.from('material-approvals').download((approval as any).ce_file_path);
+          if (data) ceBase64 = await blobToBase64(data);
+        } catch { /* skip */ }
+      }
+
       const certificatesBase64: Array<{ name: string; base64: string; type: string }> = [];
       const certs = (approval as any).certificates || [];
       for (const cert of certs) {
