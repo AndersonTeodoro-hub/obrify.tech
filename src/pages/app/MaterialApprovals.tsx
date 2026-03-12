@@ -53,6 +53,7 @@ export default function MaterialApprovals() {
   const [pdmFile, setPdmFile] = useState<File | null>(null);
   const [mqtFile, setMqtFile] = useState<File | null>(null);
   const [contractFile, setContractFile] = useState<File | null>(null);
+  const [ceFile, setCeFile] = useState<File | null>(null);
   const [certFiles, setCertFiles] = useState<File[]>([]);
   const [mfgFiles, setMfgFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
