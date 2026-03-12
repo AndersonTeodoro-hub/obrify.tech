@@ -132,6 +132,13 @@ export default function MaterialApprovals() {
         if (error) throw error;
       }
 
+      let cePath: string | null = null;
+      if (ceFile) {
+        cePath = `${basePath}_ce_${sanitizeFilename(ceFile.name)}`;
+        const { error } = await supabase.storage.from('material-approvals').upload(cePath, ceFile);
+        if (error) throw error;
+      }
+
       let contractPath: string | null = null;
       if (contractFile) {
         contractPath = `${basePath}_contract_${sanitizeFilename(contractFile.name)}`;
