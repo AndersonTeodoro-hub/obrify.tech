@@ -341,6 +341,7 @@ export default function MaterialApprovals() {
   const handleDelete = async (approval: Approval) => {
     const pathsToRemove = [approval.pdm_file_path];
     if (approval.mqt_file_path) pathsToRemove.push(approval.mqt_file_path);
+    if ((approval as any).ce_file_path) pathsToRemove.push((approval as any).ce_file_path);
     if (approval.contract_file_path) pathsToRemove.push(approval.contract_file_path);
     const certs = (approval as any).certificates || [];
     certs.forEach((c: any) => { if (c.path) pathsToRemove.push(c.path); });
