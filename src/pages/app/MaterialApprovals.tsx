@@ -258,6 +258,7 @@ export default function MaterialApprovals() {
       console.log("PAM: Sending to edge function:", JSON.stringify({
         has_pdm: !!pdmBase64,
         has_mqt: !!mqtBase64,
+        has_ce: !!ceBase64,
         has_contract: !!contractBase64,
         certs: certificatesBase64.length,
         mfg_docs: mfgDocsBase64.length,
