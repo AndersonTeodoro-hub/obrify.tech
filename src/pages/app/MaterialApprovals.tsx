@@ -29,6 +29,7 @@ type Approval = {
   id: string; obra_id: string; pdm_name: string; pdm_file_path: string; pdm_file_size: number | null;
   mqt_name: string | null; mqt_file_path: string | null; mqt_file_size: number | null;
   contract_file_path: string | null; contract_file_name: string | null;
+  ce_file_path: string | null; ce_file_name: string | null;
   material_category: string; status: string; ai_analysis: any; ai_recommendation: string | null;
   reviewer_notes: string | null; final_decision: string | null; decided_by: string | null;
   decided_at: string | null; created_at: string; updated_at: string;
