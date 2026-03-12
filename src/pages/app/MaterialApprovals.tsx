@@ -838,11 +838,20 @@ export default function MaterialApprovals() {
 
             <UploadBox
               icon={ScrollText}
-              title="MQT / Caderno de Encargos"
+              title="MQT / Mapa de Quantidades"
               subtitle="Mapa de quantidades e trabalhos (opcional)"
               accept=".pdf"
               files={mqtFile}
               onFilesChange={(f) => setMqtFile(f as File | null)}
+            />
+
+            <UploadBox
+              icon={BookOpen}
+              title="Caderno de Encargos"
+              subtitle="Condições técnicas, especificações de materiais, ensaios exigidos (opcional)"
+              accept=".pdf"
+              files={ceFile}
+              onFilesChange={(f) => setCeFile(f as File | null)}
             />
 
             <UploadBox
