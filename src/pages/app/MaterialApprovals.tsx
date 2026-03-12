@@ -269,6 +269,7 @@ export default function MaterialApprovals() {
           approval_id: approval.id,
           pdm_base64: pdmBase64,
           mqt_base64: mqtBase64,
+          ce_base64: ceBase64,
           contract_base64: contractBase64,
           certificates_base64: certificatesBase64,
           manufacturer_docs_base64: mfgDocsBase64,
