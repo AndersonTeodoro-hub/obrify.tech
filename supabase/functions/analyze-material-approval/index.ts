@@ -20,7 +20,7 @@ Responde APENAS com JSON (sem markdown, sem backticks):
     "specifications": ["especificação 1", "especificação 2"]
   },
   "material_specified": {
-    "description": "o que está especificado no projecto/MQT para esta categoria",
+    "description": "o que está especificado no projecto/MQT/Caderno de Encargos para esta categoria",
     "requirements": ["requisito 1", "requisito 2"]
   },
   "compliance_checks": [
@@ -54,6 +54,7 @@ serve(async (req) => {
     const approval_id = body.approval_id;
     const pdm_base64 = body.pdm_base64;
     const mqt_base64 = body.mqt_base64 || null;
+    const ce_base64 = body.ce_base64 || null;
     const contract_base64 = body.contract_base64 || null;
     const certificates_base64 = body.certificates_base64 || [];
     const manufacturer_docs_base64 = body.manufacturer_docs_base64 || [];
@@ -64,6 +65,7 @@ serve(async (req) => {
       approval_id, obra_id, material_category,
       has_pdm: !!pdm_base64,
       has_mqt: !!mqt_base64,
+      has_ce: !!ce_base64,
       has_contract: !!contract_base64,
       certs: certificates_base64?.length || 0,
       mfg_docs: manufacturer_docs_base64?.length || 0,
@@ -99,7 +101,19 @@ serve(async (req) => {
       });
       content.push({
         type: "text",
-        text: "[MQT / CADERNO DE ENCARGOS — mapa de quantidades e trabalhos do projecto]",
+        text: "[MQT / MAPA DE QUANTIDADES — mapa de quantidades e trabalhos do projecto]",
+      });
+    }
+
+    // 2b. Caderno de Encargos (if provided)
+    if (ce_base64) {
+      content.push({
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: ce_base64 },
+      });
+      content.push({
+        type: "text",
+        text: "[CADERNO DE ENCARGOS — condições técnicas, especificações de materiais, ensaios exigidos]",
       });
     }
 
@@ -145,16 +159,17 @@ serve(async (req) => {
       }
     }
 
-    // 6. Analysis prompt
+    // 6. Build context note based on available documents
+    const docParts: string[] = [];
+    if (mqt_base64) docParts.push("o MQT/Mapa de Quantidades");
+    if (ce_base64) docParts.push("o Caderno de Encargos");
+    if (contract_base64) docParts.push("o Contrato da Obra");
+
     let contextNote = "";
-    if (mqt_base64 && contract_base64) {
-      contextNote = "Foram fornecidos o MQT/Caderno de Encargos e o Contrato da Obra. Compara o material proposto com as especificações destes documentos.";
-    } else if (mqt_base64) {
-      contextNote = "Foi fornecido o MQT/Caderno de Encargos. Compara o material proposto com as especificações deste documento.";
-    } else if (contract_base64) {
-      contextNote = "Foi fornecido o Contrato da Obra. Verifica se o material proposto cumpre os requisitos contratuais.";
+    if (docParts.length > 0) {
+      contextNote = `Foram fornecidos ${docParts.join(", ")}. Compara o material proposto com as especificações destes documentos.`;
     } else {
-      contextNote = "Não foram fornecidos MQT nem Contrato. Analisa o PAM apenas com base nas normas aplicáveis e nos certificados/documentos do fabricante fornecidos.";
+      contextNote = "Não foram fornecidos MQT, Caderno de Encargos nem Contrato. Analisa o PAM apenas com base nas normas aplicáveis e nos certificados/documentos do fabricante fornecidos.";
     }
 
     content.push({
@@ -163,7 +178,8 @@ serve(async (req) => {
 
 Analisa este PAM considerando:
 1. O pedido de aprovação do empreiteiro (documento PDF acima)
-2. O MQT / Caderno de Encargos (se fornecido)
+2. O MQT / Mapa de Quantidades (se fornecido)
+2b. O Caderno de Encargos (se fornecido)
 3. O Contrato da Obra (se fornecido)
 4. Os certificados e laudos fornecidos (se existirem)
 5. Os documentos do fabricante (se existirem)
@@ -182,7 +198,7 @@ ${getAnalysisPrompt(material_category)}`,
         model: "claude-sonnet-4-5-20250929",
         max_tokens: 4000,
         messages: [{ role: "user", content }],
-        system: `És o Eng. Silva, engenheiro civil sénior com 30+ anos de experiência em fiscalização de obras em Portugal. Estás a analisar um Pedido de Aprovação de Materiais (PAM) submetido por um empreiteiro. A tua análise deve ser rigorosa, técnica e baseada nas normas portuguesas e europeias. Verifica se o material proposto cumpre as especificações do projecto e as normas aplicáveis. Responde em português europeu.`,
+        system: `És o Eng. Silva, engenheiro civil sénior com 30+ anos de experiência em fiscalização de obras em Portugal. Estás a analisar um Pedido de Aprovação de Materiais (PAM) submetido por um empreiteiro. A tua análise deve ser rigorosa, técnica e baseada nas normas portuguesas e europeias. Cruza a informação do PAM com o MQT, o Caderno de Encargos, o Contrato, os Certificados e os Documentos do Fabricante fornecidos. Verifica se o material proposto cumpre as especificações do projecto e as normas aplicáveis. Responde em português europeu.`,
       }),
     });
 

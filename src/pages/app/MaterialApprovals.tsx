@@ -12,7 +12,7 @@ import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import {
-  FileCheck, Plus, Upload, ChevronDown, ChevronUp, Trash2, CheckCircle2, AlertTriangle, XCircle, Clock, Loader2, Building2, ArrowLeft, FileText, Award, Factory, X, Download, ScrollText, FileSignature, ImageIcon,
+  FileCheck, Plus, Upload, ChevronDown, ChevronUp, Trash2, CheckCircle2, AlertTriangle, XCircle, Clock, Loader2, Building2, ArrowLeft, FileText, Award, Factory, X, Download, ScrollText, FileSignature, ImageIcon, BookOpen,
 } from 'lucide-react';
 import { generateMaterialApprovalPDF } from '@/utils/material-approval-pdf';
 
@@ -29,6 +29,7 @@ type Approval = {
   id: string; obra_id: string; pdm_name: string; pdm_file_path: string; pdm_file_size: number | null;
   mqt_name: string | null; mqt_file_path: string | null; mqt_file_size: number | null;
   contract_file_path: string | null; contract_file_name: string | null;
+  ce_file_path: string | null; ce_file_name: string | null;
   material_category: string; status: string; ai_analysis: any; ai_recommendation: string | null;
   reviewer_notes: string | null; final_decision: string | null; decided_by: string | null;
   decided_at: string | null; created_at: string; updated_at: string;
@@ -52,6 +53,7 @@ export default function MaterialApprovals() {
   const [pdmFile, setPdmFile] = useState<File | null>(null);
   const [mqtFile, setMqtFile] = useState<File | null>(null);
   const [contractFile, setContractFile] = useState<File | null>(null);
+  const [ceFile, setCeFile] = useState<File | null>(null);
   const [certFiles, setCertFiles] = useState<File[]>([]);
   const [mfgFiles, setMfgFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -130,6 +132,13 @@ export default function MaterialApprovals() {
         if (error) throw error;
       }
 
+      let cePath: string | null = null;
+      if (ceFile) {
+        cePath = `${basePath}_ce_${sanitizeFilename(ceFile.name)}`;
+        const { error } = await supabase.storage.from('material-approvals').upload(cePath, ceFile);
+        if (error) throw error;
+      }
+
       let contractPath: string | null = null;
       if (contractFile) {
         contractPath = `${basePath}_contract_${sanitizeFilename(contractFile.name)}`;
@@ -164,6 +173,8 @@ export default function MaterialApprovals() {
         mqt_file_size: mqtFile?.size || null,
         contract_file_path: contractPath,
         contract_file_name: contractFile?.name || null,
+        ce_file_path: cePath,
+        ce_file_name: ceFile?.name || null,
         material_category: category,
         status: 'pending',
         certificates: certificatesJson as any,
@@ -174,6 +185,7 @@ export default function MaterialApprovals() {
       setNewModalOpen(false);
       setPdmFile(null);
       setMqtFile(null);
+      setCeFile(null);
       setContractFile(null);
       setCertFiles([]);
       setMfgFiles([]);
@@ -211,6 +223,14 @@ export default function MaterialApprovals() {
         } catch { /* skip */ }
       }
 
+      let ceBase64: string | null = null;
+      if ((approval as any).ce_file_path) {
+        try {
+          const { data } = await supabase.storage.from('material-approvals').download((approval as any).ce_file_path);
+          if (data) ceBase64 = await blobToBase64(data);
+        } catch { /* skip */ }
+      }
+
       const certificatesBase64: Array<{ name: string; base64: string; type: string }> = [];
       const certs = (approval as any).certificates || [];
       for (const cert of certs) {
@@ -238,6 +258,7 @@ export default function MaterialApprovals() {
       console.log("PAM: Sending to edge function:", JSON.stringify({
         has_pdm: !!pdmBase64,
         has_mqt: !!mqtBase64,
+        has_ce: !!ceBase64,
         has_contract: !!contractBase64,
         certs: certificatesBase64.length,
         mfg_docs: mfgDocsBase64.length,
@@ -248,6 +269,7 @@ export default function MaterialApprovals() {
           approval_id: approval.id,
           pdm_base64: pdmBase64,
           mqt_base64: mqtBase64,
+          ce_base64: ceBase64,
           contract_base64: contractBase64,
           certificates_base64: certificatesBase64,
           manufacturer_docs_base64: mfgDocsBase64,
@@ -319,6 +341,7 @@ export default function MaterialApprovals() {
   const handleDelete = async (approval: Approval) => {
     const pathsToRemove = [approval.pdm_file_path];
     if (approval.mqt_file_path) pathsToRemove.push(approval.mqt_file_path);
+    if ((approval as any).ce_file_path) pathsToRemove.push((approval as any).ce_file_path);
     if (approval.contract_file_path) pathsToRemove.push(approval.contract_file_path);
     const certs = (approval as any).certificates || [];
     certs.forEach((c: any) => { if (c.path) pathsToRemove.push(c.path); });
@@ -815,11 +838,20 @@ export default function MaterialApprovals() {
 
             <UploadBox
               icon={ScrollText}
-              title="MQT / Caderno de Encargos"
+              title="MQT / Mapa de Quantidades"
               subtitle="Mapa de quantidades e trabalhos (opcional)"
               accept=".pdf"
               files={mqtFile}
               onFilesChange={(f) => setMqtFile(f as File | null)}
+            />
+
+            <UploadBox
+              icon={BookOpen}
+              title="Caderno de Encargos"
+              subtitle="Condições técnicas, especificações de materiais, ensaios exigidos (opcional)"
+              accept=".pdf"
+              files={ceFile}
+              onFilesChange={(f) => setCeFile(f as File | null)}
             />
 
             <UploadBox

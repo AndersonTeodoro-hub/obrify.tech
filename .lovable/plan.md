@@ -1,114 +1,93 @@
 
 
-# Separar MQT e Caderno de Encargos — Plano de Implementação
+# Fix: Mudar todas as políticas RLS de RESTRICTIVE para PERMISSIVE
 
-## Database Migration
-Add two columns to `material_approvals`:
+## Problema
+
+Todas as políticas RLS nas tabelas `organizations` e `memberships` estão como **RESTRICTIVE** (`Permissive: No`). Em PostgreSQL, políticas RESTRICTIVE exigem que TODAS passem (lógica AND), enquanto PERMISSIVE exige que QUALQUER uma passe (lógica OR). Isto bloqueia a criação de organizações.
+
+## Migração SQL (um único ficheiro)
+
 ```sql
-ALTER TABLE public.material_approvals ADD COLUMN ce_file_path text;
-ALTER TABLE public.material_approvals ADD COLUMN ce_file_name text;
+-- ============================================
+-- FIX: Mudar políticas de RESTRICTIVE para PERMISSIVE
+-- ============================================
+
+-- 1. DROP todas as políticas da tabela organizations
+DROP POLICY IF EXISTS "Authenticated users can create organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Members can view their organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can update organizations" ON public.organizations;
+DROP POLICY IF EXISTS "Admins can delete organizations" ON public.organizations;
+
+-- 2. Recriar como PERMISSIVE (default)
+CREATE POLICY "Authenticated users can create organizations"
+  ON public.organizations FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() IS NOT NULL);
+
+CREATE POLICY "Members can view their organizations"
+  ON public.organizations FOR SELECT
+  TO authenticated
+  USING (is_org_member(auth.uid(), id));
+
+CREATE POLICY "Admins can update organizations"
+  ON public.organizations FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+
+CREATE POLICY "Admins can delete organizations"
+  ON public.organizations FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+
+-- 3. DROP todas as políticas da tabela memberships
+DROP POLICY IF EXISTS "Users can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can insert memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Members can view memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can update memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Admins can delete memberships" ON public.memberships;
+DROP POLICY IF EXISTS "Users can view own memberships" ON public.memberships;
+
+-- 4. Recriar TODAS as políticas de memberships como PERMISSIVE
+CREATE POLICY "Users can insert memberships"
+  ON public.memberships FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+    AND (
+      has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+      OR NOT EXISTS (
+        SELECT 1 FROM public.memberships m
+        WHERE m.org_id = memberships.org_id
+      )
+    )
+  );
+
+CREATE POLICY "Members can view memberships"
+  ON public.memberships FOR SELECT
+  TO authenticated
+  USING (
+    auth.uid() = user_id
+    OR has_org_role(auth.uid(), org_id, 'admin'::membership_role)
+  );
+
+CREATE POLICY "Admins can update memberships"
+  ON public.memberships FOR UPDATE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+
+CREATE POLICY "Admins can delete memberships"
+  ON public.memberships FOR DELETE
+  TO authenticated
+  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
 ```
 
-## `src/pages/app/MaterialApprovals.tsx` — Changes
+## Resumo
 
-### 1. Import
-Add `BookOpen` to lucide-react imports (line 15).
+| Tabela | Acção |
+|---|---|
+| `organizations` | Drop 4 políticas RESTRICTIVE, recriar 4 como PERMISSIVE |
+| `memberships` | Drop todas as políticas, recriar 4 como PERMISSIVE (INSERT, SELECT, UPDATE, DELETE) |
 
-### 2. Approval type (line 31)
-Add `ce_file_path: string | null; ce_file_name: string | null;` after `contract_file_name`.
-
-### 3. State (after line 54)
-Add `const [ceFile, setCeFile] = useState<File | null>(null);`
-
-### 4. handleSubmit (lines 126-138)
-After MQT upload block, add CE upload block:
-```typescript
-let cePath: string | null = null;
-if (ceFile) {
-  cePath = `${basePath}_ce_${sanitizeFilename(ceFile.name)}`;
-  const { error } = await supabase.storage.from('material-approvals').upload(cePath, ceFile);
-  if (error) throw error;
-}
-```
-In the insert record (line 156-171), add:
-```typescript
-ce_file_path: cePath,
-ce_file_name: ceFile?.name || null,
-```
-In the reset after submit (lines 174-179), add `setCeFile(null);`
-
-### 5. processApproval (after line 212)
-Add CE download block (same pattern as contract):
-```typescript
-let ceBase64: string | null = null;
-if (approval.ce_file_path) {
-  try {
-    const { data } = await supabase.storage.from('material-approvals').download(approval.ce_file_path);
-    if (data) ceBase64 = await blobToBase64(data);
-  } catch { /* skip */ }
-}
-```
-Add `ce_base64: ceBase64` to the invoke body (line 253).
-Add `has_ce: !!ceBase64` to the console.log (line 239).
-
-### 6. handleDelete (line 320-326)
-Add: `if ((approval as any).ce_file_path) pathsToRemove.push((approval as any).ce_file_path);`
-
-### 7. Upload form (lines 816-823)
-Replace single MQT/CE upload box with two separate boxes:
-```tsx
-<UploadBox
-  icon={ScrollText}
-  title="MQT / Mapa de Quantidades"
-  subtitle="Mapa de quantidades e trabalhos (opcional)"
-  accept=".pdf"
-  files={mqtFile}
-  onFilesChange={(f) => setMqtFile(f as File | null)}
-/>
-
-<UploadBox
-  icon={BookOpen}
-  title="Caderno de Encargos"
-  subtitle="Condições técnicas, especificações de materiais, ensaios exigidos (opcional)"
-  accept=".pdf"
-  files={ceFile}
-  onFilesChange={(f) => setCeFile(f as File | null)}
-/>
-```
-
----
-
-## `supabase/functions/analyze-material-approval/index.ts` — Changes
-
-### 1. Receive ce_base64 (after line 57)
-```typescript
-const ce_base64 = body.ce_base64 || null;
-```
-Add `has_ce: !!ce_base64` to log (line 66).
-
-### 2. Add CE document to content (after MQT block, line 104)
-```typescript
-// 2b. Caderno de Encargos (if provided)
-if (ce_base64) {
-  content.push({
-    type: "document",
-    source: { type: "base64", media_type: "application/pdf", data: ce_base64 },
-  });
-  content.push({
-    type: "text",
-    text: "[CADERNO DE ENCARGOS — condições técnicas, especificações de materiais, ensaios exigidos]",
-  });
-}
-```
-
-### 3. Update context note logic (lines 149-158)
-Expand to cover all combinations of MQT, CE, and Contract. Key examples:
-- MQT + CE + Contract → "Foram fornecidos o MQT, o Caderno de Encargos e o Contrato..."
-- Only CE → "Foi fornecido o Caderno de Encargos..."
-
-### 4. Update analysis prompt text (lines 164-171)
-Add line: `2b. O Caderno de Encargos (se fornecido)`
-
-### 5. Update system prompt (line 185)
-Add reference to cross-checking PAM × MQT × Caderno de Encargos × Contrato × Certificados × Docs Fabricante.
+Nenhuma alteração de código necessária — apenas a migração da base de dados.
 
