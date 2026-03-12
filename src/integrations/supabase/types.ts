@@ -1755,6 +1755,8 @@ export type Database = {
         Row: {
           ai_analysis: Json | null
           ai_recommendation: string | null
+          ce_file_name: string | null
+          ce_file_path: string | null
           certificates: Json | null
           contract_file_name: string | null
           contract_file_path: string | null
@@ -1782,6 +1784,8 @@ export type Database = {
         Insert: {
           ai_analysis?: Json | null
           ai_recommendation?: string | null
+          ce_file_name?: string | null
+          ce_file_path?: string | null
           certificates?: Json | null
           contract_file_name?: string | null
           contract_file_path?: string | null
@@ -1809,6 +1813,8 @@ export type Database = {
         Update: {
           ai_analysis?: Json | null
           ai_recommendation?: string | null
+          ce_file_name?: string | null
+          ce_file_path?: string | null
           certificates?: Json | null
           contract_file_name?: string | null
           contract_file_path?: string | null
