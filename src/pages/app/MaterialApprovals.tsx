@@ -173,6 +173,8 @@ export default function MaterialApprovals() {
         mqt_file_size: mqtFile?.size || null,
         contract_file_path: contractPath,
         contract_file_name: contractFile?.name || null,
+        ce_file_path: cePath,
+        ce_file_name: ceFile?.name || null,
         material_category: category,
         status: 'pending',
         certificates: certificatesJson as any,
