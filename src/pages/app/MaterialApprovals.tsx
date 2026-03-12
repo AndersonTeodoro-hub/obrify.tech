@@ -185,6 +185,7 @@ export default function MaterialApprovals() {
       setNewModalOpen(false);
       setPdmFile(null);
       setMqtFile(null);
+      setCeFile(null);
       setContractFile(null);
       setCertFiles([]);
       setMfgFiles([]);
