@@ -733,7 +733,7 @@ export default function IncompatiCheck() {
           )}
 
           {/* Results: Full width findings list */}
-          {!aiAnalyzing && analysisResult && filteredFindings.length > 0 && (
+          {!aiAnalyzing && hasResults && filteredFindings.length > 0 && (
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">
