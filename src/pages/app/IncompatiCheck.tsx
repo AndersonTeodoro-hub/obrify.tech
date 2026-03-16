@@ -80,6 +80,7 @@ export default function IncompatiCheck() {
   const [zoneImages, setZoneImages] = useState<Map<string, string>>(new Map());
   const [loadingZones, setLoadingZones] = useState<Set<string>>(new Set());
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [clientLogo, setClientLogo] = useState<string | null>(() => localStorage.getItem('incompaticheck_client_logo'));
 
   // Real AI analysis state
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
