@@ -63,6 +63,7 @@ export default function PhotoReports() {
 
   // Logo state
   const [reportLogo, setReportLogo] = useState<string | null>(() => localStorage.getItem('photo_report_logo'));
+  const [clientLogo, setClientLogo] = useState<string | null>(() => localStorage.getItem('photo_report_client_logo'));
   const [exporting, setExporting] = useState(false);
 
   // Load obras
