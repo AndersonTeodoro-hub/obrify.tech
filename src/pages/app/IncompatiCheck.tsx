@@ -792,9 +792,13 @@ function PdeSection({ ic }: { ic: ReturnType<typeof useIncompaticheck> }) {
 
   const handleAnalyze = async () => {
     if (!ic.obraAtiva) return;
-    toast.info('A analisar propostas do empreiteiro...');
-    await ic.analyzeProposals(ic.obraAtiva.id);
-    toast.success('Análise de propostas concluída.');
+    try {
+      toast.info('A analisar propostas do empreiteiro...');
+      await ic.analyzeProposals(ic.obraAtiva.id);
+      toast.success('Análise de propostas concluída.');
+    } catch (err: any) {
+      toast.error(err.message || 'Erro na análise de propostas.');
+    }
   };
 
   const hasPdeOrDesenho = ic.pdeDocuments.some(d => d.doc_type === 'pde' || d.doc_type === 'desenho_preparacao');
