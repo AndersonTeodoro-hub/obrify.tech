@@ -93,6 +93,17 @@ export function useIncompaticheck() {
     }
   }, [user, obraAtiva]);
 
+  const loadKnowledgeNames = useCallback(async (obraId: string) => {
+    if (!user) return;
+    const { data } = await supabase
+      .from('eng_silva_project_knowledge')
+      .select('document_name')
+      .eq('obra_id', obraId)
+      .eq('user_id', user.id)
+      .eq('processed', true);
+    setKnowledgeNames(new Set(data?.map(k => k.document_name) || []));
+  }, [user]);
+
   const selectObra = useCallback(async (obra: Obra) => {
     setObraAtiva(obra);
     await Promise.all([
@@ -101,8 +112,9 @@ export function useIncompaticheck() {
       loadLatestAnalysis(obra.id),
       loadPdeDocuments(obra.id),
       loadPdeAnalyses(obra.id),
+      loadKnowledgeNames(obra.id),
     ]);
-  }, []);
+  }, [loadKnowledgeNames]);
 
   // ---- PROJECTS ----
   const loadProjects = useCallback(async (obraId: string) => {
