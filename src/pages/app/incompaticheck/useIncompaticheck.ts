@@ -96,6 +96,8 @@ export function useIncompaticheck() {
       loadProjects(obra.id),
       loadChat(obra.id),
       loadLatestAnalysis(obra.id),
+      loadPdeDocuments(obra.id),
+      loadPdeAnalyses(obra.id),
     ]);
   }, []);
 
