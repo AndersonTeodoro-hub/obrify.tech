@@ -1010,7 +1010,7 @@ function PdeSection({ ic }: { ic: ReturnType<typeof useIncompaticheck> }) {
                   {VERDICT_CONFIG[latestAnalysis.verdict || '']?.label || 'Parecer'}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Parecer da IA · {latestAnalysis.completed_at ? format(new Date(latestAnalysis.completed_at), "d MMM yyyy 'às' HH:mm", { locale: pt }) : ''}
+                  Parecer Técnico · {latestAnalysis.completed_at ? format(new Date(latestAnalysis.completed_at), "d MMM yyyy 'às' HH:mm", { locale: pt }) : ''}
                 </p>
               </div>
             </div>
