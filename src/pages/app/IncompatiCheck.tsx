@@ -746,7 +746,19 @@ export default function IncompatiCheck() {
           )}
         </div>
       )}
-    </div>  
+
+      {/* Modals */}
+      <ObraRegistModal isOpen={showObraModal} onClose={() => setShowObraModal(false)} onConfirm={handleCreateObra} />
+      <ObraListModal isOpen={showObraList} onClose={() => setShowObraList(false)} obras={ic.obras} obraAtiva={ic.obraAtiva}
+        onSelect={obra => ic.selectObra(obra)} onDelete={id => ic.deleteObra(id)} onNew={() => { setShowObraList(false); setShowObraModal(true); }} />
+      <UploadModal isOpen={showUpload} onClose={() => setShowUpload(false)} onUpload={handleUpload}
+        obraNome={ic.obraAtiva?.nome} uploadProgress={ic.uploadProgress} />
+      <ShareModal isOpen={showShare} onClose={() => setShowShare(false)} obraAtiva={ic.obraAtiva}
+        findingsCount={{ critical: altaCount, warning: mediaCount, info: baixaCount }}
+        onGenerateReport={() => ic.generateReport(clientLogo)} />
+      <ProjectPreviewModal project={previewProject} onClose={() => setPreviewProject(null)}
+        onDelete={(id, path) => ic.deleteProject(id, path)} />
+    </div>
   );
 }
 
@@ -972,19 +984,5 @@ function PdeSection({ ic }: { ic: ReturnType<typeof useIncompaticheck> }) {
         )}
       </CardContent>
     </Card>
-  );
-
-      {/* Modals */}
-      <ObraRegistModal isOpen={showObraModal} onClose={() => setShowObraModal(false)} onConfirm={handleCreateObra} />
-      <ObraListModal isOpen={showObraList} onClose={() => setShowObraList(false)} obras={ic.obras} obraAtiva={ic.obraAtiva}
-        onSelect={obra => ic.selectObra(obra)} onDelete={id => ic.deleteObra(id)} onNew={() => { setShowObraList(false); setShowObraModal(true); }} />
-      <UploadModal isOpen={showUpload} onClose={() => setShowUpload(false)} onUpload={handleUpload}
-        obraNome={ic.obraAtiva?.nome} uploadProgress={ic.uploadProgress} />
-      <ShareModal isOpen={showShare} onClose={() => setShowShare(false)} obraAtiva={ic.obraAtiva}
-        findingsCount={{ critical: altaCount, warning: mediaCount, info: baixaCount }}
-        onGenerateReport={() => ic.generateReport(clientLogo)} />
-      <ProjectPreviewModal project={previewProject} onClose={() => setPreviewProject(null)}
-        onDelete={(id, path) => ic.deleteProject(id, path)} />
-    </div>
   );
 }
