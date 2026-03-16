@@ -139,7 +139,24 @@ export default function IncompatiCheck() {
 
   // PDF export with annotations
   const handleExportPdfWithAnnotations = useCallback(async () => {
-    if (!analysisResult || analysisResult.findings.length === 0) {
+    // Build result from local or persisted data
+    const resultToExport = analysisResult || (ic.analysis && ic.findings.length > 0 ? {
+      findings: ic.findings.map(f => ({
+        id: f.id,
+        severity: (f.severity === 'critical' ? 'alta' : f.severity === 'warning' ? 'media' : 'baixa') as 'alta' | 'media' | 'baixa',
+        title: f.title,
+        description: f.description,
+        location: f.location || '',
+        specialties: f.tags || [],
+        recommendation: '',
+      })),
+      analyzed_at: ic.analysis.completed_at || ic.analysis.created_at || new Date().toISOString(),
+      projects_analyzed: ic.projects.map(p => ({ name: p.name, type: p.type, size_mb: '' })),
+      strategy: 'persisted',
+      skipped_files: [],
+    } : null);
+
+    if (!resultToExport || resultToExport.findings.length === 0) {
       toast.error('Execute uma análise primeiro.');
       return;
     }
