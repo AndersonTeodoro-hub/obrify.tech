@@ -384,7 +384,8 @@ export default function MaterialApprovals() {
       selectedObra.nome,
       pdfFiscalName,
       pdfFiscalCompany,
-      pdfLogo || undefined
+      pdfLogo || undefined,
+      pdfClientLogo || undefined
     );
     setPdfModalOpen(false);
   };
