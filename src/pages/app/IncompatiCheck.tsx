@@ -849,7 +849,7 @@ export default function IncompatiCheck() {
       <UploadModal isOpen={showUpload} onClose={() => setShowUpload(false)} onUpload={handleUpload}
         obraNome={ic.obraAtiva?.nome} uploadProgress={ic.uploadProgress} />
       <ShareModal isOpen={showShare} onClose={() => setShowShare(false)} obraAtiva={ic.obraAtiva}
-        findingsCount={{ critical: altaCount, warning: mediaCount, info: baixaCount }}
+        findingsCount={{ critical: displayAltaCount, warning: displayMediaCount, info: displayBaixaCount }}
         onGenerateReport={() => ic.generateReport(clientLogo)} />
       <ProjectPreviewModal project={previewProject} onClose={() => setPreviewProject(null)}
         onDelete={(id, path) => ic.deleteProject(id, path)} />
