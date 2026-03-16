@@ -88,3 +88,58 @@ export const ACCEPTED_FORMATS = ['pdf'];
 export const ZIP_FORMATS = ['zip', 'rar', '7z'];
 export const EXTRACTABLE_FORMATS = ['pdf'];
 export const FILE_SIZE_LIMIT = 2 * 1024 * 1024 * 1024; // 2GB
+
+// ---- PDE / Desenhos de Preparação ----
+
+export type PdeDocType = 'pde' | 'desenho_preparacao' | 'resposta_pde';
+
+export interface PdeDocument {
+  id: string;
+  user_id: string;
+  obra_id: string;
+  doc_type: PdeDocType;
+  file_name: string;
+  file_path: string;
+  file_size: number;
+  created_at: string;
+}
+
+export interface PdeAnalysis {
+  id: string;
+  user_id: string;
+  obra_id: string;
+  status: 'pending' | 'analyzing' | 'completed' | 'failed';
+  verdict: 'approved' | 'approved_with_reservations' | 'rejected' | null;
+  ai_analysis: {
+    summary: string;
+    findings_addressed: Array<{
+      finding_title: string;
+      resolved: boolean;
+      comment: string;
+    }>;
+    new_issues: Array<{
+      severity: string;
+      title: string;
+      description: string;
+      location: string;
+    }>;
+    technical_notes: string[];
+    recommendation: string;
+  } | null;
+  pde_document_ids: string[];
+  desenho_document_ids: string[];
+  created_at: string;
+  completed_at: string | null;
+}
+
+export const PDE_DOC_TYPES: Record<PdeDocType, { label: string; icon: string; color: string; description: string }> = {
+  pde: { label: 'PDE', icon: '📄', color: '#3b82f6', description: 'Pedido de Esclarecimento do empreiteiro' },
+  desenho_preparacao: { label: 'Desenho de Preparação', icon: '📐', color: '#8b5cf6', description: 'Proposta de solução do empreiteiro' },
+  resposta_pde: { label: 'Resposta ao PDE', icon: '💬', color: '#10b981', description: 'Resposta do projetista' },
+};
+
+export const VERDICT_CONFIG: Record<string, { label: string; color: string; bg: string; icon: string }> = {
+  approved: { label: 'Aprovado', color: '#22c55e', bg: 'rgba(34,197,94,0.1)', icon: '✅' },
+  approved_with_reservations: { label: 'Aprovado c/ Reservas', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', icon: '⚠️' },
+  rejected: { label: 'Rejeitado', color: '#ef4444', bg: 'rgba(239,68,68,0.1)', icon: '❌' },
+};
