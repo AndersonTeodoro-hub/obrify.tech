@@ -1,93 +1,80 @@
 
 
-# Fix: Mudar todas as políticas RLS de RESTRICTIVE para PERMISSIVE
+# Plano: Persistência de Resultados + Cleanup de Referências a "IA"
 
-## Problema
+## Contexto
 
-Todas as políticas RLS nas tabelas `organizations` e `memberships` estão como **RESTRICTIVE** (`Permissive: No`). Em PostgreSQL, políticas RESTRICTIVE exigem que TODAS passem (lógica AND), enquanto PERMISSIVE exige que QUALQUER uma passe (lógica OR). Isto bloqueia a criação de organizações.
+A UI do IncompatiCheck só mostra resultados da análise quando `analysisResult` (estado local) existe. Ao recarregar a página, os dados desaparecem apesar de estarem persistidos na DB via `ic.analysis` e `ic.findings`.
 
-## Migração SQL (um único ficheiro)
+## Alterações
 
-```sql
--- ============================================
--- FIX: Mudar políticas de RESTRICTIVE para PERMISSIVE
--- ============================================
+### 1. `src/pages/app/IncompatiCheck.tsx` — Fallback com dados persistidos
 
--- 1. DROP todas as políticas da tabela organizations
-DROP POLICY IF EXISTS "Authenticated users can create organizations" ON public.organizations;
-DROP POLICY IF EXISTS "Members can view their organizations" ON public.organizations;
-DROP POLICY IF EXISTS "Admins can update organizations" ON public.organizations;
-DROP POLICY IF EXISTS "Admins can delete organizations" ON public.organizations;
+**Criar variáveis de fallback** (após linha 377):
+- `hasPersistedAnalysis`: true quando não há `analysisResult` mas existe `ic.analysis` + `ic.findings`
+- `displayFindings`: mapear `ic.findings` (severity `critical`→`alta`, `warning`→`media`, `info`→`baixa`) para formato `AIFinding[]`
+- `displayAltaCount`, `displayMediaCount`, `displayBaixaCount`: contadores baseados na fonte activa
+- `hasResults`: `!!analysisResult || hasPersistedAnalysis`
 
--- 2. Recriar como PERMISSIVE (default)
-CREATE POLICY "Authenticated users can create organizations"
-  ON public.organizations FOR INSERT
-  TO authenticated
-  WITH CHECK (auth.uid() IS NOT NULL);
+**Substituir condições de render**:
+- Linha 568: `!analysisResult` → `!analysisResult && !hasPersistedAnalysis` (painel "Pronto para analisar" só aparece se não há resultados)
+- Linha 597: `analysisResult` → `hasResults`
+- Linha 640: `analysisResult.findings.length` → `displayFindings.length` (e contadores)
+- Linha 658: metadata text — quando persistido, usar `ic.analysis?.completed_at`
+- Linha 666: `analysisResult &&` → `(analysisResult || hasPersistedAnalysis) &&` (skipped files — só com local)
+- Linha 680: `analysisResult` → `hasResults`
+- Linha 769: `analysisResult` → `hasResults`
 
-CREATE POLICY "Members can view their organizations"
-  ON public.organizations FOR SELECT
-  TO authenticated
-  USING (is_org_member(auth.uid(), id));
+**Substituir `analysisResult?.findings`/`analysisResult.findings`**:
+- Linha 365: `filteredFindings` usar `displayFindings`
+- Linha 640-643: contadores usar `displayAltaCount/displayMediaCount/displayBaixaCount`
 
-CREATE POLICY "Admins can update organizations"
-  ON public.organizations FOR UPDATE
-  TO authenticated
-  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+**PDF export fallback** (linha 141-206):
+- Construir `resultToExport` a partir de dados persistidos se `analysisResult` é null
 
-CREATE POLICY "Admins can delete organizations"
-  ON public.organizations FOR DELETE
-  TO authenticated
-  USING (has_org_role(auth.uid(), id, 'admin'::membership_role));
+**Texto informativo** para dados persistidos:
+- Dentro do bloco de resultados, nota com data da última análise
 
--- 3. DROP todas as políticas da tabela memberships
-DROP POLICY IF EXISTS "Users can insert memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Admins can insert memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Members can view memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Admins can update memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Admins can delete memberships" ON public.memberships;
-DROP POLICY IF EXISTS "Users can view own memberships" ON public.memberships;
+### 2. `src/pages/app/IncompatiCheck.tsx` — Botão "Excluir Análise"
 
--- 4. Recriar TODAS as políticas de memberships como PERMISSIVE
-CREATE POLICY "Users can insert memberships"
-  ON public.memberships FOR INSERT
-  TO authenticated
-  WITH CHECK (
-    auth.uid() = user_id
-    AND (
-      has_org_role(auth.uid(), org_id, 'admin'::membership_role)
-      OR NOT EXISTS (
-        SELECT 1 FROM public.memberships m
-        WHERE m.org_id = memberships.org_id
-      )
-    )
-  );
+Adicionar botão no bloco de acções (junto a "Nova Análise" e "PDF") que:
+- Pede confirmação antes de eliminar
+- Chama `ic.deleteAnalysis(ic.analysis.id)` 
+- Limpa `analysisResult`, `severityFilter`
 
-CREATE POLICY "Members can view memberships"
-  ON public.memberships FOR SELECT
-  TO authenticated
-  USING (
-    auth.uid() = user_id
-    OR has_org_role(auth.uid(), org_id, 'admin'::membership_role)
-  );
+### 3. `src/pages/app/incompaticheck/useIncompaticheck.ts` — `deleteAnalysis`
 
-CREATE POLICY "Admins can update memberships"
-  ON public.memberships FOR UPDATE
-  TO authenticated
-  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
-
-CREATE POLICY "Admins can delete memberships"
-  ON public.memberships FOR DELETE
-  TO authenticated
-  USING (has_org_role(auth.uid(), org_id, 'admin'::membership_role));
+Adicionar função:
+```typescript
+const deleteAnalysis = useCallback(async (analysisId: string) => {
+  await supabase.from('incompaticheck_analyses').delete().eq('id', analysisId);
+  setAnalysis(null);
+  setFindings([]);
+}, []);
 ```
+Expor no return.
 
-## Resumo
+### 4. Remover menções a "IA"
 
-| Tabela | Acção |
+| Ficheiro | Linha | De | Para |
+|---|---|---|---|
+| `IncompatiCheck.tsx` | 525 | "A IA usará resumos inteligentes..." | "Serão usados resumos inteligentes em vez dos PDFs completos, resultando em análises mais rápidas e precisas." |
+| `IncompatiCheck.tsx` | 588 | "A IA irá comparar os projectos..." | "Os projectos carregados serão comparados para identificar potenciais conflitos entre especialidades." |
+| `IncompatiCheck.tsx` | 957 | "Parecer da IA" | "Parecer Técnico" |
+| `AgentPanel.tsx` | 221 | "Engº Marcos IA" | "Engº Marcos" |
+
+## Ficheiros modificados
+
+| Ficheiro | Alteração |
 |---|---|
-| `organizations` | Drop 4 políticas RESTRICTIVE, recriar 4 como PERMISSIVE |
-| `memberships` | Drop todas as políticas, recriar 4 como PERMISSIVE (INSERT, SELECT, UPDATE, DELETE) |
+| `src/pages/app/IncompatiCheck.tsx` | Fallback persistido, botão excluir, remover "IA" |
+| `src/pages/app/incompaticheck/useIncompaticheck.ts` | Adicionar `deleteAnalysis`, expor no return |
+| `src/pages/app/incompaticheck/AgentPanel.tsx` | Remover "IA" do nome |
 
-Nenhuma alteração de código necessária — apenas a migração da base de dados.
+## Garantias
+
+- Se não há dados persistidos nem locais, o painel "Pronto para analisar" aparece normalmente
+- Ao correr nova análise, `analysisResult` local sobrepõe os dados persistidos
+- O botão "Excluir Análise" elimina da DB (CASCADE elimina findings) e limpa UI
+- Nenhum texto visível menciona "IA"
 
