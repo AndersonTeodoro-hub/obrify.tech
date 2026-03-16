@@ -568,7 +568,7 @@ export function generateMaterialApprovalPDF(
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(148, 163, 184);
-    doc.text('OBRIFY — Fiscalização Inteligente de Obras', ML, FOOTER_Y);
+    doc.text(fiscalCompany ? `${fiscalCompany} — Fiscalização de Obras` : 'Fiscalização de Obras', ML, FOOTER_Y);
     doc.text(`Página ${i} de ${totalPages}`, PAGE_W - MR, FOOTER_Y, { align: 'right' });
   }
 

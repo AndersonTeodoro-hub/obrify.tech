@@ -62,10 +62,11 @@ export function generatePhotoReportPDF(
     doc.setTextColor(33, 33, 33);
     doc.text('RELATÓRIO FOTOGRÁFICO DIÁRIO', titleX, MT + 6);
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor(100, 100, 100);
-    doc.text('OBRIFY — Fiscalização Inteligente', PAGE_W - MR, MT + 5, { align: 'right' });
+    if (clientLogoBase64) {
+      try {
+        doc.addImage(clientLogoBase64, 'PNG', PAGE_W - MR - 35, MT, 35, 14);
+      } catch { /* skip */ }
+    }
 
     doc.setFontSize(10);
     doc.setTextColor(50, 50, 50);

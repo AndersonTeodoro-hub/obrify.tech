@@ -750,7 +750,7 @@ export default function IncompatiCheck() {
         obraNome={ic.obraAtiva?.nome} uploadProgress={ic.uploadProgress} />
       <ShareModal isOpen={showShare} onClose={() => setShowShare(false)} obraAtiva={ic.obraAtiva}
         findingsCount={{ critical: altaCount, warning: mediaCount, info: baixaCount }}
-        onGenerateReport={ic.generateReport} />
+        onGenerateReport={() => ic.generateReport(clientLogo)} />
       <ProjectPreviewModal project={previewProject} onClose={() => setPreviewProject(null)}
         onDelete={(id, path) => ic.deleteProject(id, path)} />
     </div>
