@@ -512,10 +512,16 @@ export function useIncompaticheck() {
     doc.rect(0, 0, pageWidth, 40, 'F');
     doc.setTextColor(255, 107, 53);
     doc.setFontSize(18);
-    doc.text('Obrify IncompatiCheck', margin, 20);
+    doc.text('IncompatiCheck', margin, 20);
     doc.setFontSize(11);
     doc.setTextColor(200, 200, 200);
     doc.text('Relatório de Incompatibilidades com Anotações', margin, 30);
+
+    if (clientLogoBase64) {
+      try {
+        doc.addImage(clientLogoBase64, 'PNG', pageWidth - margin - 40, 5, 40, 16);
+      } catch { /* skip */ }
+    }
 
     // Obra info
     doc.setTextColor(60, 60, 60);
