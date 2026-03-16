@@ -664,15 +664,31 @@ export default function IncompatiCheck() {
                       {exportingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
                       PDF
                     </Button>
+                    {ic.analysis && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (confirm('Tem a certeza que deseja excluir esta análise?')) {
+                            ic.deleteAnalysis(ic.analysis!.id);
+                            setAnalysisResult(null);
+                            setSeverityFilter(null);
+                          }
+                        }}
+                        className="gap-1.5 text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
                   </div>
 
                   {/* Filters */}
                   <div className="flex gap-1.5 flex-wrap">
                     {[
-                      { key: null, label: `Todas (${analysisResult.findings.length})` },
-                      { key: 'alta', label: `Alta (${altaCount})` },
-                      { key: 'media', label: `Média (${mediaCount})` },
-                      { key: 'baixa', label: `Baixa (${baixaCount})` },
+                      { key: null, label: `Todas (${displayFindings.length})` },
+                      { key: 'alta', label: `Alta (${displayAltaCount})` },
+                      { key: 'media', label: `Média (${displayMediaCount})` },
+                      { key: 'baixa', label: `Baixa (${displayBaixaCount})` },
                     ].map(f => (
                       <Button
                         key={f.key || 'all'}
@@ -686,9 +702,17 @@ export default function IncompatiCheck() {
                     ))}
                   </div>
 
-                  <p className="text-[11px] text-muted-foreground">
-                    Analisado em {new Date(analysisResult.analyzed_at).toLocaleString('pt-PT')} · {analysisResult.projects_analyzed.length} projectos · Estratégia: {analysisResult.strategy === 'pairs' ? 'pares' : 'conjunta'}
-                  </p>
+                  {analysisResult && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Analisado em {new Date(analysisResult.analyzed_at).toLocaleString('pt-PT')} · {analysisResult.projects_analyzed.length} projectos · Estratégia: {analysisResult.strategy === 'pairs' ? 'pares' : 'conjunta'}
+                    </p>
+                  )}
+
+                  {hasPersistedAnalysis && !analysisResult && (
+                    <p className="text-[10px] text-muted-foreground text-center italic">
+                      Resultados da última análise guardada {ic.analysis?.completed_at ? `· ${format(new Date(ic.analysis.completed_at), "d MMM yyyy 'às' HH:mm", { locale: pt })}` : ''}
+                    </p>
+                  )}
                 </div>
               )}
             </div>
