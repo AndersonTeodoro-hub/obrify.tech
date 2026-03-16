@@ -218,7 +218,7 @@ export default function AgentPanel({ findings, obraName }: AgentPanelProps) {
 
       {/* Name */}
       <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>Engº Marcos IA</div>
+        <div style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>Engº Marcos</div>
         <div style={{ fontSize: '12px', color: '#888', marginTop: '2px' }}>Engenheiro Sénior · Fiscalização</div>
         {obraName && (
           <div style={{ fontSize: '11px', color: '#ff6b35', marginTop: '4px' }}>

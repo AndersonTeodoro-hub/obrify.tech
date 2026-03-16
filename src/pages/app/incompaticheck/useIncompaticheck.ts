@@ -872,6 +872,12 @@ export function useIncompaticheck() {
     if (user) loadObras();
   }, [user, loadObras]);
 
+  const deleteAnalysis = useCallback(async (analysisId: string) => {
+    await supabase.from('incompaticheck_analyses').delete().eq('id', analysisId);
+    setAnalysis(null);
+    setFindings([]);
+  }, []);
+
   return {
     // State
     obras,
@@ -898,6 +904,7 @@ export function useIncompaticheck() {
     uploadProject,
     deleteProject,
     runAnalysis,
+    deleteAnalysis,
     sendUserMessage,
     generateReport,
     generateReportWithAnnotations,
