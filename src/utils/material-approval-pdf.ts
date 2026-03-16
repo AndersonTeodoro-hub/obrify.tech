@@ -61,7 +61,8 @@ export function generateMaterialApprovalPDF(
   obraName: string,
   fiscalName?: string,
   fiscalCompany?: string,
-  logoBase64?: string
+  logoBase64?: string,
+  clientLogoBase64?: string
 ) {
   const doc = new jsPDF('p', 'mm', 'a4');
   const now = new Date();
