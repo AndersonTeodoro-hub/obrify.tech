@@ -822,7 +822,7 @@ export default function IncompatiCheck() {
           )}
 
           {/* No findings for current filter */}
-          {!aiAnalyzing && analysisResult && filteredFindings.length === 0 && (
+          {!aiAnalyzing && hasResults && filteredFindings.length === 0 && (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12 text-center">
                 <CheckCircle2 className="w-10 h-10 text-emerald-500 mb-3" />
