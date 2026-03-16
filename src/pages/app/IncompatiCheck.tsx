@@ -225,6 +225,24 @@ export default function IncompatiCheck() {
     setAnalysisResult(null);
 
     try {
+      // Fetch knowledge data for this obra
+      const { data: knowledgeData } = await supabase
+        .from('eng_silva_project_knowledge')
+        .select('document_name, specialty, summary, key_elements, processed')
+        .eq('obra_id', ic.obraAtiva.id)
+        .eq('processed', true);
+
+      const knowledgePayload = knowledgeData?.map(k => ({
+        project_name: k.document_name,
+        specialty: k.specialty,
+        summary: k.summary,
+        key_elements: k.key_elements,
+      })) || [];
+
+      if (knowledgePayload.length > 0) {
+        toast.info(`Usando resumos inteligentes para ${knowledgePayload.length} projecto(s).`);
+      }
+
       const projectData = ic.projects.map(p => ({
         id: p.id,
         name: p.name,
@@ -232,10 +250,10 @@ export default function IncompatiCheck() {
         file_path: p.file_path,
       }));
 
-      console.log('INCOMPATICHECK: Invoking analysis with', projectData.length, 'projects');
+      console.log('INCOMPATICHECK: Invoking analysis with', projectData.length, 'projects,', knowledgePayload.length, 'knowledge entries');
 
       const { data, error } = await supabase.functions.invoke('incompaticheck-analyze', {
-        body: { projects: projectData },
+        body: { projects: projectData, knowledge_data: knowledgePayload },
       });
 
       if (error) throw error;
