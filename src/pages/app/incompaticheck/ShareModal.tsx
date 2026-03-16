@@ -6,7 +6,7 @@ interface ShareModalProps {
   onClose: () => void;
   obraAtiva: Obra | null;
   findingsCount: { critical: number; warning: number; info: number };
-  onGenerateReport: () => Promise<Blob | null>;
+  onGenerateReport: (clientLogo?: string | null) => Promise<Blob | null>;
 }
 
 export default function ShareModal({ isOpen, onClose, obraAtiva, findingsCount, onGenerateReport }: ShareModalProps) {
