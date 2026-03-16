@@ -485,7 +485,14 @@ export default function IncompatiCheck() {
                             >
                               <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                               <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-foreground truncate">{project.name}</p>
+                                <div className="flex items-center gap-1.5">
+                                  <p className="text-sm font-medium text-foreground truncate">{project.name}</p>
+                                  {ic.knowledgeNames.has(project.name) && (
+                                    <Badge variant="secondary" className="text-[9px] px-1 py-0 gap-0.5 flex-shrink-0">
+                                      🧠 Knowledge
+                                    </Badge>
+                                  )}
+                                </div>
                                 <p className="text-[11px] text-muted-foreground">
                                   {formatFileSize(project.file_size)} · {format(new Date(project.created_at), "d MMM yyyy", { locale: pt })}
                                 </p>
