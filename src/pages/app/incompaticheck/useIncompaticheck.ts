@@ -497,7 +497,7 @@ export function useIncompaticheck() {
     if (createErr || !analysisRow) {
       console.error('Create PDE analysis error:', createErr);
       setAnalyzingProposal(false);
-      return;
+      throw new Error('Erro ao iniciar análise.');
     }
 
     try {
