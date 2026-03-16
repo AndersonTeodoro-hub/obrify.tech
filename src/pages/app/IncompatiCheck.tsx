@@ -212,7 +212,7 @@ export default function IncompatiCheck() {
         }
       }
 
-      await ic.generateReportWithAnnotations(analysisResult, annotatedImages, clientLogo);
+      await ic.generateReportWithAnnotations(resultToExport, annotatedImages, clientLogo);
       toast.success('Relatório gerado com sucesso!');
     } catch (err) {
       console.error('PDF generation error:', err);
