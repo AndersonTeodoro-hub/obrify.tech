@@ -1,7 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useIncompaticheck } from './incompaticheck/useIncompaticheck';
-import { PROJECT_TYPES } from './incompaticheck/types';
-import type { Project } from './incompaticheck/types';
+import { PROJECT_TYPES, PDE_DOC_TYPES, VERDICT_CONFIG } from './incompaticheck/types';
+import type { Project, PdeDocType } from './incompaticheck/types';
 import { formatFileSize } from './incompaticheck/helpers';
 import UploadModal from './incompaticheck/UploadModal';
 import ShareModal from './incompaticheck/ShareModal';
