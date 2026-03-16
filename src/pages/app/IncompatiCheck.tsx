@@ -512,6 +512,20 @@ export default function IncompatiCheck() {
                   })}
                 </CardContent>
               </Card>
+
+              {/* Knowledge tip */}
+              {ic.projects.length > 4 && ic.knowledgeNames.size < ic.projects.length / 2 && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-accent/50 border border-accent">
+                  <Lightbulb className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                  <p className="text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">Dica:</span> Processe os projectos no{' '}
+                    <a href="/app/project-knowledge" className="text-primary underline hover:no-underline">
+                      Conhecimento do Projecto
+                    </a>{' '}
+                    antes de analisar. A IA usará resumos inteligentes em vez dos PDFs completos, resultando em análises mais rápidas e precisas.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Right: Analysis Panel (2 cols) */}
