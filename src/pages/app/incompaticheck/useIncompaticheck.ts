@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import JSZip from 'jszip';
 import * as pdfjsLib from 'pdfjs-dist';
-import type { Obra, Project, Analysis, Finding, ChatMessage } from './types';
+import type { Obra, Project, Analysis, Finding, ChatMessage, PdeDocument, PdeAnalysis, PdeDocType } from './types';
 import { analyzeText, crossAnalyze, getFileExtension, generateAgentResponseFromFindings } from './helpers';
 import { EXTRACTABLE_FORMATS, ZIP_FORMATS, ACCEPTED_FORMATS, FILE_SIZE_LIMIT } from './types';
 import jsPDF from 'jspdf';
@@ -22,6 +22,11 @@ export function useIncompaticheck() {
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
+
+  // PDE state
+  const [pdeDocuments, setPdeDocuments] = useState<PdeDocument[]>([]);
+  const [pdeAnalyses, setPdeAnalyses] = useState<PdeAnalysis[]>([]);
+  const [analyzingProposal, setAnalyzingProposal] = useState(false);
 
   // ---- OBRAS ----
   const loadObras = useCallback(async () => {
@@ -48,7 +53,7 @@ export function useIncompaticheck() {
   }, [user]);
 
   const deleteObra = useCallback(async (id: string) => {
-    // Delete storage files for this obra
+    // Delete storage files for this obra (projects)
     if (user) {
       const { data: projectFiles } = await supabase
         .from('incompaticheck_projects')
@@ -60,6 +65,17 @@ export function useIncompaticheck() {
           await supabase.storage.from('incompaticheck-files').remove(paths);
         }
       }
+      // Delete PDE storage files
+      const { data: pdeFiles } = await (supabase as any)
+        .from('incompaticheck_pde_documents')
+        .select('file_path')
+        .eq('obra_id', id);
+      if (pdeFiles && pdeFiles.length > 0) {
+        const pdePaths = pdeFiles.map((p: any) => p.file_path).filter(Boolean);
+        if (pdePaths.length > 0) {
+          await supabase.storage.from('incompaticheck-files').remove(pdePaths);
+        }
+      }
     }
     await supabase.from('incompaticheck_obras').delete().eq('id', id);
     setObras(prev => prev.filter(o => o.id !== id));
@@ -69,6 +85,8 @@ export function useIncompaticheck() {
       setFindings([]);
       setAnalysis(null);
       setChatMessages([]);
+      setPdeDocuments([]);
+      setPdeAnalyses([]);
     }
   }, [user, obraAtiva]);
 
@@ -78,6 +96,8 @@ export function useIncompaticheck() {
       loadProjects(obra.id),
       loadChat(obra.id),
       loadLatestAnalysis(obra.id),
+      loadPdeDocuments(obra.id),
+      loadPdeAnalyses(obra.id),
     ]);
   }, []);
 
@@ -397,6 +417,131 @@ export function useIncompaticheck() {
     }
   }, [obraAtiva, user, findings, chatMessages, sendMessage]);
 
+  // ---- PDE / DESENHOS DE PREPARAÇÃO ----
+  const loadPdeDocuments = useCallback(async (obraId: string) => {
+    const { data } = await (supabase as any)
+      .from('incompaticheck_pde_documents')
+      .select('*')
+      .eq('obra_id', obraId)
+      .order('created_at', { ascending: false });
+    if (data) setPdeDocuments(data as PdeDocument[]);
+    else setPdeDocuments([]);
+  }, []);
+
+  const loadPdeAnalyses = useCallback(async (obraId: string) => {
+    const { data } = await (supabase as any)
+      .from('incompaticheck_pde_analyses')
+      .select('*')
+      .eq('obra_id', obraId)
+      .order('created_at', { ascending: false });
+    if (data) setPdeAnalyses(data as PdeAnalysis[]);
+    else setPdeAnalyses([]);
+  }, []);
+
+  const uploadPdeDocument = useCallback(async (file: File, docType: PdeDocType, obraId: string) => {
+    if (!user) return;
+    const timestamp = Date.now();
+    const path = `${user.id}/${obraId}/pde/${timestamp}_${file.name}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('incompaticheck-files')
+      .upload(path, file, { upsert: true });
+
+    if (uploadError) throw new Error(`Erro no upload: ${uploadError.message}`);
+
+    const { error: insertError } = await (supabase as any)
+      .from('incompaticheck_pde_documents')
+      .insert({
+        user_id: user.id,
+        obra_id: obraId,
+        doc_type: docType,
+        file_name: file.name,
+        file_path: path,
+        file_size: file.size,
+      });
+
+    if (insertError) {
+      console.error('Insert PDE doc error:', insertError);
+      throw new Error('Erro ao guardar documento.');
+    }
+
+    await loadPdeDocuments(obraId);
+  }, [user, loadPdeDocuments]);
+
+  const deletePdeDocument = useCallback(async (id: string, filePath: string) => {
+    await supabase.storage.from('incompaticheck-files').remove([filePath]);
+    await (supabase as any).from('incompaticheck_pde_documents').delete().eq('id', id);
+    setPdeDocuments(prev => prev.filter(d => d.id !== id));
+  }, []);
+
+  const analyzeProposals = useCallback(async (obraId: string) => {
+    if (!user) return;
+    setAnalyzingProposal(true);
+
+    const pdeDocs = pdeDocuments.filter(d => d.doc_type === 'pde');
+    const desenhoDocs = pdeDocuments.filter(d => d.doc_type === 'desenho_preparacao');
+
+    // Create analysis record
+    const { data: analysisRow, error: createErr } = await (supabase as any)
+      .from('incompaticheck_pde_analyses')
+      .insert({
+        user_id: user.id,
+        obra_id: obraId,
+        status: 'analyzing',
+        pde_document_ids: pdeDocs.map(d => d.id),
+        desenho_document_ids: desenhoDocs.map(d => d.id),
+      })
+      .select()
+      .single();
+
+    if (createErr || !analysisRow) {
+      console.error('Create PDE analysis error:', createErr);
+      setAnalyzingProposal(false);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.functions.invoke('incompaticheck-analyze-proposal', {
+        body: {
+          obra_id: obraId,
+          pde_documents: pdeDocs.map(d => ({ file_path: d.file_path, name: d.file_name })),
+          desenho_documents: desenhoDocs.map(d => ({ file_path: d.file_path, name: d.file_name })),
+          original_projects: projects.map(p => ({ file_path: p.file_path, name: p.name, type: p.type })),
+          existing_findings: findings.map(f => ({
+            severity: f.severity,
+            title: f.title,
+            description: f.description,
+            location: f.location,
+          })),
+        },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      await (supabase as any)
+        .from('incompaticheck_pde_analyses')
+        .update({
+          status: 'completed',
+          verdict: data.verdict,
+          ai_analysis: data,
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', analysisRow.id);
+
+      await loadPdeAnalyses(obraId);
+    } catch (err: any) {
+      console.error('PDE analysis error:', err);
+      await (supabase as any)
+        .from('incompaticheck_pde_analyses')
+        .update({ status: 'failed' })
+        .eq('id', analysisRow.id);
+      await loadPdeAnalyses(obraId);
+    } finally {
+      setAnalyzingProposal(false);
+    }
+  }, [user, pdeDocuments, projects, findings, loadPdeAnalyses]);
+
   // ---- REPORT ----
   const generateReport = useCallback(async (clientLogoBase64?: string | null) => {
     if (!obraAtiva || !analysis || !user) return null;
@@ -708,6 +853,10 @@ export function useIncompaticheck() {
     analyzing,
     uploadProgress,
     agentThinking,
+    // PDE State
+    pdeDocuments,
+    pdeAnalyses,
+    analyzingProposal,
     // Actions
     loadObras,
     createObra,
@@ -720,5 +869,9 @@ export function useIncompaticheck() {
     generateReport,
     generateReportWithAnnotations,
     setUploadProgress,
+    // PDE Actions
+    uploadPdeDocument,
+    deletePdeDocument,
+    analyzeProposals,
   };
 }

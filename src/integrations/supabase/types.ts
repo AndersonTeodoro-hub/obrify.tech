@@ -1344,6 +1344,94 @@ export type Database = {
         }
         Relationships: []
       }
+      incompaticheck_pde_analyses: {
+        Row: {
+          ai_analysis: Json | null
+          completed_at: string | null
+          created_at: string | null
+          desenho_document_ids: string[] | null
+          id: string
+          obra_id: string
+          pde_document_ids: string[] | null
+          status: string | null
+          user_id: string
+          verdict: string | null
+        }
+        Insert: {
+          ai_analysis?: Json | null
+          completed_at?: string | null
+          created_at?: string | null
+          desenho_document_ids?: string[] | null
+          id?: string
+          obra_id: string
+          pde_document_ids?: string[] | null
+          status?: string | null
+          user_id: string
+          verdict?: string | null
+        }
+        Update: {
+          ai_analysis?: Json | null
+          completed_at?: string | null
+          created_at?: string | null
+          desenho_document_ids?: string[] | null
+          id?: string
+          obra_id?: string
+          pde_document_ids?: string[] | null
+          status?: string | null
+          user_id?: string
+          verdict?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "incompaticheck_pde_analyses_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_obras"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      incompaticheck_pde_documents: {
+        Row: {
+          created_at: string | null
+          doc_type: string
+          file_name: string
+          file_path: string
+          file_size: number
+          id: string
+          obra_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          doc_type: string
+          file_name: string
+          file_path: string
+          file_size: number
+          id?: string
+          obra_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          doc_type?: string
+          file_name?: string
+          file_path?: string
+          file_size?: number
+          id?: string
+          obra_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "incompaticheck_pde_documents_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_obras"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       incompaticheck_projects: {
         Row: {
           created_at: string | null
