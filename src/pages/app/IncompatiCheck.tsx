@@ -361,10 +361,25 @@ export default function IncompatiCheck() {
     return acc;
   }, {});
 
-  // Filtered findings from AI result
-  const filteredFindings = analysisResult?.findings.filter(
+  // Fallback: use persisted DB data when local analysisResult is absent
+  const hasPersistedAnalysis = !analysisResult && !!ic.analysis && ic.findings.length > 0;
+
+  const displayFindings: AIFinding[] = analysisResult?.findings || (hasPersistedAnalysis ? ic.findings.map(f => ({
+    id: f.id,
+    severity: (f.severity === 'critical' ? 'alta' : f.severity === 'warning' ? 'media' : 'baixa') as 'alta' | 'media' | 'baixa',
+    title: f.title,
+    description: f.description,
+    location: f.location || '',
+    specialties: f.tags || [],
+    recommendation: '',
+  })) : []);
+
+  const hasResults = !!analysisResult || hasPersistedAnalysis;
+
+  // Filtered findings
+  const filteredFindings = displayFindings.filter(
     f => !severityFilter || f.severity === severityFilter
-  ) || [];
+  );
 
   const severityBadgeVariant = (s: string) =>
     s === 'alta' ? 'critical' : s === 'media' ? 'high' : 'success';
@@ -372,9 +387,9 @@ export default function IncompatiCheck() {
   const severityLabel = (s: string) =>
     s === 'alta' ? 'Alta' : s === 'media' ? 'Média' : 'Baixa';
 
-  const altaCount = analysisResult?.findings.filter(f => f.severity === 'alta').length || 0;
-  const mediaCount = analysisResult?.findings.filter(f => f.severity === 'media').length || 0;
-  const baixaCount = analysisResult?.findings.filter(f => f.severity === 'baixa').length || 0;
+  const displayAltaCount = displayFindings.filter(f => f.severity === 'alta').length;
+  const displayMediaCount = displayFindings.filter(f => f.severity === 'media').length;
+  const displayBaixaCount = displayFindings.filter(f => f.severity === 'baixa').length;
 
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6 lg:p-8 space-y-6">
