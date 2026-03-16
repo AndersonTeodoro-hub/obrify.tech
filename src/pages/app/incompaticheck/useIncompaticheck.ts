@@ -417,6 +417,131 @@ export function useIncompaticheck() {
     }
   }, [obraAtiva, user, findings, chatMessages, sendMessage]);
 
+  // ---- PDE / DESENHOS DE PREPARAÇÃO ----
+  const loadPdeDocuments = useCallback(async (obraId: string) => {
+    const { data } = await (supabase as any)
+      .from('incompaticheck_pde_documents')
+      .select('*')
+      .eq('obra_id', obraId)
+      .order('created_at', { ascending: false });
+    if (data) setPdeDocuments(data as PdeDocument[]);
+    else setPdeDocuments([]);
+  }, []);
+
+  const loadPdeAnalyses = useCallback(async (obraId: string) => {
+    const { data } = await (supabase as any)
+      .from('incompaticheck_pde_analyses')
+      .select('*')
+      .eq('obra_id', obraId)
+      .order('created_at', { ascending: false });
+    if (data) setPdeAnalyses(data as PdeAnalysis[]);
+    else setPdeAnalyses([]);
+  }, []);
+
+  const uploadPdeDocument = useCallback(async (file: File, docType: PdeDocType, obraId: string) => {
+    if (!user) return;
+    const timestamp = Date.now();
+    const path = `${user.id}/${obraId}/pde/${timestamp}_${file.name}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('incompaticheck-files')
+      .upload(path, file, { upsert: true });
+
+    if (uploadError) throw new Error(`Erro no upload: ${uploadError.message}`);
+
+    const { error: insertError } = await (supabase as any)
+      .from('incompaticheck_pde_documents')
+      .insert({
+        user_id: user.id,
+        obra_id: obraId,
+        doc_type: docType,
+        file_name: file.name,
+        file_path: path,
+        file_size: file.size,
+      });
+
+    if (insertError) {
+      console.error('Insert PDE doc error:', insertError);
+      throw new Error('Erro ao guardar documento.');
+    }
+
+    await loadPdeDocuments(obraId);
+  }, [user, loadPdeDocuments]);
+
+  const deletePdeDocument = useCallback(async (id: string, filePath: string) => {
+    await supabase.storage.from('incompaticheck-files').remove([filePath]);
+    await (supabase as any).from('incompaticheck_pde_documents').delete().eq('id', id);
+    setPdeDocuments(prev => prev.filter(d => d.id !== id));
+  }, []);
+
+  const analyzeProposals = useCallback(async (obraId: string) => {
+    if (!user) return;
+    setAnalyzingProposal(true);
+
+    const pdeDocs = pdeDocuments.filter(d => d.doc_type === 'pde');
+    const desenhoDocs = pdeDocuments.filter(d => d.doc_type === 'desenho_preparacao');
+
+    // Create analysis record
+    const { data: analysisRow, error: createErr } = await (supabase as any)
+      .from('incompaticheck_pde_analyses')
+      .insert({
+        user_id: user.id,
+        obra_id: obraId,
+        status: 'analyzing',
+        pde_document_ids: pdeDocs.map(d => d.id),
+        desenho_document_ids: desenhoDocs.map(d => d.id),
+      })
+      .select()
+      .single();
+
+    if (createErr || !analysisRow) {
+      console.error('Create PDE analysis error:', createErr);
+      setAnalyzingProposal(false);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.functions.invoke('incompaticheck-analyze-proposal', {
+        body: {
+          obra_id: obraId,
+          pde_documents: pdeDocs.map(d => ({ file_path: d.file_path, name: d.file_name })),
+          desenho_documents: desenhoDocs.map(d => ({ file_path: d.file_path, name: d.file_name })),
+          original_projects: projects.map(p => ({ file_path: p.file_path, name: p.name, type: p.type })),
+          existing_findings: findings.map(f => ({
+            severity: f.severity,
+            title: f.title,
+            description: f.description,
+            location: f.location,
+          })),
+        },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      await (supabase as any)
+        .from('incompaticheck_pde_analyses')
+        .update({
+          status: 'completed',
+          verdict: data.verdict,
+          ai_analysis: data,
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', analysisRow.id);
+
+      await loadPdeAnalyses(obraId);
+    } catch (err: any) {
+      console.error('PDE analysis error:', err);
+      await (supabase as any)
+        .from('incompaticheck_pde_analyses')
+        .update({ status: 'failed' })
+        .eq('id', analysisRow.id);
+      await loadPdeAnalyses(obraId);
+    } finally {
+      setAnalyzingProposal(false);
+    }
+  }, [user, pdeDocuments, projects, findings, loadPdeAnalyses]);
+
   // ---- REPORT ----
   const generateReport = useCallback(async (clientLogoBase64?: string | null) => {
     if (!obraAtiva || !analysis || !user) return null;
