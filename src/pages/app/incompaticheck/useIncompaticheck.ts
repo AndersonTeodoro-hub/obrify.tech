@@ -53,7 +53,7 @@ export function useIncompaticheck() {
   }, [user]);
 
   const deleteObra = useCallback(async (id: string) => {
-    // Delete storage files for this obra
+    // Delete storage files for this obra (projects)
     if (user) {
       const { data: projectFiles } = await supabase
         .from('incompaticheck_projects')
@@ -65,6 +65,17 @@ export function useIncompaticheck() {
           await supabase.storage.from('incompaticheck-files').remove(paths);
         }
       }
+      // Delete PDE storage files
+      const { data: pdeFiles } = await (supabase as any)
+        .from('incompaticheck_pde_documents')
+        .select('file_path')
+        .eq('obra_id', id);
+      if (pdeFiles && pdeFiles.length > 0) {
+        const pdePaths = pdeFiles.map((p: any) => p.file_path).filter(Boolean);
+        if (pdePaths.length > 0) {
+          await supabase.storage.from('incompaticheck-files').remove(pdePaths);
+        }
+      }
     }
     await supabase.from('incompaticheck_obras').delete().eq('id', id);
     setObras(prev => prev.filter(o => o.id !== id));
@@ -74,6 +85,8 @@ export function useIncompaticheck() {
       setFindings([]);
       setAnalysis(null);
       setChatMessages([]);
+      setPdeDocuments([]);
+      setPdeAnalyses([]);
     }
   }, [user, obraAtiva]);
 
