@@ -38,7 +38,8 @@ export function generatePhotoReportPDF(
   fiscalName: string,
   fiscalCompany: string,
   photoImages: PhotoForExport[],
-  logoBase64?: string | null
+  logoBase64?: string | null,
+  clientLogoBase64?: string | null
 ) {
   const doc = new jsPDF('p', 'mm', 'a4');
   const dateFormatted = new Date(report.report_date + 'T00:00:00').toLocaleDateString('pt-PT', {
