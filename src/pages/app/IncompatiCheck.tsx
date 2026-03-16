@@ -741,7 +741,7 @@ export default function IncompatiCheck() {
           )}
 
           {/* ---- ESCLARECIMENTOS & PROPOSTAS (PDE) ---- */}
-          {analysisResult && (
+          {(analysisResult || ic.analysis || ic.pdeDocuments.length > 0) && (
             <PdeSection ic={ic} />
           )}
         </div>
