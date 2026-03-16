@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import JSZip from 'jszip';
 import * as pdfjsLib from 'pdfjs-dist';
-import type { Obra, Project, Analysis, Finding, ChatMessage } from './types';
+import type { Obra, Project, Analysis, Finding, ChatMessage, PdeDocument, PdeAnalysis, PdeDocType } from './types';
 import { analyzeText, crossAnalyze, getFileExtension, generateAgentResponseFromFindings } from './helpers';
 import { EXTRACTABLE_FORMATS, ZIP_FORMATS, ACCEPTED_FORMATS, FILE_SIZE_LIMIT } from './types';
 import jsPDF from 'jspdf';
