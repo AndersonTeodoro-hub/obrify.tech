@@ -472,7 +472,7 @@ export function useIncompaticheck() {
       doc.setPage(i);
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
-      doc.text(`Gerado automaticamente por Obrify IncompatiCheck — ${new Date().toLocaleDateString('pt-PT')}`, 20, 285);
+      doc.text(`Gerado automaticamente por IncompatiCheck — ${new Date().toLocaleDateString('pt-PT')}`, 20, 285);
       doc.text(`Página ${i} de ${pageCount}`, pageWidth - 40, 285);
     }
 
