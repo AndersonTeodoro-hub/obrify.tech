@@ -23,6 +23,11 @@ export function useIncompaticheck() {
   const [analyzing, setAnalyzing] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
 
+  // PDE state
+  const [pdeDocuments, setPdeDocuments] = useState<PdeDocument[]>([]);
+  const [pdeAnalyses, setPdeAnalyses] = useState<PdeAnalysis[]>([]);
+  const [analyzingProposal, setAnalyzingProposal] = useState(false);
+
   // ---- OBRAS ----
   const loadObras = useCallback(async () => {
     if (!user) return;
