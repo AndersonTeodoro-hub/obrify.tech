@@ -496,7 +496,8 @@ export function useIncompaticheck() {
   // ---- REPORT WITH ANNOTATIONS ----
   const generateReportWithAnnotations = useCallback(async (
     analysisResult: { findings: any[]; analyzed_at: string; projects_analyzed: any[] },
-    annotatedImages: Map<string, string>
+    annotatedImages: Map<string, string>,
+    clientLogoBase64?: string | null
   ) => {
     if (!obraAtiva || !user) return null;
 
