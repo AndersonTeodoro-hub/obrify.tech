@@ -362,9 +362,9 @@ export default function PhotoReports() {
       const fc = localStorage.getItem('pam_fiscal_company') || 'DDN';
 
       if (type === 'pdf') {
-        generatePhotoReportPDF(reportData, selectedObra.nome, selectedObra.cidade || '', (report as any).contractor || '', fn, fc, photoImages, reportLogo);
+        generatePhotoReportPDF(reportData, selectedObra.nome, selectedObra.cidade || '', (report as any).contractor || '', fn, fc, photoImages, reportLogo, clientLogo);
       } else {
-        await generatePhotoReportDOCX(reportData, selectedObra.nome, selectedObra.cidade || '', (report as any).contractor || '', fn, fc, photoImages, reportLogo);
+        await generatePhotoReportDOCX(reportData, selectedObra.nome, selectedObra.cidade || '', (report as any).contractor || '', fn, fc, photoImages, reportLogo, clientLogo);
       }
       toast.success(`${type.toUpperCase()} exportado com sucesso`);
     } catch (err: any) {
