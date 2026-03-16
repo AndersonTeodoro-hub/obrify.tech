@@ -76,6 +76,7 @@ export default function MaterialApprovals() {
   const [pdfFiscalName, setPdfFiscalName] = useState(() => localStorage.getItem('pam_fiscal_name') || '');
   const [pdfFiscalCompany, setPdfFiscalCompany] = useState(() => localStorage.getItem('pam_fiscal_company') || 'DDN');
   const [pdfLogo, setPdfLogo] = useState<string | null>(() => localStorage.getItem('pam_fiscal_logo'));
+  const [pdfClientLogo, setPdfClientLogo] = useState<string | null>(() => localStorage.getItem('pam_client_logo'));
 
   // Load obras
   useEffect(() => {
