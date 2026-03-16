@@ -167,7 +167,7 @@ export default function IncompatiCheck() {
       const annotatedImages = new Map<string, string>();
       const projectCache = new Map<string, string>();
 
-      for (const finding of resultToExport.findings) {
+      for (const finding of resultToExport.findings as AIFinding[]) {
         if (!finding.zone?.source_project) continue;
         const projectName = finding.zone.source_project;
 
