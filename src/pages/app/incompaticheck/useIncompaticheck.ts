@@ -872,6 +872,8 @@ export function useIncompaticheck() {
     pdeDocuments,
     pdeAnalyses,
     analyzingProposal,
+    // Knowledge
+    knowledgeNames,
     // Actions
     loadObras,
     createObra,
