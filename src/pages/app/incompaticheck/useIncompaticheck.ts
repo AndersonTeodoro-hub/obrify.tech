@@ -28,6 +28,9 @@ export function useIncompaticheck() {
   const [pdeAnalyses, setPdeAnalyses] = useState<PdeAnalysis[]>([]);
   const [analyzingProposal, setAnalyzingProposal] = useState(false);
 
+  // Knowledge state
+  const [knowledgeNames, setKnowledgeNames] = useState<Set<string>>(new Set());
+
   // ---- OBRAS ----
   const loadObras = useCallback(async () => {
     if (!user) return;
