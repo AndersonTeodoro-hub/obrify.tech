@@ -398,7 +398,7 @@ export function useIncompaticheck() {
   }, [obraAtiva, user, findings, chatMessages, sendMessage]);
 
   // ---- REPORT ----
-  const generateReport = useCallback(async () => {
+  const generateReport = useCallback(async (clientLogoBase64?: string | null) => {
     if (!obraAtiva || !analysis || !user) return null;
 
     const doc = new jsPDF('p', 'mm', 'a4');
