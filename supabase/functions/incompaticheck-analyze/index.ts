@@ -8,6 +8,13 @@ const corsHeaders = {
 
 const MAX_FILE_SIZE = 22 * 1024 * 1024;
 
+interface KnowledgeData {
+  project_name: string;
+  specialty: string;
+  summary: string;
+  key_elements: any[];
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -19,17 +26,42 @@ serve(async (req) => {
     const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { projects } = await req.json();
+    const { projects, knowledge_data } = await req.json();
 
     if (!projects || projects.length < 2) {
       throw new Error("Mínimo 2 projectos para análise");
     }
 
-    console.log(`INCOMPATICHECK: Analyzing ${projects.length} projects`);
+    console.log(`INCOMPATICHECK: Analyzing ${projects.length} projects, knowledge_data: ${knowledge_data?.length || 0} entries`);
 
-    const projectContents: { name: string; type: string; base64: string; size: number; skipped: boolean; skipReason?: string }[] = [];
+    // Separate projects into those with knowledge and those without
+    const knowledgeMap = new Map<string, KnowledgeData>();
+    if (knowledge_data && Array.isArray(knowledge_data)) {
+      for (const k of knowledge_data) {
+        if (k.summary && k.key_elements?.length > 0) {
+          knowledgeMap.set(k.project_name, k);
+        }
+      }
+    }
+
+    const projectsWithKnowledge: { name: string; type: string; knowledge: KnowledgeData }[] = [];
+    const projectsToDownload: typeof projects = [];
 
     for (const project of projects) {
+      const knowledge = knowledgeMap.get(project.name);
+      if (knowledge) {
+        projectsWithKnowledge.push({ name: project.name, type: project.type, knowledge });
+      } else {
+        projectsToDownload.push(project);
+      }
+    }
+
+    console.log(`INCOMPATICHECK: ${projectsWithKnowledge.length} with knowledge, ${projectsToDownload.length} need PDF download`);
+
+    // Download only projects without knowledge
+    const projectContents: { name: string; type: string; base64: string; size: number; skipped: boolean; skipReason?: string }[] = [];
+
+    for (const project of projectsToDownload) {
       console.log(`INCOMPATICHECK: Downloading ${project.name} (${project.type})`);
 
       const { data: fileData, error: fileError } = await supabase.storage
@@ -38,14 +70,7 @@ serve(async (req) => {
 
       if (fileError || !fileData) {
         console.error(`INCOMPATICHECK: Failed to download ${project.name}:`, fileError);
-        projectContents.push({
-          name: project.name,
-          type: project.type,
-          base64: "",
-          size: 0,
-          skipped: true,
-          skipReason: "Erro ao descarregar ficheiro",
-        });
+        projectContents.push({ name: project.name, type: project.type, base64: "", size: 0, skipped: true, skipReason: "Erro ao descarregar ficheiro" });
         continue;
       }
 
@@ -66,42 +91,61 @@ serve(async (req) => {
       }
       const base64 = btoa(binary);
 
-      projectContents.push({
-        name: project.name,
-        type: project.type,
-        base64,
-        size: fileSize,
-        skipped: false,
-      });
+      projectContents.push({ name: project.name, type: project.type, base64, size: fileSize, skipped: false });
     }
 
-    const validProjects = projectContents.filter((p) => !p.skipped && p.base64.length > 0);
+    const validPdfProjects = projectContents.filter((p) => !p.skipped && p.base64.length > 0);
+    const totalProjects = validPdfProjects.length + projectsWithKnowledge.length;
 
-    if (validProjects.length < 2) {
+    if (totalProjects < 2) {
       throw new Error("Não foi possível processar ficheiros suficientes. Verifique que os PDFs foram carregados correctamente.");
     }
 
-    const totalBase64Size = validProjects.reduce((sum, p) => sum + p.base64.length, 0);
+    const totalBase64Size = validPdfProjects.reduce((sum, p) => sum + p.base64.length, 0);
     const totalMB = totalBase64Size / 1024 / 1024;
-    console.log(`INCOMPATICHECK: Total payload size: ${totalMB.toFixed(1)}MB base64 from ${validProjects.length} files`);
+    console.log(`INCOMPATICHECK: PDF payload: ${totalMB.toFixed(1)}MB from ${validPdfProjects.length} files, ${projectsWithKnowledge.length} from knowledge`);
 
     let findings: any[] = [];
 
-    if (totalMB > 80) {
-      console.log("INCOMPATICHECK: Large payload — analyzing in pairs");
+    // Build knowledge text blocks
+    const buildKnowledgeContent = () => {
+      const blocks: any[] = [];
+      for (const pk of projectsWithKnowledge) {
+        const elementsText = (pk.knowledge.key_elements || [])
+          .map((el: any) => {
+            if (typeof el === 'string') return `- ${el}`;
+            const parts = [el.type, el.id, el.details || el.description].filter(Boolean);
+            return `- ${parts.join(': ')}`;
+          })
+          .join('\n');
 
-      for (let i = 0; i < validProjects.length; i++) {
-        for (let j = i + 1; j < validProjects.length; j++) {
-          const pairA = validProjects[i];
-          const pairB = validProjects[j];
+        blocks.push({
+          type: "text",
+          text: `[Projecto: "${pk.name}" — Especialidade: ${pk.type}]\nRESUMO TÉCNICO (processado pela Base de Conhecimento):\n${pk.knowledge.summary}\n\nELEMENTOS-CHAVE IDENTIFICADOS:\n${elementsText}\n---`,
+        });
+      }
+      return blocks;
+    };
+
+    if (totalMB > 80 && validPdfProjects.length > 1) {
+      console.log("INCOMPATICHECK: Large PDF payload — analyzing in pairs with knowledge context");
+
+      // Knowledge context is always included
+      const knowledgeBlocks = buildKnowledgeContent();
+
+      for (let i = 0; i < validPdfProjects.length; i++) {
+        for (let j = i + 1; j < validPdfProjects.length; j++) {
+          const pairA = validPdfProjects[i];
+          const pairB = validPdfProjects[j];
           console.log(`INCOMPATICHECK: Analyzing pair: ${pairA.name} vs ${pairB.name}`);
 
           const content: any[] = [
+            ...knowledgeBlocks,
             { type: "document", source: { type: "base64", media_type: "application/pdf", data: pairA.base64 } },
             { type: "text", text: `[Documento acima: "${pairA.name}" — Especialidade: ${pairA.type}]` },
             { type: "document", source: { type: "base64", media_type: "application/pdf", data: pairB.base64 } },
             { type: "text", text: `[Documento acima: "${pairB.name}" — Especialidade: ${pairB.type}]` },
-            { type: "text", text: getAnalysisPrompt(2) },
+            { type: "text", text: getAnalysisPrompt(totalProjects) },
           ];
 
           const pairResult = await callClaude(anthropicKey, content);
@@ -115,15 +159,20 @@ serve(async (req) => {
         }
       }
     } else {
-      console.log("INCOMPATICHECK: Normal payload — analyzing all at once");
+      console.log("INCOMPATICHECK: Analyzing all at once");
 
       const content: any[] = [];
-      for (const doc of validProjects) {
+
+      // Knowledge blocks first (text is lightweight)
+      content.push(...buildKnowledgeContent());
+
+      // Then PDF documents
+      for (const doc of validPdfProjects) {
         content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: doc.base64 } });
         content.push({ type: "text", text: `[Documento acima: "${doc.name}" — Especialidade: ${doc.type}]` });
       }
-      content.push({ type: "text", text: getAnalysisPrompt(validProjects.length) });
 
+      content.push({ type: "text", text: getAnalysisPrompt(totalProjects) });
       findings = await callClaude(anthropicKey, content);
     }
 
@@ -136,9 +185,13 @@ serve(async (req) => {
       JSON.stringify({
         findings: uniqueFindings,
         analyzed_at: new Date().toISOString(),
-        projects_analyzed: validProjects.map((p) => ({ name: p.name, type: p.type, size_mb: (p.size / 1024 / 1024).toFixed(1) })),
+        projects_analyzed: [
+          ...validPdfProjects.map((p) => ({ name: p.name, type: p.type, size_mb: (p.size / 1024 / 1024).toFixed(1) })),
+          ...projectsWithKnowledge.map((p) => ({ name: p.name, type: p.type, size_mb: "knowledge" })),
+        ],
         skipped_files: skippedFiles.map((p) => ({ name: p.name, reason: p.skipReason })),
-        strategy: totalMB > 80 ? "pairs" : "all_at_once",
+        strategy: totalMB > 80 && validPdfProjects.length > 1 ? "pairs" : "all_at_once",
+        knowledge_used: projectsWithKnowledge.length,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
@@ -153,6 +206,8 @@ serve(async (req) => {
 
 function getAnalysisPrompt(projectCount: number): string {
   return `Analisa os ${projectCount} projectos de especialidades acima e identifica TODAS as incompatibilidades entre eles.
+
+NOTA: Alguns projectos são apresentados como resumos técnicos da Base de Conhecimento (texto com elementos-chave), enquanto outros são PDFs completos. Usa TODA a informação disponível para cruzar e identificar conflitos.
 
 Para cada incompatibilidade encontrada, responde APENAS com um JSON array (sem markdown, sem backticks, sem texto antes ou depois) com objectos neste formato exacto:
 
