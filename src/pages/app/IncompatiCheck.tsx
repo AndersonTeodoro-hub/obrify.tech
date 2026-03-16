@@ -554,7 +554,7 @@ export default function IncompatiCheck() {
                     <a href="/app/project-knowledge" className="text-primary underline hover:no-underline">
                       Conhecimento do Projecto
                     </a>{' '}
-                    antes de analisar. A IA usará resumos inteligentes em vez dos PDFs completos, resultando em análises mais rápidas e precisas.
+                    antes de analisar. Serão usados resumos inteligentes em vez dos PDFs completos, resultando em análises mais rápidas e precisas.
                   </p>
                 </div>
               )}
