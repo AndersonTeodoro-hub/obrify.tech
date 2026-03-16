@@ -853,6 +853,10 @@ export function useIncompaticheck() {
     analyzing,
     uploadProgress,
     agentThinking,
+    // PDE State
+    pdeDocuments,
+    pdeAnalyses,
+    analyzingProposal,
     // Actions
     loadObras,
     createObra,
@@ -865,5 +869,9 @@ export function useIncompaticheck() {
     generateReport,
     generateReportWithAnnotations,
     setUploadProgress,
+    // PDE Actions
+    uploadPdeDocument,
+    deletePdeDocument,
+    analyzeProposals,
   };
 }
