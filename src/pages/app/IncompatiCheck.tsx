@@ -626,20 +626,20 @@ export default function IncompatiCheck() {
               )}
 
               {/* Results summary (right panel) */}
-              {!aiAnalyzing && analysisResult && (
+              {!aiAnalyzing && hasResults && (
                 <div className="space-y-4">
                   {/* Stats */}
                   <div className="grid grid-cols-3 gap-3">
                     <Card className="text-center py-3">
-                      <p className="text-2xl font-bold text-destructive">{altaCount}</p>
+                      <p className="text-2xl font-bold text-destructive">{displayAltaCount}</p>
                       <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Alta</p>
                     </Card>
                     <Card className="text-center py-3">
-                      <p className="text-2xl font-bold text-amber-500">{mediaCount}</p>
+                      <p className="text-2xl font-bold text-amber-500">{displayMediaCount}</p>
                       <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Média</p>
                     </Card>
                     <Card className="text-center py-3">
-                      <p className="text-2xl font-bold text-emerald-500">{baixaCount}</p>
+                      <p className="text-2xl font-bold text-emerald-500">{displayBaixaCount}</p>
                       <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Baixa</p>
                     </Card>
                   </div>
