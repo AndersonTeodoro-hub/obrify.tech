@@ -76,6 +76,7 @@ export default function MaterialApprovals() {
   const [pdfFiscalName, setPdfFiscalName] = useState(() => localStorage.getItem('pam_fiscal_name') || '');
   const [pdfFiscalCompany, setPdfFiscalCompany] = useState(() => localStorage.getItem('pam_fiscal_company') || 'DDN');
   const [pdfLogo, setPdfLogo] = useState<string | null>(() => localStorage.getItem('pam_fiscal_logo'));
+  const [pdfClientLogo, setPdfClientLogo] = useState<string | null>(() => localStorage.getItem('pam_client_logo'));
 
   // Load obras
   useEffect(() => {
@@ -383,7 +384,8 @@ export default function MaterialApprovals() {
       selectedObra.nome,
       pdfFiscalName,
       pdfFiscalCompany,
-      pdfLogo || undefined
+      pdfLogo || undefined,
+      pdfClientLogo || undefined
     );
     setPdfModalOpen(false);
   };
@@ -897,32 +899,55 @@ export default function MaterialApprovals() {
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Exportar Relatório PDF</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            {/* Logo upload */}
-            <div>
-              <label className="text-sm font-medium text-foreground">Logo da Empresa</label>
-              {pdfLogo ? (
-                <div className="mt-2 flex items-center gap-3">
-                  <img src={pdfLogo} alt="Logo" className="h-12 w-auto rounded border border-border object-contain" />
-                  <Button size="sm" variant="ghost" className="text-destructive" onClick={removeLogo}>
-                    <X className="w-3 h-3 mr-1" /> Remover
-                  </Button>
-                </div>
-              ) : (
-                <div
-                  className="mt-2 border-2 border-dashed border-border rounded-lg p-4 cursor-pointer hover:border-primary/50 transition flex items-center gap-3"
-                  onClick={() => document.getElementById('pdf-logo-upload')?.click()}
-                >
-                  <ImageIcon className="w-5 h-5 text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">Carregar logo (PNG ou JPG)</span>
-                </div>
-              )}
-              <input
-                id="pdf-logo-upload"
-                type="file"
-                accept=".png,.jpg,.jpeg"
-                className="hidden"
-                onChange={handleLogoUpload}
-              />
+            {/* Logo uploads */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium text-foreground">Logo da Empresa</label>
+                {pdfLogo ? (
+                  <div className="mt-2 flex items-center gap-3">
+                    <img src={pdfLogo} alt="Logo" className="h-12 w-auto rounded border border-border object-contain" />
+                    <Button size="sm" variant="ghost" className="text-destructive" onClick={removeLogo}>
+                      <X className="w-3 h-3 mr-1" /> Remover
+                    </Button>
+                  </div>
+                ) : (
+                  <div
+                    className="mt-2 border-2 border-dashed border-border rounded-lg p-4 cursor-pointer hover:border-primary/50 transition flex items-center gap-3"
+                    onClick={() => document.getElementById('pdf-logo-upload')?.click()}
+                  >
+                    <ImageIcon className="w-5 h-5 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">Carregar logo</span>
+                  </div>
+                )}
+                <input id="pdf-logo-upload" type="file" accept=".png,.jpg,.jpeg" className="hidden" onChange={handleLogoUpload} />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-foreground">Logo do Cliente</label>
+                {pdfClientLogo ? (
+                  <div className="mt-2 flex items-center gap-3">
+                    <img src={pdfClientLogo} alt="Logo Cliente" className="h-12 w-auto rounded border border-border object-contain" />
+                    <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setPdfClientLogo(null); localStorage.removeItem('pam_client_logo'); }}>
+                      <X className="w-3 h-3 mr-1" /> Remover
+                    </Button>
+                  </div>
+                ) : (
+                  <div
+                    className="mt-2 border-2 border-dashed border-border rounded-lg p-4 cursor-pointer hover:border-primary/50 transition flex items-center gap-3"
+                    onClick={() => document.getElementById('pdf-client-logo-upload')?.click()}
+                  >
+                    <ImageIcon className="w-5 h-5 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">Carregar logo</span>
+                  </div>
+                )}
+                <input id="pdf-client-logo-upload" type="file" accept=".png,.jpg,.jpeg" className="hidden" onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onloadend = () => { const b64 = reader.result as string; setPdfClientLogo(b64); localStorage.setItem('pam_client_logo', b64); };
+                  reader.readAsDataURL(file);
+                  e.target.value = '';
+                }} />
+              </div>
             </div>
 
             {/* Fiscal name */}

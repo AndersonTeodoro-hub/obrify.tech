@@ -6,7 +6,7 @@ interface ShareModalProps {
   onClose: () => void;
   obraAtiva: Obra | null;
   findingsCount: { critical: number; warning: number; info: number };
-  onGenerateReport: () => Promise<Blob | null>;
+  onGenerateReport: (clientLogo?: string | null) => Promise<Blob | null>;
 }
 
 export default function ShareModal({ isOpen, onClose, obraAtiva, findingsCount, onGenerateReport }: ShareModalProps) {
@@ -34,9 +34,9 @@ export default function ShareModal({ isOpen, onClose, obraAtiva, findingsCount, 
         a.click();
         URL.revokeObjectURL(url);
       } else if (shareType === 'email' && email) {
-        window.open(`mailto:${email}?subject=${encodeURIComponent(`Relatório de Incompatibilidades — ${obraNome}`)}&body=${encodeURIComponent(`Relatório de análise de incompatibilidades.\n\n🏗️ Obra: ${obraNome}\n${obraAtiva?.cidade ? `📍 ${obraAtiva.cidade}\n` : ''}${obraAtiva?.fiscal ? `👷 ${obraAtiva.fiscal}\n` : ''}\n${findingsCount.critical} críticas, ${findingsCount.warning} alertas, ${findingsCount.info} observações.\n\nGerado por Obrify IncompatiCheck.`)}`);
+        window.open(`mailto:${email}?subject=${encodeURIComponent(`Relatório de Incompatibilidades — ${obraNome}`)}&body=${encodeURIComponent(`Relatório de análise de incompatibilidades.\n\n🏗️ Obra: ${obraNome}\n${obraAtiva?.cidade ? `📍 ${obraAtiva.cidade}\n` : ''}${obraAtiva?.fiscal ? `👷 ${obraAtiva.fiscal}\n` : ''}\n${findingsCount.critical} críticas, ${findingsCount.warning} alertas, ${findingsCount.info} observações.\n\nGerado por IncompatiCheck.`)}`);
       } else if (shareType === 'whatsapp' && phone) {
-        window.open(`https://wa.me/${phone.replace(/\D/g, '')}?text=${encodeURIComponent(`📋 Relatório IncompatiCheck\n🏗️ ${obraNome}\n${findingsCount.critical} críticas, ${findingsCount.warning} alertas\nGerado por Obrify.`)}`);
+        window.open(`https://wa.me/${phone.replace(/\D/g, '')}?text=${encodeURIComponent(`📋 Relatório IncompatiCheck\n🏗️ ${obraNome}\n${findingsCount.critical} críticas, ${findingsCount.warning} alertas`)}`);
       }
     } catch (e) {
       console.error('Report error:', e);

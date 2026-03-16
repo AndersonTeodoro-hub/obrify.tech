@@ -27,6 +27,7 @@ export async function generatePhotoReportDOCX(
   fiscalCompany: string,
   photoImages: PhotoForExport[],
   logoBase64?: string | null,
+  clientLogoBase64?: string | null,
 ) {
   const dateFormatted = new Date(report.report_date + 'T00:00:00').toLocaleDateString('pt-PT', {
     day: '2-digit', month: 'long', year: 'numeric',
@@ -50,10 +51,18 @@ export async function generatePhotoReportDOCX(
   }
   headerRuns.push(new TextRun({ text: 'RELATÓRIO FOTOGRÁFICO DIÁRIO', bold: true, size: 24 }));
   headerChildren.push(new Paragraph({ children: headerRuns }));
-  headerChildren.push(new Paragraph({
-    children: [new TextRun({ text: 'OBRIFY — Fiscalização Inteligente', size: 16, color: '888888' })],
-    alignment: AlignmentType.RIGHT,
-  }));
+  if (clientLogoBase64) {
+    try {
+      headerChildren.push(new Paragraph({
+        children: [new ImageRun({
+          data: base64ToUint8Array(clientLogoBase64),
+          transformation: { width: 100, height: 40 },
+          type: 'png',
+        })],
+        alignment: AlignmentType.RIGHT,
+      }));
+    } catch { /* skip */ }
+  }
 
   // Info table rows
   const noBorders = {

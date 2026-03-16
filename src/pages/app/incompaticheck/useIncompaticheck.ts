@@ -398,7 +398,7 @@ export function useIncompaticheck() {
   }, [obraAtiva, user, findings, chatMessages, sendMessage]);
 
   // ---- REPORT ----
-  const generateReport = useCallback(async () => {
+  const generateReport = useCallback(async (clientLogoBase64?: string | null) => {
     if (!obraAtiva || !analysis || !user) return null;
 
     const doc = new jsPDF('p', 'mm', 'a4');
@@ -409,10 +409,16 @@ export function useIncompaticheck() {
     doc.rect(0, 0, pageWidth, 40, 'F');
     doc.setTextColor(255, 107, 53);
     doc.setFontSize(18);
-    doc.text('Obrify IncompatiCheck', 20, 20);
+    doc.text('IncompatiCheck', 20, 20);
     doc.setFontSize(11);
     doc.setTextColor(200, 200, 200);
     doc.text('Relatório de Incompatibilidades', 20, 30);
+
+    if (clientLogoBase64) {
+      try {
+        doc.addImage(clientLogoBase64, 'PNG', pageWidth - 20 - 40, 5, 40, 16);
+      } catch { /* skip */ }
+    }
 
     // Obra info
     doc.setTextColor(60, 60, 60);
@@ -466,7 +472,7 @@ export function useIncompaticheck() {
       doc.setPage(i);
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
-      doc.text(`Gerado automaticamente por Obrify IncompatiCheck — ${new Date().toLocaleDateString('pt-PT')}`, 20, 285);
+      doc.text(`Gerado automaticamente por IncompatiCheck — ${new Date().toLocaleDateString('pt-PT')}`, 20, 285);
       doc.text(`Página ${i} de ${pageCount}`, pageWidth - 40, 285);
     }
 
@@ -490,7 +496,8 @@ export function useIncompaticheck() {
   // ---- REPORT WITH ANNOTATIONS ----
   const generateReportWithAnnotations = useCallback(async (
     analysisResult: { findings: any[]; analyzed_at: string; projects_analyzed: any[] },
-    annotatedImages: Map<string, string>
+    annotatedImages: Map<string, string>,
+    clientLogoBase64?: string | null
   ) => {
     if (!obraAtiva || !user) return null;
 
@@ -505,10 +512,16 @@ export function useIncompaticheck() {
     doc.rect(0, 0, pageWidth, 40, 'F');
     doc.setTextColor(255, 107, 53);
     doc.setFontSize(18);
-    doc.text('Obrify IncompatiCheck', margin, 20);
+    doc.text('IncompatiCheck', margin, 20);
     doc.setFontSize(11);
     doc.setTextColor(200, 200, 200);
     doc.text('Relatório de Incompatibilidades com Anotações', margin, 30);
+
+    if (clientLogoBase64) {
+      try {
+        doc.addImage(clientLogoBase64, 'PNG', pageWidth - margin - 40, 5, 40, 16);
+      } catch { /* skip */ }
+    }
 
     // Obra info
     doc.setTextColor(60, 60, 60);
@@ -663,7 +676,7 @@ export function useIncompaticheck() {
       doc.setPage(i);
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
-      doc.text(`Gerado automaticamente por Obrify IncompatiCheck — ${new Date().toLocaleDateString('pt-PT')}`, margin, 285);
+      doc.text(`Gerado automaticamente por IncompatiCheck — ${new Date().toLocaleDateString('pt-PT')}`, margin, 285);
       doc.text(`Página ${i} de ${pageCount}`, pageWidth - 40, 285);
     }
 

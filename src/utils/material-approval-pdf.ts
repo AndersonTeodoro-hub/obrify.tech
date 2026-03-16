@@ -61,7 +61,8 @@ export function generateMaterialApprovalPDF(
   obraName: string,
   fiscalName?: string,
   fiscalCompany?: string,
-  logoBase64?: string
+  logoBase64?: string,
+  clientLogoBase64?: string
 ) {
   const doc = new jsPDF('p', 'mm', 'a4');
   const now = new Date();
@@ -91,10 +92,12 @@ export function generateMaterialApprovalPDF(
     doc.setTextColor(30, 41, 59);
     doc.text('Análise PAM', titleX, MT + 6);
 
-    // Branding right
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'normal');
-    doc.text('OBRIFY — Fiscalização Inteligente', PAGE_W - MR, MT + 6, { align: 'right' });
+    // Client logo right
+    if (clientLogoBase64) {
+      try {
+        doc.addImage(clientLogoBase64, 'PNG', PAGE_W - MR - 35, MT, 35, 14);
+      } catch { /* skip */ }
+    }
 
     // Second line — obra + date
     doc.setFontSize(9);
@@ -134,7 +137,7 @@ export function generateMaterialApprovalPDF(
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(148, 163, 184);
-    doc.text('OBRIFY — Fiscalização Inteligente de Obras', ML, FOOTER_Y);
+    doc.text(fiscalCompany ? `${fiscalCompany} — Fiscalização de Obras` : 'Fiscalização de Obras', ML, FOOTER_Y);
   };
 
   const addSectionTitle = (title: string) => {
@@ -565,7 +568,7 @@ export function generateMaterialApprovalPDF(
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(148, 163, 184);
-    doc.text('OBRIFY — Fiscalização Inteligente de Obras', ML, FOOTER_Y);
+    doc.text(fiscalCompany ? `${fiscalCompany} — Fiscalização de Obras` : 'Fiscalização de Obras', ML, FOOTER_Y);
     doc.text(`Página ${i} de ${totalPages}`, PAGE_W - MR, FOOTER_Y, { align: 'right' });
   }
 

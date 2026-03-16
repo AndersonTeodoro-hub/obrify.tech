@@ -63,6 +63,7 @@ export default function PhotoReports() {
 
   // Logo state
   const [reportLogo, setReportLogo] = useState<string | null>(() => localStorage.getItem('photo_report_logo'));
+  const [clientLogo, setClientLogo] = useState<string | null>(() => localStorage.getItem('photo_report_client_logo'));
   const [exporting, setExporting] = useState(false);
 
   // Load obras
@@ -361,9 +362,9 @@ export default function PhotoReports() {
       const fc = localStorage.getItem('pam_fiscal_company') || 'DDN';
 
       if (type === 'pdf') {
-        generatePhotoReportPDF(reportData, selectedObra.nome, selectedObra.cidade || '', (report as any).contractor || '', fn, fc, photoImages, reportLogo);
+        generatePhotoReportPDF(reportData, selectedObra.nome, selectedObra.cidade || '', (report as any).contractor || '', fn, fc, photoImages, reportLogo, clientLogo);
       } else {
-        await generatePhotoReportDOCX(reportData, selectedObra.nome, selectedObra.cidade || '', (report as any).contractor || '', fn, fc, photoImages, reportLogo);
+        await generatePhotoReportDOCX(reportData, selectedObra.nome, selectedObra.cidade || '', (report as any).contractor || '', fn, fc, photoImages, reportLogo, clientLogo);
       }
       toast.success(`${type.toUpperCase()} exportado com sucesso`);
     } catch (err: any) {
@@ -434,25 +435,53 @@ export default function PhotoReports() {
         <Card>
           <CardHeader><CardTitle className="text-base">Dados do Cabeçalho</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            {/* Logo upload */}
-            <div>
-              <label className="text-sm font-medium text-muted-foreground mb-2 block">Logo da Empresa</label>
-              {reportLogo ? (
-                <div className="flex items-center gap-4">
-                  <div className="border border-border rounded-lg p-2 bg-muted/30">
-                    <img src={reportLogo} alt="Logo" className="h-12 max-w-[160px] object-contain" />
+            {/* Logo uploads */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium text-muted-foreground mb-2 block">Logo da Empresa (Fiscalização)</label>
+                {reportLogo ? (
+                  <div className="flex items-center gap-4">
+                    <div className="border border-border rounded-lg p-2 bg-muted/30">
+                      <img src={reportLogo} alt="Logo" className="h-12 max-w-[160px] object-contain" />
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={removeLogo} className="text-destructive hover:text-destructive">
+                      <X className="w-4 h-4 mr-1" /> Remover
+                    </Button>
                   </div>
-                  <Button variant="ghost" size="sm" onClick={removeLogo} className="text-destructive hover:text-destructive">
-                    <X className="w-4 h-4 mr-1" /> Remover
-                  </Button>
-                </div>
-              ) : (
-                <label className="flex items-center gap-3 border-2 border-dashed border-border rounded-lg p-4 cursor-pointer hover:border-primary/50 transition w-fit">
-                  <Upload className="w-5 h-5 text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">Carregar logo (PNG, JPG)</span>
-                  <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleLogoUpload} />
-                </label>
-              )}
+                ) : (
+                  <label className="flex items-center gap-3 border-2 border-dashed border-border rounded-lg p-4 cursor-pointer hover:border-primary/50 transition w-fit">
+                    <Upload className="w-5 h-5 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">Carregar logo (PNG, JPG)</span>
+                    <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleLogoUpload} />
+                  </label>
+                )}
+              </div>
+              <div>
+                <label className="text-sm font-medium text-muted-foreground mb-2 block">Logo do Cliente / Dono de Obra</label>
+                {clientLogo ? (
+                  <div className="flex items-center gap-4">
+                    <div className="border border-border rounded-lg p-2 bg-muted/30">
+                      <img src={clientLogo} alt="Logo Cliente" className="h-12 max-w-[160px] object-contain" />
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => { setClientLogo(null); localStorage.removeItem('photo_report_client_logo'); }} className="text-destructive hover:text-destructive">
+                      <X className="w-4 h-4 mr-1" /> Remover
+                    </Button>
+                  </div>
+                ) : (
+                  <label className="flex items-center gap-3 border-2 border-dashed border-border rounded-lg p-4 cursor-pointer hover:border-primary/50 transition w-fit">
+                    <Upload className="w-5 h-5 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">Carregar logo (PNG, JPG)</span>
+                    <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = () => { const b64 = reader.result as string; setClientLogo(b64); localStorage.setItem('photo_report_client_logo', b64); };
+                      reader.readAsDataURL(file);
+                      e.target.value = '';
+                    }} />
+                  </label>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

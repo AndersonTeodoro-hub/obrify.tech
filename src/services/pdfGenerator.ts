@@ -1127,7 +1127,7 @@ export async function generateMeasurementAuto(
   currentY = addInfoRow(doc, 'Obra', site.name, currentY);
   currentY = addInfoRow(doc, 'Morada', site.address || '-', currentY);
   currentY = addInfoRow(doc, 'Dono de Obra', (site.organizations as { name: string })?.name || '-', currentY);
-  currentY = addInfoRow(doc, 'Fiscalização', 'Obrify', currentY);
+  currentY = addInfoRow(doc, 'Fiscalização', '—', currentY);
 
   currentY += 8;
 

@@ -80,6 +80,7 @@ export default function IncompatiCheck() {
   const [zoneImages, setZoneImages] = useState<Map<string, string>>(new Map());
   const [loadingZones, setLoadingZones] = useState<Set<string>>(new Set());
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [clientLogo, setClientLogo] = useState<string | null>(() => localStorage.getItem('incompaticheck_client_logo'));
 
   // Real AI analysis state
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
@@ -194,7 +195,7 @@ export default function IncompatiCheck() {
         }
       }
 
-      await ic.generateReportWithAnnotations(analysisResult, annotatedImages);
+      await ic.generateReportWithAnnotations(analysisResult, annotatedImages, clientLogo);
       toast.success('Relatório gerado com sucesso!');
     } catch (err) {
       console.error('PDF generation error:', err);
@@ -749,7 +750,7 @@ export default function IncompatiCheck() {
         obraNome={ic.obraAtiva?.nome} uploadProgress={ic.uploadProgress} />
       <ShareModal isOpen={showShare} onClose={() => setShowShare(false)} obraAtiva={ic.obraAtiva}
         findingsCount={{ critical: altaCount, warning: mediaCount, info: baixaCount }}
-        onGenerateReport={ic.generateReport} />
+        onGenerateReport={() => ic.generateReport(clientLogo)} />
       <ProjectPreviewModal project={previewProject} onClose={() => setPreviewProject(null)}
         onDelete={(id, path) => ic.deleteProject(id, path)} />
     </div>
