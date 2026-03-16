@@ -8,6 +8,13 @@ const corsHeaders = {
 
 const MAX_FILE_SIZE = 22 * 1024 * 1024;
 
+interface KnowledgeData {
+  project_name: string;
+  specialty: string;
+  summary: string;
+  key_elements: any[];
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -19,15 +26,24 @@ serve(async (req) => {
     const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { obra_id, pde_documents, desenho_documents, original_projects, existing_findings } = await req.json();
+    const { obra_id, pde_documents, desenho_documents, original_projects, existing_findings, knowledge_data } = await req.json();
 
     if (!pde_documents?.length && !desenho_documents?.length) {
       throw new Error("É necessário pelo menos 1 PDE ou 1 Desenho de Preparação.");
     }
 
-    console.log(`PDE-ANALYZE: Analyzing ${pde_documents?.length || 0} PDEs + ${desenho_documents?.length || 0} Desenhos vs ${original_projects?.length || 0} projects`);
+    console.log(`PDE-ANALYZE: Analyzing ${pde_documents?.length || 0} PDEs + ${desenho_documents?.length || 0} Desenhos vs ${original_projects?.length || 0} projects, knowledge: ${knowledge_data?.length || 0}`);
 
-    // Download all files and convert to base64
+    // Build knowledge map for original projects
+    const knowledgeMap = new Map<string, KnowledgeData>();
+    if (knowledge_data && Array.isArray(knowledge_data)) {
+      for (const k of knowledge_data) {
+        if (k.summary && k.key_elements?.length > 0) {
+          knowledgeMap.set(k.project_name, k);
+        }
+      }
+    }
+
     const downloadFile = async (doc: { file_path: string; name: string }) => {
       const { data, error } = await supabase.storage
         .from("incompaticheck-files")
@@ -55,38 +71,35 @@ serve(async (req) => {
       return { name: doc.name, base64: btoa(binary), size: fileSize };
     };
 
-    // Download original projects
-    const origFiles = [];
-    for (const p of (original_projects || [])) {
-      const result = await downloadFile(p);
-      if (result) origFiles.push({ ...result, type: p.type });
-    }
-
-    // Download PDE documents
-    const pdeFiles = [];
-    for (const d of (pde_documents || [])) {
-      const result = await downloadFile(d);
-      if (result) pdeFiles.push(result);
-    }
-
-    // Download Desenho documents
-    const desenhoFiles = [];
-    for (const d of (desenho_documents || [])) {
-      const result = await downloadFile(d);
-      if (result) desenhoFiles.push(result);
-    }
-
-    if (pdeFiles.length === 0 && desenhoFiles.length === 0) {
-      throw new Error("Não foi possível processar os ficheiros PDE/Desenhos.");
-    }
-
     // Build Claude content
     const content: any[] = [];
+    let knowledgeUsed = 0;
 
-    // Original projects
-    for (const doc of origFiles) {
-      content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: doc.base64 } });
-      content.push({ type: "text", text: `[Projecto original acima: "${doc.name}" — Especialidade: ${doc.type}]` });
+    // Original projects: use knowledge when available, PDF otherwise
+    for (const p of (original_projects || [])) {
+      const knowledge = knowledgeMap.get(p.name);
+      if (knowledge) {
+        const elementsText = (knowledge.key_elements || [])
+          .map((el: any) => {
+            if (typeof el === 'string') return `- ${el}`;
+            const parts = [el.type, el.id, el.details || el.description].filter(Boolean);
+            return `- ${parts.join(': ')}`;
+          })
+          .join('\n');
+
+        content.push({
+          type: "text",
+          text: `[Projecto original: "${p.name}" — Especialidade: ${p.type}]\nRESUMO TÉCNICO (Base de Conhecimento):\n${knowledge.summary}\n\nELEMENTOS-CHAVE:\n${elementsText}\n---`,
+        });
+        knowledgeUsed++;
+        console.log(`PDE-ANALYZE: Using knowledge for ${p.name}`);
+      } else {
+        const result = await downloadFile(p);
+        if (result) {
+          content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: result.base64 } });
+          content.push({ type: "text", text: `[Projecto original acima: "${result.name}" — Especialidade: ${p.type}]` });
+        }
+      }
     }
 
     // Existing findings text
@@ -97,16 +110,30 @@ serve(async (req) => {
       content.push({ type: "text", text: `\n--- INCOMPATIBILIDADES PREVIAMENTE DETECTADAS ---\n${findingsText}\n---\n` });
     }
 
-    // PDE documents
+    // PDE documents (always download — these are new)
+    const pdeFiles = [];
+    for (const d of (pde_documents || [])) {
+      const result = await downloadFile(d);
+      if (result) pdeFiles.push(result);
+    }
     for (const doc of pdeFiles) {
       content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: doc.base64 } });
       content.push({ type: "text", text: `[PDE (Pedido de Esclarecimento) acima: "${doc.name}"]` });
     }
 
-    // Desenho documents
+    // Desenho documents (always download — these are new)
+    const desenhoFiles = [];
+    for (const d of (desenho_documents || [])) {
+      const result = await downloadFile(d);
+      if (result) desenhoFiles.push(result);
+    }
     for (const doc of desenhoFiles) {
       content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: doc.base64 } });
       content.push({ type: "text", text: `[Desenho de Preparação acima: "${doc.name}"]` });
+    }
+
+    if (pdeFiles.length === 0 && desenhoFiles.length === 0) {
+      throw new Error("Não foi possível processar os ficheiros PDE/Desenhos.");
     }
 
     // User prompt
@@ -115,12 +142,13 @@ serve(async (req) => {
     // Call Claude
     const result = await callClaude(anthropicKey, content);
 
-    console.log(`PDE-ANALYZE: Analysis complete — verdict: ${result?.verdict || 'unknown'}`);
+    console.log(`PDE-ANALYZE: Analysis complete — verdict: ${result?.verdict || 'unknown'}, knowledge_used: ${knowledgeUsed}`);
 
     return new Response(
       JSON.stringify({
         ...result,
         analyzed_at: new Date().toISOString(),
+        knowledge_used: knowledgeUsed,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
@@ -135,6 +163,8 @@ serve(async (req) => {
 
 function getProposalPrompt(): string {
   return `Analisa a proposta do empreiteiro (PDE + Desenhos de Preparação acima) confrontando com os projectos originais e as incompatibilidades detectadas.
+
+NOTA: Alguns projectos originais são apresentados como resumos técnicos da Base de Conhecimento (texto com elementos-chave), enquanto outros são PDFs completos. Usa TODA a informação disponível.
 
 Responde APENAS com um JSON (sem markdown, sem backticks, sem texto antes ou depois) neste formato exacto:
 
@@ -187,7 +217,7 @@ async function callClaude(apiKey: string, content: any[]): Promise<any> {
       system: `És um engenheiro civil sénior especialista em fiscalização de obras em Portugal com 30+ anos de experiência. A tua função é analisar PROPOSTAS DE RESOLUÇÃO (PDE e desenhos de preparação) submetidas pelo empreiteiro e confrontá-las com os projectos originais.
 
 Tens acesso a:
-1. Os projectos originais de várias especialidades
+1. Os projectos originais de várias especialidades (alguns como PDFs, outros como resumos técnicos da Base de Conhecimento)
 2. As incompatibilidades previamente detectadas entre esses projectos
 3. O(s) PDE(s) do empreiteiro (pedidos de esclarecimento)
 4. Os desenhos de preparação do empreiteiro (proposta de solução)

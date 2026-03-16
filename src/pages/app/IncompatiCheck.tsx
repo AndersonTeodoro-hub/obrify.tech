@@ -225,6 +225,24 @@ export default function IncompatiCheck() {
     setAnalysisResult(null);
 
     try {
+      // Fetch knowledge data for this obra
+      const { data: knowledgeData } = await supabase
+        .from('eng_silva_project_knowledge')
+        .select('document_name, specialty, summary, key_elements, processed')
+        .eq('obra_id', ic.obraAtiva.id)
+        .eq('processed', true);
+
+      const knowledgePayload = knowledgeData?.map(k => ({
+        project_name: k.document_name,
+        specialty: k.specialty,
+        summary: k.summary,
+        key_elements: k.key_elements,
+      })) || [];
+
+      if (knowledgePayload.length > 0) {
+        toast.info(`Usando resumos inteligentes para ${knowledgePayload.length} projecto(s).`);
+      }
+
       const projectData = ic.projects.map(p => ({
         id: p.id,
         name: p.name,
@@ -232,10 +250,10 @@ export default function IncompatiCheck() {
         file_path: p.file_path,
       }));
 
-      console.log('INCOMPATICHECK: Invoking analysis with', projectData.length, 'projects');
+      console.log('INCOMPATICHECK: Invoking analysis with', projectData.length, 'projects,', knowledgePayload.length, 'knowledge entries');
 
       const { data, error } = await supabase.functions.invoke('incompaticheck-analyze', {
-        body: { projects: projectData },
+        body: { projects: projectData, knowledge_data: knowledgePayload },
       });
 
       if (error) throw error;
@@ -467,7 +485,14 @@ export default function IncompatiCheck() {
                             >
                               <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                               <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-foreground truncate">{project.name}</p>
+                                <div className="flex items-center gap-1.5">
+                                  <p className="text-sm font-medium text-foreground truncate">{project.name}</p>
+                                  {ic.knowledgeNames.has(project.name) && (
+                                    <Badge variant="secondary" className="text-[9px] px-1 py-0 gap-0.5 flex-shrink-0">
+                                      🧠 Knowledge
+                                    </Badge>
+                                  )}
+                                </div>
                                 <p className="text-[11px] text-muted-foreground">
                                   {formatFileSize(project.file_size)} · {format(new Date(project.created_at), "d MMM yyyy", { locale: pt })}
                                 </p>
@@ -487,6 +512,20 @@ export default function IncompatiCheck() {
                   })}
                 </CardContent>
               </Card>
+
+              {/* Knowledge tip */}
+              {ic.projects.length > 4 && ic.knowledgeNames.size < ic.projects.length / 2 && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-accent/50 border border-accent">
+                  <Lightbulb className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                  <p className="text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">Dica:</span> Processe os projectos no{' '}
+                    <a href="/app/project-knowledge" className="text-primary underline hover:no-underline">
+                      Conhecimento do Projecto
+                    </a>{' '}
+                    antes de analisar. A IA usará resumos inteligentes em vez dos PDFs completos, resultando em análises mais rápidas e precisas.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Right: Analysis Panel (2 cols) */}

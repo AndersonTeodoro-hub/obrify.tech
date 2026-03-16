@@ -28,6 +28,9 @@ export function useIncompaticheck() {
   const [pdeAnalyses, setPdeAnalyses] = useState<PdeAnalysis[]>([]);
   const [analyzingProposal, setAnalyzingProposal] = useState(false);
 
+  // Knowledge state
+  const [knowledgeNames, setKnowledgeNames] = useState<Set<string>>(new Set());
+
   // ---- OBRAS ----
   const loadObras = useCallback(async () => {
     if (!user) return;
@@ -90,6 +93,17 @@ export function useIncompaticheck() {
     }
   }, [user, obraAtiva]);
 
+  const loadKnowledgeNames = useCallback(async (obraId: string) => {
+    if (!user) return;
+    const { data } = await supabase
+      .from('eng_silva_project_knowledge')
+      .select('document_name')
+      .eq('obra_id', obraId)
+      .eq('user_id', user.id)
+      .eq('processed', true);
+    setKnowledgeNames(new Set(data?.map(k => k.document_name) || []));
+  }, [user]);
+
   const selectObra = useCallback(async (obra: Obra) => {
     setObraAtiva(obra);
     await Promise.all([
@@ -98,8 +112,9 @@ export function useIncompaticheck() {
       loadLatestAnalysis(obra.id),
       loadPdeDocuments(obra.id),
       loadPdeAnalyses(obra.id),
+      loadKnowledgeNames(obra.id),
     ]);
-  }, []);
+  }, [loadKnowledgeNames]);
 
   // ---- PROJECTS ----
   const loadProjects = useCallback(async (obraId: string) => {
@@ -481,6 +496,21 @@ export function useIncompaticheck() {
     const pdeDocs = pdeDocuments.filter(d => d.doc_type === 'pde');
     const desenhoDocs = pdeDocuments.filter(d => d.doc_type === 'desenho_preparacao');
 
+    // Fetch knowledge data for original projects
+    const { data: knowledgeData } = await supabase
+      .from('eng_silva_project_knowledge')
+      .select('document_name, specialty, summary, key_elements')
+      .eq('obra_id', obraId)
+      .eq('user_id', user.id)
+      .eq('processed', true);
+
+    const knowledgePayload = knowledgeData?.map(k => ({
+      project_name: k.document_name,
+      specialty: k.specialty,
+      summary: k.summary,
+      key_elements: k.key_elements,
+    })) || [];
+
     // Create analysis record
     const { data: analysisRow, error: createErr } = await (supabase as any)
       .from('incompaticheck_pde_analyses')
@@ -513,6 +543,7 @@ export function useIncompaticheck() {
             description: f.description,
             location: f.location,
           })),
+          knowledge_data: knowledgePayload,
         },
       });
 
@@ -857,6 +888,8 @@ export function useIncompaticheck() {
     pdeDocuments,
     pdeAnalyses,
     analyzingProposal,
+    // Knowledge
+    knowledgeNames,
     // Actions
     loadObras,
     createObra,
