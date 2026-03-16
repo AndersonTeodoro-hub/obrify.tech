@@ -195,7 +195,7 @@ export default function IncompatiCheck() {
         }
       }
 
-      await ic.generateReportWithAnnotations(analysisResult, annotatedImages);
+      await ic.generateReportWithAnnotations(analysisResult, annotatedImages, clientLogo);
       toast.success('Relatório gerado com sucesso!');
     } catch (err) {
       console.error('PDF generation error:', err);
