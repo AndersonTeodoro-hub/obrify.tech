@@ -27,6 +27,7 @@ export async function generatePhotoReportDOCX(
   fiscalCompany: string,
   photoImages: PhotoForExport[],
   logoBase64?: string | null,
+  clientLogoBase64?: string | null,
 ) {
   const dateFormatted = new Date(report.report_date + 'T00:00:00').toLocaleDateString('pt-PT', {
     day: '2-digit', month: 'long', year: 'numeric',
