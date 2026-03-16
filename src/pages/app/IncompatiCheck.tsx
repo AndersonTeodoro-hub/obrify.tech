@@ -739,8 +739,240 @@ export default function IncompatiCheck() {
               </CardContent>
             </Card>
           )}
+
+          {/* ---- ESCLARECIMENTOS & PROPOSTAS (PDE) ---- */}
+          {analysisResult && (
+            <PdeSection ic={ic} />
+          )}
         </div>
       )}
+    </div>  
+  );
+}
+
+/* ========== PDE Section Component ========== */
+function PdeSection({ ic }: { ic: ReturnType<typeof useIncompaticheck> }) {
+  const pdeInputRef = useRef<HTMLInputElement>(null);
+  const desenhoInputRef = useRef<HTMLInputElement>(null);
+  const respostaInputRef = useRef<HTMLInputElement>(null);
+
+  const inputRefs: Record<PdeDocType, React.RefObject<HTMLInputElement | null>> = {
+    pde: pdeInputRef,
+    desenho_preparacao: desenhoInputRef,
+    resposta_pde: respostaInputRef,
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, docType: PdeDocType) => {
+    const file = e.target.files?.[0];
+    if (!file || !ic.obraAtiva) return;
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      toast.error('Apenas ficheiros PDF são aceites.');
+      return;
+    }
+    try {
+      await ic.uploadPdeDocument(file, docType, ic.obraAtiva.id);
+      toast.success(`${PDE_DOC_TYPES[docType].label} carregado.`);
+    } catch (err: any) {
+      toast.error(err.message || 'Erro no upload.');
+    }
+    e.target.value = '';
+  };
+
+  const handleAnalyze = async () => {
+    if (!ic.obraAtiva) return;
+    toast.info('A analisar propostas do empreiteiro...');
+    await ic.analyzeProposals(ic.obraAtiva.id);
+    toast.success('Análise de propostas concluída.');
+  };
+
+  const hasPdeOrDesenho = ic.pdeDocuments.some(d => d.doc_type === 'pde' || d.doc_type === 'desenho_preparacao');
+  const latestAnalysis = ic.pdeAnalyses.find(a => a.status === 'completed');
+
+  return (
+    <Card>
+      <CardHeader className="pb-4">
+        <CardTitle className="text-base flex items-center gap-2">
+          <span>📋</span> Esclarecimentos & Propostas
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Gerir PDE, Desenhos de Preparação e Respostas do projetista
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* 3-column upload grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {(Object.entries(PDE_DOC_TYPES) as [PdeDocType, typeof PDE_DOC_TYPES[PdeDocType]][]).map(([docType, config]) => {
+            const docs = ic.pdeDocuments.filter(d => d.doc_type === docType);
+            return (
+              <div
+                key={docType}
+                className="rounded-lg border p-4 space-y-3"
+                style={{ borderColor: config.color + '40' }}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">{config.icon}</span>
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">{config.label}</p>
+                    <p className="text-[11px] text-muted-foreground">{config.description}</p>
+                  </div>
+                </div>
+
+                {/* File list */}
+                {docs.length > 0 && (
+                  <div className="space-y-1.5">
+                    {docs.map(doc => (
+                      <div key={doc.id} className="flex items-center gap-2 px-2 py-1.5 rounded bg-muted/50 group">
+                        <FileText className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-foreground truncate">{doc.file_name}</p>
+                          <p className="text-[10px] text-muted-foreground">{formatFileSize(doc.file_size)}</p>
+                        </div>
+                        <button
+                          onClick={() => ic.deletePdeDocument(doc.id, doc.file_path)}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-destructive/10"
+                        >
+                          <Trash2 className="w-3 h-3 text-destructive" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Upload button */}
+                <input
+                  ref={inputRefs[docType]}
+                  type="file"
+                  accept=".pdf"
+                  className="hidden"
+                  onChange={(e) => handleFileUpload(e, docType)}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full gap-1.5 text-xs"
+                  onClick={() => inputRefs[docType].current?.click()}
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Carregar
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Analyze button */}
+        <div className="flex justify-center">
+          <Button
+            onClick={handleAnalyze}
+            disabled={!hasPdeOrDesenho || ic.analyzingProposal}
+            variant="accent"
+            className="gap-2"
+          >
+            {ic.analyzingProposal ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <FileSearch className="w-4 h-4" />
+            )}
+            {ic.analyzingProposal ? 'A analisar...' : 'Analisar Propostas'}
+          </Button>
+        </div>
+        {!hasPdeOrDesenho && (
+          <p className="text-[11px] text-muted-foreground text-center">
+            Carregue pelo menos 1 PDE ou 1 Desenho de Preparação para analisar.
+          </p>
+        )}
+
+        {/* Verdict Panel */}
+        {latestAnalysis && latestAnalysis.ai_analysis && (
+          <div
+            className="rounded-lg border p-5 space-y-4"
+            style={{
+              borderColor: VERDICT_CONFIG[latestAnalysis.verdict || '']?.color + '40' || undefined,
+              background: VERDICT_CONFIG[latestAnalysis.verdict || '']?.bg || undefined,
+            }}
+          >
+            {/* Verdict badge */}
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">{VERDICT_CONFIG[latestAnalysis.verdict || '']?.icon}</span>
+              <div>
+                <p className="text-lg font-bold text-foreground">
+                  {VERDICT_CONFIG[latestAnalysis.verdict || '']?.label || 'Parecer'}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Parecer da IA · {latestAnalysis.completed_at ? format(new Date(latestAnalysis.completed_at), "d MMM yyyy 'às' HH:mm", { locale: pt }) : ''}
+                </p>
+              </div>
+            </div>
+
+            {/* Summary */}
+            <div className="bg-background/60 rounded-lg p-3">
+              <p className="text-sm text-foreground leading-relaxed">{latestAnalysis.ai_analysis.summary}</p>
+            </div>
+
+            {/* Findings addressed */}
+            {latestAnalysis.ai_analysis.findings_addressed?.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Incompatibilidades Abordadas</p>
+                <div className="space-y-1.5">
+                  {latestAnalysis.ai_analysis.findings_addressed.map((fa, i) => (
+                    <div key={i} className="flex items-start gap-2 text-xs">
+                      <span className="mt-0.5 flex-shrink-0">{fa.resolved ? '✅' : '❌'}</span>
+                      <div>
+                        <p className="font-medium text-foreground">{fa.finding_title}</p>
+                        <p className="text-muted-foreground">{fa.comment}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* New issues */}
+            {latestAnalysis.ai_analysis.new_issues?.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-destructive">Novos Problemas Detectados</p>
+                <div className="space-y-1.5">
+                  {latestAnalysis.ai_analysis.new_issues.map((ni, i) => (
+                    <div key={i} className="flex items-start gap-2 text-xs bg-destructive/5 rounded p-2">
+                      <AlertTriangle className="w-3.5 h-3.5 text-destructive mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="font-medium text-foreground">{ni.title}</p>
+                        <p className="text-muted-foreground">{ni.description}</p>
+                        {ni.location && <p className="text-muted-foreground italic">Local: {ni.location}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Technical notes */}
+            {latestAnalysis.ai_analysis.technical_notes?.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notas Técnicas</p>
+                <ul className="space-y-1 text-xs text-muted-foreground list-disc list-inside">
+                  {latestAnalysis.ai_analysis.technical_notes.map((note, i) => (
+                    <li key={i}>{note}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Recommendation */}
+            {latestAnalysis.ai_analysis.recommendation && (
+              <div className="flex items-start gap-2 bg-primary/5 rounded-lg p-3">
+                <Lightbulb className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-xs font-semibold text-foreground mb-1">Recomendação</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{latestAnalysis.ai_analysis.recommendation}</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 
       {/* Modals */}
       <ObraRegistModal isOpen={showObraModal} onClose={() => setShowObraModal(false)} onConfirm={handleCreateObra} />
