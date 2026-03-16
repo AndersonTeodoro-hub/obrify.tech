@@ -617,7 +617,7 @@ export default function IncompatiCheck() {
                           Analisar Incompatibilidades
                         </Button>
                         <p className="text-xs text-muted-foreground">
-                          A IA irá comparar os projectos carregados e identificar potenciais conflitos entre especialidades.
+                          Os projectos carregados serão comparados para identificar potenciais conflitos entre especialidades.
                         </p>
                       </div>
                     )}
