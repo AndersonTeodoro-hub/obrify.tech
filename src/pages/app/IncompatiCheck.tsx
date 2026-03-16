@@ -597,7 +597,7 @@ export default function IncompatiCheck() {
               )}
 
               {/* Ready to analyze */}
-              {!aiAnalyzing && !analysisError && !analysisResult && (
+              {!aiAnalyzing && !analysisError && !analysisResult && !hasPersistedAnalysis && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-base">Análise</CardTitle>
