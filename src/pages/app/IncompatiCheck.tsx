@@ -139,7 +139,24 @@ export default function IncompatiCheck() {
 
   // PDF export with annotations
   const handleExportPdfWithAnnotations = useCallback(async () => {
-    if (!analysisResult || analysisResult.findings.length === 0) {
+    // Build result from local or persisted data
+    const resultToExport = analysisResult || (ic.analysis && ic.findings.length > 0 ? {
+      findings: ic.findings.map(f => ({
+        id: f.id,
+        severity: (f.severity === 'critical' ? 'alta' : f.severity === 'warning' ? 'media' : 'baixa') as 'alta' | 'media' | 'baixa',
+        title: f.title,
+        description: f.description,
+        location: f.location || '',
+        specialties: f.tags || [],
+        recommendation: '',
+      })),
+      analyzed_at: ic.analysis.completed_at || ic.analysis.created_at || new Date().toISOString(),
+      projects_analyzed: ic.projects.map(p => ({ name: p.name, type: p.type, size_mb: '' })),
+      strategy: 'persisted',
+      skipped_files: [],
+    } : null);
+
+    if (!resultToExport || resultToExport.findings.length === 0) {
       toast.error('Execute uma análise primeiro.');
       return;
     }
@@ -150,7 +167,7 @@ export default function IncompatiCheck() {
       const annotatedImages = new Map<string, string>();
       const projectCache = new Map<string, string>();
 
-      for (const finding of analysisResult.findings) {
+      for (const finding of resultToExport.findings as AIFinding[]) {
         if (!finding.zone?.source_project) continue;
         const projectName = finding.zone.source_project;
 
@@ -195,7 +212,7 @@ export default function IncompatiCheck() {
         }
       }
 
-      await ic.generateReportWithAnnotations(analysisResult, annotatedImages, clientLogo);
+      await ic.generateReportWithAnnotations(resultToExport, annotatedImages, clientLogo);
       toast.success('Relatório gerado com sucesso!');
     } catch (err) {
       console.error('PDF generation error:', err);
@@ -361,10 +378,25 @@ export default function IncompatiCheck() {
     return acc;
   }, {});
 
-  // Filtered findings from AI result
-  const filteredFindings = analysisResult?.findings.filter(
+  // Fallback: use persisted DB data when local analysisResult is absent
+  const hasPersistedAnalysis = !analysisResult && !!ic.analysis && ic.findings.length > 0;
+
+  const displayFindings: AIFinding[] = analysisResult?.findings || (hasPersistedAnalysis ? ic.findings.map(f => ({
+    id: f.id,
+    severity: (f.severity === 'critical' ? 'alta' : f.severity === 'warning' ? 'media' : 'baixa') as 'alta' | 'media' | 'baixa',
+    title: f.title,
+    description: f.description,
+    location: f.location || '',
+    specialties: f.tags || [],
+    recommendation: '',
+  })) : []);
+
+  const hasResults = !!analysisResult || hasPersistedAnalysis;
+
+  // Filtered findings
+  const filteredFindings = displayFindings.filter(
     f => !severityFilter || f.severity === severityFilter
-  ) || [];
+  );
 
   const severityBadgeVariant = (s: string) =>
     s === 'alta' ? 'critical' : s === 'media' ? 'high' : 'success';
@@ -372,9 +404,9 @@ export default function IncompatiCheck() {
   const severityLabel = (s: string) =>
     s === 'alta' ? 'Alta' : s === 'media' ? 'Média' : 'Baixa';
 
-  const altaCount = analysisResult?.findings.filter(f => f.severity === 'alta').length || 0;
-  const mediaCount = analysisResult?.findings.filter(f => f.severity === 'media').length || 0;
-  const baixaCount = analysisResult?.findings.filter(f => f.severity === 'baixa').length || 0;
+  const displayAltaCount = displayFindings.filter(f => f.severity === 'alta').length;
+  const displayMediaCount = displayFindings.filter(f => f.severity === 'media').length;
+  const displayBaixaCount = displayFindings.filter(f => f.severity === 'baixa').length;
 
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6 lg:p-8 space-y-6">
@@ -522,7 +554,7 @@ export default function IncompatiCheck() {
                     <a href="/app/project-knowledge" className="text-primary underline hover:no-underline">
                       Conhecimento do Projecto
                     </a>{' '}
-                    antes de analisar. A IA usará resumos inteligentes em vez dos PDFs completos, resultando em análises mais rápidas e precisas.
+                    antes de analisar. Serão usados resumos inteligentes em vez dos PDFs completos, resultando em análises mais rápidas e precisas.
                   </p>
                 </div>
               )}
@@ -565,7 +597,7 @@ export default function IncompatiCheck() {
               )}
 
               {/* Ready to analyze */}
-              {!aiAnalyzing && !analysisError && !analysisResult && (
+              {!aiAnalyzing && !analysisError && !analysisResult && !hasPersistedAnalysis && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-base">Análise</CardTitle>
@@ -585,7 +617,7 @@ export default function IncompatiCheck() {
                           Analisar Incompatibilidades
                         </Button>
                         <p className="text-xs text-muted-foreground">
-                          A IA irá comparar os projectos carregados e identificar potenciais conflitos entre especialidades.
+                          Os projectos carregados serão comparados para identificar potenciais conflitos entre especialidades.
                         </p>
                       </div>
                     )}
@@ -594,20 +626,20 @@ export default function IncompatiCheck() {
               )}
 
               {/* Results summary (right panel) */}
-              {!aiAnalyzing && analysisResult && (
+              {!aiAnalyzing && hasResults && (
                 <div className="space-y-4">
                   {/* Stats */}
                   <div className="grid grid-cols-3 gap-3">
                     <Card className="text-center py-3">
-                      <p className="text-2xl font-bold text-destructive">{altaCount}</p>
+                      <p className="text-2xl font-bold text-destructive">{displayAltaCount}</p>
                       <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Alta</p>
                     </Card>
                     <Card className="text-center py-3">
-                      <p className="text-2xl font-bold text-amber-500">{mediaCount}</p>
+                      <p className="text-2xl font-bold text-amber-500">{displayMediaCount}</p>
                       <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Média</p>
                     </Card>
                     <Card className="text-center py-3">
-                      <p className="text-2xl font-bold text-emerald-500">{baixaCount}</p>
+                      <p className="text-2xl font-bold text-emerald-500">{displayBaixaCount}</p>
                       <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Baixa</p>
                     </Card>
                   </div>
@@ -632,15 +664,31 @@ export default function IncompatiCheck() {
                       {exportingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
                       PDF
                     </Button>
+                    {ic.analysis && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (confirm('Tem a certeza que deseja excluir esta análise?')) {
+                            ic.deleteAnalysis(ic.analysis!.id);
+                            setAnalysisResult(null);
+                            setSeverityFilter(null);
+                          }
+                        }}
+                        className="gap-1.5 text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
                   </div>
 
                   {/* Filters */}
                   <div className="flex gap-1.5 flex-wrap">
                     {[
-                      { key: null, label: `Todas (${analysisResult.findings.length})` },
-                      { key: 'alta', label: `Alta (${altaCount})` },
-                      { key: 'media', label: `Média (${mediaCount})` },
-                      { key: 'baixa', label: `Baixa (${baixaCount})` },
+                      { key: null, label: `Todas (${displayFindings.length})` },
+                      { key: 'alta', label: `Alta (${displayAltaCount})` },
+                      { key: 'media', label: `Média (${displayMediaCount})` },
+                      { key: 'baixa', label: `Baixa (${displayBaixaCount})` },
                     ].map(f => (
                       <Button
                         key={f.key || 'all'}
@@ -654,9 +702,17 @@ export default function IncompatiCheck() {
                     ))}
                   </div>
 
-                  <p className="text-[11px] text-muted-foreground">
-                    Analisado em {new Date(analysisResult.analyzed_at).toLocaleString('pt-PT')} · {analysisResult.projects_analyzed.length} projectos · Estratégia: {analysisResult.strategy === 'pairs' ? 'pares' : 'conjunta'}
-                  </p>
+                  {analysisResult && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Analisado em {new Date(analysisResult.analyzed_at).toLocaleString('pt-PT')} · {analysisResult.projects_analyzed.length} projectos · Estratégia: {analysisResult.strategy === 'pairs' ? 'pares' : 'conjunta'}
+                    </p>
+                  )}
+
+                  {hasPersistedAnalysis && !analysisResult && (
+                    <p className="text-[10px] text-muted-foreground text-center italic">
+                      Resultados da última análise guardada {ic.analysis?.completed_at ? `· ${format(new Date(ic.analysis.completed_at), "d MMM yyyy 'às' HH:mm", { locale: pt })}` : ''}
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -677,7 +733,7 @@ export default function IncompatiCheck() {
           )}
 
           {/* Results: Full width findings list */}
-          {!aiAnalyzing && analysisResult && filteredFindings.length > 0 && (
+          {!aiAnalyzing && hasResults && filteredFindings.length > 0 && (
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">
@@ -766,7 +822,7 @@ export default function IncompatiCheck() {
           )}
 
           {/* No findings for current filter */}
-          {!aiAnalyzing && analysisResult && filteredFindings.length === 0 && (
+          {!aiAnalyzing && hasResults && filteredFindings.length === 0 && (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12 text-center">
                 <CheckCircle2 className="w-10 h-10 text-emerald-500 mb-3" />
@@ -780,7 +836,7 @@ export default function IncompatiCheck() {
           )}
 
           {/* ---- ESCLARECIMENTOS & PROPOSTAS (PDE) ---- */}
-          {(analysisResult || ic.analysis || ic.pdeDocuments.length > 0) && (
+          {(hasResults || ic.analysis || ic.pdeDocuments.length > 0) && (
             <PdeSection ic={ic} />
           )}
         </div>
@@ -793,7 +849,7 @@ export default function IncompatiCheck() {
       <UploadModal isOpen={showUpload} onClose={() => setShowUpload(false)} onUpload={handleUpload}
         obraNome={ic.obraAtiva?.nome} uploadProgress={ic.uploadProgress} />
       <ShareModal isOpen={showShare} onClose={() => setShowShare(false)} obraAtiva={ic.obraAtiva}
-        findingsCount={{ critical: altaCount, warning: mediaCount, info: baixaCount }}
+        findingsCount={{ critical: displayAltaCount, warning: displayMediaCount, info: displayBaixaCount }}
         onGenerateReport={() => ic.generateReport(clientLogo)} />
       <ProjectPreviewModal project={previewProject} onClose={() => setPreviewProject(null)}
         onDelete={(id, path) => ic.deleteProject(id, path)} />
@@ -954,7 +1010,7 @@ function PdeSection({ ic }: { ic: ReturnType<typeof useIncompaticheck> }) {
                   {VERDICT_CONFIG[latestAnalysis.verdict || '']?.label || 'Parecer'}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Parecer da IA · {latestAnalysis.completed_at ? format(new Date(latestAnalysis.completed_at), "d MMM yyyy 'às' HH:mm", { locale: pt }) : ''}
+                  Parecer Técnico · {latestAnalysis.completed_at ? format(new Date(latestAnalysis.completed_at), "d MMM yyyy 'às' HH:mm", { locale: pt }) : ''}
                 </p>
               </div>
             </div>
