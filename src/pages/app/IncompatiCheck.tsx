@@ -838,7 +838,7 @@ export default function IncompatiCheck() {
 
           {/* ---- ESCLARECIMENTOS & PROPOSTAS (PDE) ---- */}
           {(hasResults || ic.analysis || ic.pdeDocuments.length > 0) && (
-            <PdeSection ic={ic} />
+            <PdeSection ic={ic} clientLogo={clientLogo} fiscalLogo={fiscalLogo} />
           )}
         </div>
       )}
