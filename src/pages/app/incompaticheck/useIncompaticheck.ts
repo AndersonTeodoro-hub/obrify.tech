@@ -574,7 +574,7 @@ export function useIncompaticheck() {
   }, [user, pdeDocuments, projects, findings, loadPdeAnalyses]);
 
   // ---- REPORT ----
-  const generateReport = useCallback(async (clientLogoBase64?: string | null) => {
+  const generateReport = useCallback(async (clientLogoBase64?: string | null, fiscalLogoBase64?: string | null) => {
     if (!obraAtiva || !analysis || !user) return null;
 
     const doc = new jsPDF('p', 'mm', 'a4');
@@ -583,12 +583,21 @@ export function useIncompaticheck() {
     // Header
     doc.setFillColor(10, 12, 16);
     doc.rect(0, 0, pageWidth, 40, 'F');
+
+    let titleX = 20;
+    if (fiscalLogoBase64) {
+      try {
+        doc.addImage(fiscalLogoBase64, 'PNG', 15, 5, 25, 15);
+        titleX = 45;
+      } catch { /* skip */ }
+    }
+
     doc.setTextColor(255, 107, 53);
     doc.setFontSize(18);
-    doc.text('IncompatiCheck', 20, 20);
+    doc.text('IncompatiCheck', titleX, 20);
     doc.setFontSize(11);
     doc.setTextColor(200, 200, 200);
-    doc.text('Relatório de Incompatibilidades', 20, 30);
+    doc.text('Relatório de Incompatibilidades', titleX, 30);
 
     if (clientLogoBase64) {
       try {
