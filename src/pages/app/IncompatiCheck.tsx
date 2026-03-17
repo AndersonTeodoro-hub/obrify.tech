@@ -683,6 +683,56 @@ export default function IncompatiCheck() {
                     )}
                   </div>
 
+                  {/* Logo uploads for PDF */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-muted-foreground font-medium">Logo Fiscalização</label>
+                      {fiscalLogo ? (
+                        <div className="flex items-center gap-1.5 p-1.5 rounded border border-border bg-muted/30">
+                          <img src={fiscalLogo} alt="Fiscal" className="h-6 object-contain" />
+                          <button onClick={() => { setFiscalLogo(null); localStorage.removeItem('incompaticheck_fiscal_logo'); }} className="ml-auto p-0.5 rounded hover:bg-destructive/10">
+                            <Trash2 className="w-3 h-3 text-destructive" />
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="flex items-center justify-center gap-1 p-1.5 rounded border border-dashed border-border cursor-pointer hover:bg-muted/50 text-[10px] text-muted-foreground">
+                          <Plus className="w-3 h-3" /> Carregar
+                          <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = () => { const b64 = reader.result as string; setFiscalLogo(b64); localStorage.setItem('incompaticheck_fiscal_logo', b64); };
+                            reader.readAsDataURL(file);
+                            e.target.value = '';
+                          }} />
+                        </label>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-muted-foreground font-medium">Logo Cliente</label>
+                      {clientLogo ? (
+                        <div className="flex items-center gap-1.5 p-1.5 rounded border border-border bg-muted/30">
+                          <img src={clientLogo} alt="Cliente" className="h-6 object-contain" />
+                          <button onClick={() => { setClientLogo(null); localStorage.removeItem('incompaticheck_client_logo'); }} className="ml-auto p-0.5 rounded hover:bg-destructive/10">
+                            <Trash2 className="w-3 h-3 text-destructive" />
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="flex items-center justify-center gap-1 p-1.5 rounded border border-dashed border-border cursor-pointer hover:bg-muted/50 text-[10px] text-muted-foreground">
+                          <Plus className="w-3 h-3" /> Carregar
+                          <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = () => { const b64 = reader.result as string; setClientLogo(b64); localStorage.setItem('incompaticheck_client_logo', b64); };
+                            reader.readAsDataURL(file);
+                            e.target.value = '';
+                          }} />
+                        </label>
+                      )}
+                    </div>
+                  </div>
+
                   {/* Filters */}
                   <div className="flex gap-1.5 flex-wrap">
                     {[
