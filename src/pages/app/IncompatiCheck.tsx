@@ -859,7 +859,7 @@ export default function IncompatiCheck() {
 }
 
 /* ========== PDE Section Component ========== */
-function PdeSection({ ic }: { ic: ReturnType<typeof useIncompaticheck> }) {
+function PdeSection({ ic, clientLogo, fiscalLogo }: { ic: ReturnType<typeof useIncompaticheck>; clientLogo: string | null; fiscalLogo: string | null }) {
   const pdeInputRef = useRef<HTMLInputElement>(null);
   const desenhoInputRef = useRef<HTMLInputElement>(null);
   const respostaInputRef = useRef<HTMLInputElement>(null);
