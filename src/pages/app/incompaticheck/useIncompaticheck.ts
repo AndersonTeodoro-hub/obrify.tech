@@ -404,11 +404,24 @@ export function useIncompaticheck() {
       }));
       recentMessages.push({ role: 'user', content });
 
+      // Build PDE context for the agent
+      const completedPdes = pdeAnalyses.filter(a => a.status === 'completed' && a.ai_analysis);
+      const pdeContext = completedPdes.map(a => ({
+        verdict: a.verdict,
+        summary: a.ai_analysis?.summary,
+        findings_addressed: a.ai_analysis?.findings_addressed,
+        new_issues: a.ai_analysis?.new_issues,
+        technical_notes: a.ai_analysis?.technical_notes,
+        recommendation: a.ai_analysis?.recommendation,
+      }));
+
       const { data, error } = await supabase.functions.invoke('incompaticheck-agent', {
         body: {
           messages: recentMessages,
           findings: obraAtiva ? findings.map(f => ({ severity: f.severity, title: f.title, description: f.description, location: f.location })) : [],
           obraName: obraAtiva?.nome || undefined,
+          pdeAnalyses: pdeContext.length > 0 ? pdeContext : undefined,
+          projects: obraAtiva ? projects.map(p => ({ name: p.name, type: p.type })) : undefined,
         },
       });
 
@@ -430,7 +443,7 @@ export function useIncompaticheck() {
     } finally {
       setAgentThinking(false);
     }
-  }, [obraAtiva, user, findings, chatMessages, sendMessage]);
+  }, [obraAtiva, user, findings, chatMessages, pdeAnalyses, projects, sendMessage]);
 
   // ---- PDE / DESENHOS DE PREPARAÇÃO ----
   const loadPdeDocuments = useCallback(async (obraId: string) => {

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useIncompaticheck } from './incompaticheck/useIncompaticheck';
 import { PROJECT_TYPES, PDE_DOC_TYPES, VERDICT_CONFIG } from './incompaticheck/types';
 import type { Project, PdeDocType } from './incompaticheck/types';
@@ -8,6 +8,7 @@ import ShareModal from './incompaticheck/ShareModal';
 import ObraRegistModal from './incompaticheck/ObraRegistModal';
 import ObraListModal from './incompaticheck/ObraListModal';
 import ProjectPreviewModal from './incompaticheck/ProjectPreviewModal';
+import { useEngSilvaContext } from '@/hooks/use-eng-silva-context';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -88,6 +89,32 @@ export default function IncompatiCheck() {
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [severityFilter, setSeverityFilter] = useState<string | null>(null);
+
+  // Push IncompatiCheck context to global Eng. Silva panel
+  const { setContext: setSilvaContext } = useEngSilvaContext();
+  useEffect(() => {
+    if (ic.obraAtiva) {
+      setSilvaContext({
+        chatMessages: ic.chatMessages,
+        agentThinking: ic.agentThinking,
+        sendUserMessage: ic.sendUserMessage,
+        obraName: ic.obraAtiva.nome,
+        findings: ic.findings.map(f => ({
+          severity: f.severity,
+          title: f.title,
+          description: f.description,
+          location: f.location || undefined,
+        })),
+        pdeAnalyses: ic.pdeAnalyses.filter(a => a.status === 'completed').map(a => ({
+          verdict: a.verdict,
+          ai_analysis: a.ai_analysis,
+          completed_at: a.completed_at,
+        })),
+        projects: ic.projects.map(p => ({ name: p.name, type: p.type })),
+      });
+    }
+    return () => setSilvaContext(null);
+  }, [ic.obraAtiva, ic.chatMessages, ic.agentThinking, ic.sendUserMessage, ic.findings, ic.pdeAnalyses, ic.projects, setSilvaContext]);
 
   // Zone image loading
   const handleToggleZone = useCallback(async (finding: AIFinding) => {

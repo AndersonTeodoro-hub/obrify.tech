@@ -11,14 +11,16 @@ import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { EngSilvaFAB } from '@/components/eng-silva/EngSilvaFAB';
 import { EngSilvaPanel } from '@/components/eng-silva/EngSilvaPanel';
 import { EngSilvaCallOverlay } from '@/components/eng-silva/EngSilvaCallOverlay';
+import { EngSilvaProvider, useEngSilvaContext } from '@/hooks/use-eng-silva-context';
 
-export function AppLayout() {
+function AppLayoutInner() {
   const [showWelcome, setShowWelcome] = useState(false);
   const [showPulse, setShowPulse] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
   const [silvaPanelOpen, setSilvaPanelOpen] = useState(false);
   const [silvaVoiceOpen, setSilvaVoiceOpen] = useState(false);
   const location = useLocation();
+  const { context: silvaContext } = useEngSilvaContext();
 
   const toggleAgent = useCallback(() => setAgentOpen(prev => !prev), []);
   const closeAgent = useCallback(() => setAgentOpen(false), []);
@@ -73,6 +75,7 @@ export function AppLayout() {
         isOpen={silvaPanelOpen}
         onClose={() => setSilvaPanelOpen(false)}
         onStartVoiceCall={() => setSilvaVoiceOpen(true)}
+        incompaticheckContext={silvaContext || undefined}
       />
       <EngSilvaCallOverlay open={silvaVoiceOpen} onClose={() => setSilvaVoiceOpen(false)} />
 
@@ -83,5 +86,13 @@ export function AppLayout() {
         onExplore={handleExplore}
       />
     </SidebarProvider>
+  );
+}
+
+export function AppLayout() {
+  return (
+    <EngSilvaProvider>
+      <AppLayoutInner />
+    </EngSilvaProvider>
   );
 }

@@ -60,18 +60,58 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, findings, obraName } = await req.json();
+    const { messages, findings, obraName, pdeAnalyses, projects, pageContext } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
     // Build dynamic context
     let context = "";
     if (obraName) context += `\nObra actual: "${obraName}".`;
+    if (pageContext && !obraName) context += `\nPágina actual: ${pageContext}.`;
+
+    // Projects
+    if (projects && projects.length > 0) {
+      context += `\n\nProjectos carregados (${projects.length}): ${projects.map((p: any) => `${p.name} (${p.type})`).join(', ')}.`;
+    }
+
+    // Findings (incompatibilidades)
     if (findings && findings.length > 0) {
-      context += `\n\nIncompatibilidades detectadas:`;
+      context += `\n\nIncompatibilidades detectadas (${findings.length}):`;
       for (const f of findings) {
         const sev = f.severity === "critical" ? "CRÍTICA" : f.severity === "warning" ? "ALERTA" : "INFO";
         context += `\n- [${sev}] ${f.title}: ${f.description}${f.location ? ` (${f.location})` : ""}`;
+      }
+    }
+
+    // PDE Analyses (pareceres técnicos)
+    if (pdeAnalyses && pdeAnalyses.length > 0) {
+      context += `\n\n=== PARECERES PDE (Propostas do Empreiteiro) ===`;
+      for (const pde of pdeAnalyses) {
+        const verdict = pde.verdict === "approved" ? "APROVADO" : pde.verdict === "approved_with_reservations" ? "APROVADO COM RESERVAS" : pde.verdict === "rejected" ? "REJEITADO" : "PENDENTE";
+        context += `\n\n--- PARECER: ${verdict} ---`;
+        if (pde.summary) context += `\nResumo: ${pde.summary}`;
+        
+        if (pde.findings_addressed?.length > 0) {
+          context += `\nIncompatibilidades abordadas:`;
+          for (const fa of pde.findings_addressed) {
+            context += `\n  ${fa.resolved ? "✓ RESOLVIDO" : "✗ NÃO RESOLVIDO"} ${fa.finding_title}: ${fa.comment}`;
+          }
+        }
+
+        if (pde.new_issues?.length > 0) {
+          context += `\nNovos problemas detectados:`;
+          for (const ni of pde.new_issues) {
+            context += `\n  [${ni.severity?.toUpperCase() || "?"}] ${ni.title}: ${ni.description}${ni.location ? ` (${ni.location})` : ""}`;
+          }
+        }
+
+        if (pde.technical_notes?.length > 0) {
+          context += `\nNotas técnicas: ${pde.technical_notes.join(" | ")}`;
+        }
+
+        if (pde.recommendation) {
+          context += `\nRecomendação final: ${pde.recommendation}`;
+        }
       }
     }
 
