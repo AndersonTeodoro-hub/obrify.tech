@@ -1131,7 +1131,7 @@ function PdeSection({ ic, clientLogo, fiscalLogo }: { ic: ReturnType<typeof useI
               </div>
             )}
 
-            {/* Download PDE PDF button */}
+            {/* Download PDE PDF + Delete */}
             <div className="flex gap-2 pt-2">
               <Button
                 variant="outline"
@@ -1144,6 +1144,20 @@ function PdeSection({ ic, clientLogo, fiscalLogo }: { ic: ReturnType<typeof useI
               >
                 <Download className="w-3.5 h-3.5" />
                 Baixar Parecer PDF
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-destructive hover:text-destructive"
+                onClick={() => {
+                  if (confirm('Tem a certeza que deseja excluir este parecer? Poderá executar uma nova análise depois.')) {
+                    ic.deletePdeAnalysis(latestAnalysis.id);
+                    toast.success('Parecer excluído.');
+                  }
+                }}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Excluir Parecer
               </Button>
             </div>
           </div>
