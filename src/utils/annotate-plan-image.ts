@@ -51,7 +51,9 @@ export function annotateImage(
       annotations.forEach((ann) => {
         const x = (ann.x_percent / 100) * canvas.width;
         const y = (ann.y_percent / 100) * canvas.height;
-        const radius = (ann.radius_percent / 100) * canvas.width;
+        // Cap radius at 12% max to avoid oversized circles
+        const clampedRadius = Math.min(ann.radius_percent, 12);
+        const radius = (clampedRadius / 100) * canvas.width;
 
         const colors: Record<string, { fill: string; stroke: string }> = {
           alta: { fill: 'rgba(220, 38, 38, 0.15)', stroke: '#DC2626' },
