@@ -9,17 +9,16 @@ import { startProductTour } from '@/components/onboarding/ProductTour';
 import { ObrifyAgent } from '@/components/ai/ObrifyAgent';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { EngSilvaFAB } from '@/components/eng-silva/EngSilvaFAB';
+import { EngSilvaPanel } from '@/components/eng-silva/EngSilvaPanel';
 import { EngSilvaCallOverlay } from '@/components/eng-silva/EngSilvaCallOverlay';
 
 export function AppLayout() {
   const [showWelcome, setShowWelcome] = useState(false);
   const [showPulse, setShowPulse] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
-  const [silvaOpen, setSilvaOpen] = useState(false);
+  const [silvaPanelOpen, setSilvaPanelOpen] = useState(false);
+  const [silvaVoiceOpen, setSilvaVoiceOpen] = useState(false);
   const location = useLocation();
-
-  // Hide global Eng. Silva FAB on IncompatiCheck (has its own integrated chat)
-  const isIncompatiCheck = location.pathname.includes('/incompaticheck');
 
   const toggleAgent = useCallback(() => setAgentOpen(prev => !prev), []);
   const closeAgent = useCallback(() => setAgentOpen(false), []);
@@ -64,9 +63,18 @@ export function AppLayout() {
       </div>
 
       <HelpButton showPulse={showPulse} onTourComplete={() => setShowPulse(false)} />
-      {!isIncompatiCheck && <ObrifyAgent open={agentOpen} onOpenChange={setAgentOpen} />}
-      {!isIncompatiCheck && <EngSilvaFAB onClick={() => setSilvaOpen(true)} />}
-      <EngSilvaCallOverlay open={silvaOpen} onClose={() => setSilvaOpen(false)} />
+      <ObrifyAgent open={agentOpen} onOpenChange={setAgentOpen} />
+
+      {/* Eng. Silva: FAB + Chat Panel + Voice Overlay */}
+      {!silvaPanelOpen && (
+        <EngSilvaFAB onClick={() => setSilvaPanelOpen(true)} />
+      )}
+      <EngSilvaPanel
+        isOpen={silvaPanelOpen}
+        onClose={() => setSilvaPanelOpen(false)}
+        onStartVoiceCall={() => setSilvaVoiceOpen(true)}
+      />
+      <EngSilvaCallOverlay open={silvaVoiceOpen} onClose={() => setSilvaVoiceOpen(false)} />
 
       <WelcomeModal
         open={showWelcome}
