@@ -200,8 +200,7 @@ export default function AgentPanel({ findings, obraName }: AgentPanelProps) {
 
   return (
     <div style={{
-      width: '340px', minWidth: '340px', background: '#0d1117',
-      borderLeft: '1px solid rgba(255,255,255,0.04)',
+      width: '100%', background: 'var(--background, #0d1117)',
       display: 'flex', flexDirection: 'column', alignItems: 'center',
       padding: '24px 20px', overflowY: 'auto', gap: '16px',
     }}>

@@ -8,6 +8,7 @@ import ShareModal from './incompaticheck/ShareModal';
 import ObraRegistModal from './incompaticheck/ObraRegistModal';
 import ObraListModal from './incompaticheck/ObraListModal';
 import ProjectPreviewModal from './incompaticheck/ProjectPreviewModal';
+import ChatPanel, { ChatFAB } from './incompaticheck/ChatPanel';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -88,6 +89,9 @@ export default function IncompatiCheck() {
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [severityFilter, setSeverityFilter] = useState<string | null>(null);
+
+  // Chat panel state
+  const [chatOpen, setChatOpen] = useState(false);
 
   // Zone image loading
   const handleToggleZone = useCallback(async (finding: AIFinding) => {
@@ -891,6 +895,27 @@ export default function IncompatiCheck() {
             <PdeSection ic={ic} clientLogo={clientLogo} fiscalLogo={fiscalLogo} />
           )}
         </div>
+      )}
+
+      {/* Chat Panel + FAB */}
+      {hasObra && (
+        <>
+          <ChatPanel
+            isOpen={chatOpen}
+            onClose={() => setChatOpen(false)}
+            findings={ic.findings}
+            obraName={ic.obraAtiva?.nome}
+            chatMessages={ic.chatMessages}
+            agentThinking={ic.agentThinking}
+            sendUserMessage={ic.sendUserMessage}
+          />
+          {!chatOpen && (
+            <ChatFAB
+              onClick={() => setChatOpen(true)}
+              hasMessages={ic.chatMessages.length > 0}
+            />
+          )}
+        </>
       )}
 
       {/* Modals */}
