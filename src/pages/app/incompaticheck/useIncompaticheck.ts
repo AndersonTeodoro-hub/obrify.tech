@@ -1117,6 +1117,7 @@ export function useIncompaticheck() {
     sendUserMessage,
     generateReport,
     generateReportWithAnnotations,
+    generatePdeReport,
     setUploadProgress,
     // PDE Actions
     uploadPdeDocument,
