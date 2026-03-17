@@ -682,7 +682,8 @@ export function useIncompaticheck() {
   const generateReportWithAnnotations = useCallback(async (
     analysisResult: { findings: any[]; analyzed_at: string; projects_analyzed: any[] },
     annotatedImages: Map<string, string>,
-    clientLogoBase64?: string | null
+    clientLogoBase64?: string | null,
+    fiscalLogoBase64?: string | null
   ) => {
     if (!obraAtiva || !user) return null;
 
@@ -695,12 +696,21 @@ export function useIncompaticheck() {
     // Header
     doc.setFillColor(10, 12, 16);
     doc.rect(0, 0, pageWidth, 40, 'F');
+
+    let titleX = margin;
+    if (fiscalLogoBase64) {
+      try {
+        doc.addImage(fiscalLogoBase64, 'PNG', 15, 5, 25, 15);
+        titleX = 45;
+      } catch { /* skip */ }
+    }
+
     doc.setTextColor(255, 107, 53);
     doc.setFontSize(18);
-    doc.text('IncompatiCheck', margin, 20);
+    doc.text('IncompatiCheck', titleX, 20);
     doc.setFontSize(11);
     doc.setTextColor(200, 200, 200);
-    doc.text('Relatório de Incompatibilidades com Anotações', margin, 30);
+    doc.text('Relatório de Incompatibilidades com Anotações', titleX, 30);
 
     if (clientLogoBase64) {
       try {
