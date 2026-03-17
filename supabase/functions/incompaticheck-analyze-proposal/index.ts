@@ -199,6 +199,8 @@ Regras:
 - Sê específico: referencia cotas, eixos, diâmetros, materiais, dimensões concretas
 - Em findings_addressed, mapeia a proposta às incompatibilidades existentes usando títulos e descrições
 - Se a proposta não se relaciona com nenhum finding existente, indica isso
+- NÃO uses caracteres especiais como ≥ ≤ → ← Ø ° ² ³ × ÷ € — usa alternativas ASCII: >= <= -> <- O/ graus 2 3 x / EUR -
+- Para diâmetros usa "O/" em vez de "Ø" (ex: O/125 em vez de Ø125)
 - Responde APENAS com o JSON, nada mais`;
 }
 

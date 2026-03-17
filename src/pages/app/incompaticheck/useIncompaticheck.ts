@@ -939,9 +939,46 @@ export function useIncompaticheck() {
       return currentY;
     };
 
+    // Helper: sanitize text — replace chars unsupported by jsPDF Helvetica
+    const sanitize = (text: string): string => {
+      return text
+        .replace(/≥/g, '>=')
+        .replace(/≤/g, '<=')
+        .replace(/→/g, '->')
+        .replace(/←/g, '<-')
+        .replace(/↔/g, '<->')
+        .replace(/Ø/g, 'O/')
+        .replace(/ø/g, 'o/')
+        .replace(/±/g, '+/-')
+        .replace(/²/g, '2')
+        .replace(/³/g, '3')
+        .replace(/µ/g, 'u')
+        .replace(/×/g, 'x')
+        .replace(/÷/g, '/')
+        .replace(/€/g, 'EUR')
+        .replace(/°/g, 'o')
+        .replace(/…/g, '...')
+        .replace(/–/g, '-')
+        .replace(/—/g, ' - ')
+        .replace(/"/g, '"')
+        .replace(/"/g, '"')
+        .replace(/'/g, "'")
+        .replace(/'/g, "'")
+        .replace(/\u2265/g, '>=')
+        .replace(/\u2264/g, '<=')
+        .replace(/\u2192/g, '->')
+        .replace(/[^\x00-\x7F\xC0-\xFF]/g, (ch) => {
+          // Last resort: replace any remaining non-latin1 chars with ?
+          const code = ch.charCodeAt(0);
+          if (code >= 0x100) return '?';
+          return ch;
+        });
+    };
+
     // Helper: print wrapped text safely within margins
     const printWrapped = (text: string, x: number, startY: number, maxWidth: number, lh: number): number => {
-      const lines: string[] = doc.splitTextToSize(text, maxWidth);
+      const safe = sanitize(text);
+      const lines: string[] = doc.splitTextToSize(safe, maxWidth);
       let cy = startY;
       for (const line of lines) {
         cy = ensureSpace(cy, lh + 1);
