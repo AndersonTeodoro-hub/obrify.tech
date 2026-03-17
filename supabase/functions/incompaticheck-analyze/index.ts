@@ -221,10 +221,10 @@ Para cada incompatibilidade encontrada, responde APENAS com um JSON array (sem m
     "location": "Referência à localização no projecto (ex: Eixo B, Pilar P3, Cota -2.50)",
     "recommendation": "Recomendação prática para resolver",
     "zone": {
-      "description": "Zona central-esquerda da planta, junto ao eixo B entre pilares P3 e P5",
+      "description": "Junto ao pilar P3, eixo B, entre cotas -2.50 e -3.00",
       "x_percent": 35,
       "y_percent": 50,
-      "radius_percent": 15,
+      "radius_percent": 5,
       "source_project": "nome-do-ficheiro.pdf"
     }
   }
@@ -238,13 +238,13 @@ Regras:
 - Se forem memórias descritivas, compara especificações, materiais, dimensões, cotas
 - Foca especialmente em: redes enterradas que atravessam sapatas ou lintéis, cotas de fundo de tubagem vs cotas de fundação, caixas de visita em conflito com elementos estruturais, passagens de cabos ou tubagens que conflituam com armaduras
 - Se não encontrares incompatibilidades claras, devolve um array com uma entrada de severity "baixa" a indicar que não foram detectados conflitos significativos
-- Para cada incompatibilidade, inclui um campo "zone" que indica a zona aproximada na planta onde o conflito ocorre:
-  - description: descrição textual da zona
-  - x_percent: posição horizontal aproximada em percentagem (0=esquerda, 100=direita)
-  - y_percent: posição vertical aproximada em percentagem (0=topo, 100=fundo)
-  - radius_percent: raio aproximado da zona afectada em percentagem da largura da planta (10=pequena, 30=grande)
+- Para cada incompatibilidade, inclui um campo "zone" que indica a zona PRECISA na planta onde o conflito ocorre:
+  - description: descrição textual precisa da zona (referencia eixos, pilares, cotas)
+  - x_percent: posição horizontal PRECISA em percentagem (0=esquerda, 100=direita). Usa os eixos estruturais como referência.
+  - y_percent: posição vertical PRECISA em percentagem (0=topo, 100=fundo). Usa os eixos estruturais como referência.
+  - radius_percent: raio da zona afectada em percentagem da largura da planta. USA VALORES PEQUENOS: 3=um pilar ou caixa, 5=uma zona de 2-3 pilares, 8=um troço de rede, 12=máximo absoluto para incompatibilidades que afectam uma ala inteira. NÃO uses valores acima de 12.
   - source_project: nome do ficheiro de projecto mais relevante para visualizar esta incompatibilidade
-  Não precisas de ser exacto — indica a zona abrangente onde o especialista deve verificar.
+  SÊ O MAIS PRECISO POSSÍVEL na localização. Identifica o eixo estrutural mais próximo e posiciona o centro do círculo nesse ponto exacto. Raios grandes e genéricos não são úteis.
 - Responde APENAS com o JSON array, nada mais`;
 }
 
