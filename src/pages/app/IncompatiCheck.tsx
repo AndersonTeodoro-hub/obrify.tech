@@ -1080,6 +1080,22 @@ function PdeSection({ ic, clientLogo, fiscalLogo }: { ic: ReturnType<typeof useI
                 </div>
               </div>
             )}
+
+            {/* Download PDE PDF button */}
+            <div className="flex gap-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => {
+                  ic.generatePdeReport(latestAnalysis, ic.pdeDocuments, clientLogo, fiscalLogo);
+                  toast.success('PDF do parecer gerado.');
+                }}
+              >
+                <Download className="w-3.5 h-3.5" />
+                Baixar Parecer PDF
+              </Button>
+            </div>
           </div>
         )}
       </CardContent>
