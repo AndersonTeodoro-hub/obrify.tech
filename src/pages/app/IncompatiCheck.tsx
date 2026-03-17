@@ -81,6 +81,7 @@ export default function IncompatiCheck() {
   const [loadingZones, setLoadingZones] = useState<Set<string>>(new Set());
   const [exportingPdf, setExportingPdf] = useState(false);
   const [clientLogo, setClientLogo] = useState<string | null>(() => localStorage.getItem('incompaticheck_client_logo'));
+  const [fiscalLogo, setFiscalLogo] = useState<string | null>(() => localStorage.getItem('incompaticheck_fiscal_logo'));
 
   // Real AI analysis state
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
