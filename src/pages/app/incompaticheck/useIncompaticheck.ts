@@ -573,6 +573,11 @@ export function useIncompaticheck() {
     }
   }, [user, pdeDocuments, projects, findings, loadPdeAnalyses]);
 
+  const deletePdeAnalysis = useCallback(async (analysisId: string) => {
+    await (supabase as any).from('incompaticheck_pde_analyses').delete().eq('id', analysisId);
+    setPdeAnalyses(prev => prev.filter(a => a.id !== analysisId));
+  }, []);
+
   // ---- REPORT ----
   const generateReport = useCallback(async (clientLogoBase64?: string | null, fiscalLogoBase64?: string | null) => {
     if (!obraAtiva || !analysis || !user) return null;
@@ -936,11 +941,16 @@ export function useIncompaticheck() {
       } catch { /* skip */ }
     }
 
-    // Title centered
+    // Title centered (between logos)
+    const titleMaxWidth = pageWidth - margin * 2 - 80; // leave space for both logos
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(14);
+    doc.setFontSize(13);
     doc.setTextColor(30, 30, 30);
-    doc.text('Parecer Técnico — Proposta do Empreiteiro', pageWidth / 2, 18, { align: 'center' });
+    doc.text('Parecer Técnico', pageWidth / 2, 14, { align: 'center' });
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 100, 100);
+    doc.text('Proposta do Empreiteiro', pageWidth / 2, 22, { align: 'center' });
 
     // Separator line
     doc.setDrawColor(200, 200, 200);
@@ -1136,5 +1146,6 @@ export function useIncompaticheck() {
     uploadPdeDocument,
     deletePdeDocument,
     analyzeProposals,
+    deletePdeAnalysis,
   };
 }
