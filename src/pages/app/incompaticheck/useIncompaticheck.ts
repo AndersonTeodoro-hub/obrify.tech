@@ -574,7 +574,7 @@ export function useIncompaticheck() {
   }, [user, pdeDocuments, projects, findings, loadPdeAnalyses]);
 
   // ---- REPORT ----
-  const generateReport = useCallback(async (clientLogoBase64?: string | null) => {
+  const generateReport = useCallback(async (clientLogoBase64?: string | null, fiscalLogoBase64?: string | null) => {
     if (!obraAtiva || !analysis || !user) return null;
 
     const doc = new jsPDF('p', 'mm', 'a4');
@@ -583,12 +583,21 @@ export function useIncompaticheck() {
     // Header
     doc.setFillColor(10, 12, 16);
     doc.rect(0, 0, pageWidth, 40, 'F');
+
+    let titleX = 20;
+    if (fiscalLogoBase64) {
+      try {
+        doc.addImage(fiscalLogoBase64, 'PNG', 15, 5, 25, 15);
+        titleX = 45;
+      } catch { /* skip */ }
+    }
+
     doc.setTextColor(255, 107, 53);
     doc.setFontSize(18);
-    doc.text('IncompatiCheck', 20, 20);
+    doc.text('IncompatiCheck', titleX, 20);
     doc.setFontSize(11);
     doc.setTextColor(200, 200, 200);
-    doc.text('Relatório de Incompatibilidades', 20, 30);
+    doc.text('Relatório de Incompatibilidades', titleX, 30);
 
     if (clientLogoBase64) {
       try {
@@ -648,7 +657,7 @@ export function useIncompaticheck() {
       doc.setPage(i);
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
-      doc.text(`Gerado automaticamente por IncompatiCheck — ${new Date().toLocaleDateString('pt-PT')}`, 20, 285);
+      doc.text(`Gerado por IncompatiCheck — ${new Date().toLocaleDateString('pt-PT')}`, 20, 285);
       doc.text(`Página ${i} de ${pageCount}`, pageWidth - 40, 285);
     }
 
@@ -673,7 +682,8 @@ export function useIncompaticheck() {
   const generateReportWithAnnotations = useCallback(async (
     analysisResult: { findings: any[]; analyzed_at: string; projects_analyzed: any[] },
     annotatedImages: Map<string, string>,
-    clientLogoBase64?: string | null
+    clientLogoBase64?: string | null,
+    fiscalLogoBase64?: string | null
   ) => {
     if (!obraAtiva || !user) return null;
 
@@ -686,12 +696,21 @@ export function useIncompaticheck() {
     // Header
     doc.setFillColor(10, 12, 16);
     doc.rect(0, 0, pageWidth, 40, 'F');
+
+    let titleX = margin;
+    if (fiscalLogoBase64) {
+      try {
+        doc.addImage(fiscalLogoBase64, 'PNG', 15, 5, 25, 15);
+        titleX = 45;
+      } catch { /* skip */ }
+    }
+
     doc.setTextColor(255, 107, 53);
     doc.setFontSize(18);
-    doc.text('IncompatiCheck', margin, 20);
+    doc.text('IncompatiCheck', titleX, 20);
     doc.setFontSize(11);
     doc.setTextColor(200, 200, 200);
-    doc.text('Relatório de Incompatibilidades com Anotações', margin, 30);
+    doc.text('Relatório de Incompatibilidades com Anotações', titleX, 30);
 
     if (clientLogoBase64) {
       try {
@@ -852,7 +871,7 @@ export function useIncompaticheck() {
       doc.setPage(i);
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
-      doc.text(`Gerado automaticamente por IncompatiCheck — ${new Date().toLocaleDateString('pt-PT')}`, margin, 285);
+      doc.text(`Gerado por IncompatiCheck — ${new Date().toLocaleDateString('pt-PT')}`, margin, 285);
       doc.text(`Página ${i} de ${pageCount}`, pageWidth - 40, 285);
     }
 
@@ -877,6 +896,196 @@ export function useIncompaticheck() {
     setAnalysis(null);
     setFindings([]);
   }, []);
+
+  // ---- PDE REPORT ----
+  const generatePdeReport = useCallback(async (
+    pdeAnalysis: PdeAnalysis,
+    pdeDocsList: PdeDocument[],
+    clientLogoBase64?: string | null,
+    fiscalLogoBase64?: string | null
+  ) => {
+    if (!obraAtiva) return;
+
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 20;
+
+    // Header
+    doc.setFillColor(10, 12, 16);
+    doc.rect(0, 0, pageWidth, 40, 'F');
+
+    let titleX = margin;
+    if (fiscalLogoBase64) {
+      try {
+        doc.addImage(fiscalLogoBase64, 'PNG', 15, 5, 25, 15);
+        titleX = 45;
+      } catch { /* skip */ }
+    }
+
+    doc.setTextColor(255, 107, 53);
+    doc.setFontSize(16);
+    doc.text('Parecer Técnico — Proposta do Empreiteiro', titleX, 18);
+    doc.setFontSize(10);
+    doc.setTextColor(200, 200, 200);
+    doc.text('IncompatiCheck · Esclarecimentos & Propostas', titleX, 28);
+
+    if (clientLogoBase64) {
+      try {
+        doc.addImage(clientLogoBase64, 'PNG', pageWidth - margin - 40, 5, 40, 16);
+      } catch { /* skip */ }
+    }
+
+    // Obra info
+    let y = 50;
+    doc.setTextColor(60, 60, 60);
+    doc.setFontSize(10);
+    doc.text(`Obra: ${obraAtiva.nome}`, margin, y);
+    if (obraAtiva.cidade) { y += 6; doc.text(`Localização: ${obraAtiva.cidade}`, margin, y); }
+    if (obraAtiva.fiscal) { y += 6; doc.text(`Fiscal: ${obraAtiva.fiscal}`, margin, y); }
+    y += 6; doc.text(`Data do Parecer: ${pdeAnalysis.completed_at ? new Date(pdeAnalysis.completed_at).toLocaleDateString('pt-PT') : new Date().toLocaleDateString('pt-PT')}`, margin, y);
+
+    // Verdict
+    y += 15;
+    const verdictLabel = pdeAnalysis.verdict === 'approved' ? 'APROVADO' : pdeAnalysis.verdict === 'approved_with_reservations' ? 'APROVADO COM RESERVAS' : 'REJEITADO';
+    const verdictColor: [number, number, number] = pdeAnalysis.verdict === 'approved' ? [34, 197, 94] : pdeAnalysis.verdict === 'approved_with_reservations' ? [245, 158, 11] : [239, 68, 68];
+    doc.setFillColor(...verdictColor);
+    doc.roundedRect(margin, y, 50, 10, 2, 2, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text(verdictLabel, margin + 25, y + 7, { align: 'center' });
+
+    // Summary
+    y += 18;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(30, 30, 30);
+    doc.text('Resumo', margin, y);
+    y += 7;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(60, 60, 60);
+    const summaryLines = doc.splitTextToSize(pdeAnalysis.ai_analysis?.summary || '', pageWidth - margin * 2);
+    doc.text(summaryLines, margin, y);
+    y += summaryLines.length * 4.5 + 5;
+
+    // Documents analyzed
+    const pdeDocs = pdeDocsList.filter(d => d.doc_type === 'pde');
+    const desenhoDocs = pdeDocsList.filter(d => d.doc_type === 'desenho_preparacao');
+    const respostaDocs = pdeDocsList.filter(d => d.doc_type === 'resposta_pde');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(30, 30, 30);
+    doc.text('Documentos Analisados', margin, y);
+    y += 7;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    if (pdeDocs.length > 0) { doc.text(`PDE: ${pdeDocs.map(d => d.file_name).join(', ')}`, margin, y); y += 5; }
+    if (desenhoDocs.length > 0) { doc.text(`Desenhos de Preparação: ${desenhoDocs.map(d => d.file_name).join(', ')}`, margin, y); y += 5; }
+    if (respostaDocs.length > 0) { doc.text(`Respostas ao PDE: ${respostaDocs.map(d => d.file_name).join(', ')}`, margin, y); y += 5; }
+    y += 5;
+
+    // Findings addressed
+    if (pdeAnalysis.ai_analysis?.findings_addressed?.length) {
+      if (y > 250) { doc.addPage(); y = 20; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(30, 30, 30);
+      doc.text('Incompatibilidades Abordadas', margin, y);
+      y += 7;
+
+      for (const fa of pdeAnalysis.ai_analysis.findings_addressed) {
+        if (y > 270) { doc.addPage(); y = 20; }
+        const icon = fa.resolved ? '✓' : '✗';
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(fa.resolved ? 34 : 239, fa.resolved ? 197 : 68, fa.resolved ? 94 : 68);
+        doc.text(icon, margin, y);
+        doc.setTextColor(30, 30, 30);
+        doc.text(fa.finding_title, margin + 6, y);
+        y += 5;
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(80, 80, 80);
+        const commentLines = doc.splitTextToSize(fa.comment, pageWidth - margin * 2 - 6);
+        doc.text(commentLines, margin + 6, y);
+        y += commentLines.length * 4 + 3;
+      }
+      y += 5;
+    }
+
+    // New issues
+    if (pdeAnalysis.ai_analysis?.new_issues?.length) {
+      if (y > 250) { doc.addPage(); y = 20; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(239, 68, 68);
+      doc.text('Novos Problemas Detectados', margin, y);
+      y += 7;
+
+      for (const ni of pdeAnalysis.ai_analysis.new_issues) {
+        if (y > 270) { doc.addPage(); y = 20; }
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(30, 30, 30);
+        doc.text(`[${ni.severity.toUpperCase()}] ${ni.title}`, margin, y);
+        y += 5;
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(80, 80, 80);
+        const descLines = doc.splitTextToSize(ni.description, pageWidth - margin * 2);
+        doc.text(descLines, margin, y);
+        y += descLines.length * 4 + 3;
+        if (ni.location) { doc.text(`Local: ${ni.location}`, margin, y); y += 5; }
+      }
+      y += 5;
+    }
+
+    // Technical notes
+    if (pdeAnalysis.ai_analysis?.technical_notes?.length) {
+      if (y > 250) { doc.addPage(); y = 20; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(30, 30, 30);
+      doc.text('Notas Técnicas', margin, y);
+      y += 7;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      for (const note of pdeAnalysis.ai_analysis.technical_notes) {
+        if (y > 270) { doc.addPage(); y = 20; }
+        const noteLines = doc.splitTextToSize(`• ${note}`, pageWidth - margin * 2);
+        doc.text(noteLines, margin, y);
+        y += noteLines.length * 4 + 2;
+      }
+      y += 5;
+    }
+
+    // Recommendation
+    if (pdeAnalysis.ai_analysis?.recommendation) {
+      if (y > 250) { doc.addPage(); y = 20; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(30, 30, 30);
+      doc.text('Recomendação Final', margin, y);
+      y += 7;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(60, 60, 60);
+      const recLines = doc.splitTextToSize(pdeAnalysis.ai_analysis.recommendation, pageWidth - margin * 2);
+      doc.text(recLines, margin, y);
+    }
+
+    // Footer
+    const pageCount = doc.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(150, 150, 150);
+      doc.text(`Gerado por IncompatiCheck — ${new Date().toLocaleDateString('pt-PT')}`, margin, 285);
+      doc.text(`Página ${i} de ${pageCount}`, pageWidth - margin, 285, { align: 'right' });
+    }
+
+    doc.save(`Parecer_PDE_${obraAtiva.nome.replace(/\s+/g, '_')}_${Date.now()}.pdf`);
+  }, [obraAtiva]);
 
   return {
     // State
@@ -908,6 +1117,7 @@ export function useIncompaticheck() {
     sendUserMessage,
     generateReport,
     generateReportWithAnnotations,
+    generatePdeReport,
     setUploadProgress,
     // PDE Actions
     uploadPdeDocument,

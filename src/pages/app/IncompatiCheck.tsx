@@ -81,6 +81,7 @@ export default function IncompatiCheck() {
   const [loadingZones, setLoadingZones] = useState<Set<string>>(new Set());
   const [exportingPdf, setExportingPdf] = useState(false);
   const [clientLogo, setClientLogo] = useState<string | null>(() => localStorage.getItem('incompaticheck_client_logo'));
+  const [fiscalLogo, setFiscalLogo] = useState<string | null>(() => localStorage.getItem('incompaticheck_fiscal_logo'));
 
   // Real AI analysis state
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
@@ -212,7 +213,7 @@ export default function IncompatiCheck() {
         }
       }
 
-      await ic.generateReportWithAnnotations(resultToExport, annotatedImages, clientLogo);
+      await ic.generateReportWithAnnotations(resultToExport, annotatedImages, clientLogo, fiscalLogo);
       toast.success('Relatório gerado com sucesso!');
     } catch (err) {
       console.error('PDF generation error:', err);
@@ -682,6 +683,56 @@ export default function IncompatiCheck() {
                     )}
                   </div>
 
+                  {/* Logo uploads for PDF */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-muted-foreground font-medium">Logo Fiscalização</label>
+                      {fiscalLogo ? (
+                        <div className="flex items-center gap-1.5 p-1.5 rounded border border-border bg-muted/30">
+                          <img src={fiscalLogo} alt="Fiscal" className="h-6 object-contain" />
+                          <button onClick={() => { setFiscalLogo(null); localStorage.removeItem('incompaticheck_fiscal_logo'); }} className="ml-auto p-0.5 rounded hover:bg-destructive/10">
+                            <Trash2 className="w-3 h-3 text-destructive" />
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="flex items-center justify-center gap-1 p-1.5 rounded border border-dashed border-border cursor-pointer hover:bg-muted/50 text-[10px] text-muted-foreground">
+                          <Plus className="w-3 h-3" /> Carregar
+                          <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = () => { const b64 = reader.result as string; setFiscalLogo(b64); localStorage.setItem('incompaticheck_fiscal_logo', b64); };
+                            reader.readAsDataURL(file);
+                            e.target.value = '';
+                          }} />
+                        </label>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-muted-foreground font-medium">Logo Cliente</label>
+                      {clientLogo ? (
+                        <div className="flex items-center gap-1.5 p-1.5 rounded border border-border bg-muted/30">
+                          <img src={clientLogo} alt="Cliente" className="h-6 object-contain" />
+                          <button onClick={() => { setClientLogo(null); localStorage.removeItem('incompaticheck_client_logo'); }} className="ml-auto p-0.5 rounded hover:bg-destructive/10">
+                            <Trash2 className="w-3 h-3 text-destructive" />
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="flex items-center justify-center gap-1 p-1.5 rounded border border-dashed border-border cursor-pointer hover:bg-muted/50 text-[10px] text-muted-foreground">
+                          <Plus className="w-3 h-3" /> Carregar
+                          <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = () => { const b64 = reader.result as string; setClientLogo(b64); localStorage.setItem('incompaticheck_client_logo', b64); };
+                            reader.readAsDataURL(file);
+                            e.target.value = '';
+                          }} />
+                        </label>
+                      )}
+                    </div>
+                  </div>
+
                   {/* Filters */}
                   <div className="flex gap-1.5 flex-wrap">
                     {[
@@ -837,7 +888,7 @@ export default function IncompatiCheck() {
 
           {/* ---- ESCLARECIMENTOS & PROPOSTAS (PDE) ---- */}
           {(hasResults || ic.analysis || ic.pdeDocuments.length > 0) && (
-            <PdeSection ic={ic} />
+            <PdeSection ic={ic} clientLogo={clientLogo} fiscalLogo={fiscalLogo} />
           )}
         </div>
       )}
@@ -850,7 +901,7 @@ export default function IncompatiCheck() {
         obraNome={ic.obraAtiva?.nome} uploadProgress={ic.uploadProgress} />
       <ShareModal isOpen={showShare} onClose={() => setShowShare(false)} obraAtiva={ic.obraAtiva}
         findingsCount={{ critical: displayAltaCount, warning: displayMediaCount, info: displayBaixaCount }}
-        onGenerateReport={() => ic.generateReport(clientLogo)} />
+        onGenerateReport={() => ic.generateReport(clientLogo, fiscalLogo)} />
       <ProjectPreviewModal project={previewProject} onClose={() => setPreviewProject(null)}
         onDelete={(id, path) => ic.deleteProject(id, path)} />
     </div>
@@ -858,7 +909,7 @@ export default function IncompatiCheck() {
 }
 
 /* ========== PDE Section Component ========== */
-function PdeSection({ ic }: { ic: ReturnType<typeof useIncompaticheck> }) {
+function PdeSection({ ic, clientLogo, fiscalLogo }: { ic: ReturnType<typeof useIncompaticheck>; clientLogo: string | null; fiscalLogo: string | null }) {
   const pdeInputRef = useRef<HTMLInputElement>(null);
   const desenhoInputRef = useRef<HTMLInputElement>(null);
   const respostaInputRef = useRef<HTMLInputElement>(null);
@@ -1079,6 +1130,22 @@ function PdeSection({ ic }: { ic: ReturnType<typeof useIncompaticheck> }) {
                 </div>
               </div>
             )}
+
+            {/* Download PDE PDF button */}
+            <div className="flex gap-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => {
+                  ic.generatePdeReport(latestAnalysis, ic.pdeDocuments, clientLogo, fiscalLogo);
+                  toast.success('PDF do parecer gerado.');
+                }}
+              >
+                <Download className="w-3.5 h-3.5" />
+                Baixar Parecer PDF
+              </Button>
+            </div>
           </div>
         )}
       </CardContent>
