@@ -921,8 +921,35 @@ export function useIncompaticheck() {
     if (!obraAtiva) return;
 
     const doc = new jsPDF('p', 'mm', 'a4');
-    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageWidth = doc.internal.pageSize.getWidth();   // 210
+    const pageHeight = doc.internal.pageSize.getHeight();  // 297
     const margin = 20;
+    const contentWidth = pageWidth - margin * 2;           // 170
+    const lineH = 4.2;     // line height for fontSize 9
+    const lineH10 = 5;     // line height for fontSize 10
+    const footerY = 287;   // footer position
+    const maxY = footerY - 8; // safe zone before footer
+
+    // Helper: check if we need a new page, returns new y
+    const ensureSpace = (currentY: number, needed: number): number => {
+      if (currentY + needed > maxY) {
+        doc.addPage();
+        return 20;
+      }
+      return currentY;
+    };
+
+    // Helper: print wrapped text safely within margins
+    const printWrapped = (text: string, x: number, startY: number, maxWidth: number, lh: number): number => {
+      const lines: string[] = doc.splitTextToSize(text, maxWidth);
+      let cy = startY;
+      for (const line of lines) {
+        cy = ensureSpace(cy, lh + 1);
+        doc.text(line, x, cy);
+        cy += lh;
+      }
+      return cy;
+    };
 
     // Header — clean professional layout
     const headerH = 35;
@@ -942,7 +969,6 @@ export function useIncompaticheck() {
     }
 
     // Title centered (between logos)
-    const titleMaxWidth = pageWidth - margin * 2 - 80; // leave space for both logos
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(13);
     doc.setTextColor(30, 30, 30);
@@ -971,12 +997,13 @@ export function useIncompaticheck() {
     y += 15;
     const verdictLabel = pdeAnalysis.verdict === 'approved' ? 'APROVADO' : pdeAnalysis.verdict === 'approved_with_reservations' ? 'APROVADO COM RESERVAS' : 'REJEITADO';
     const verdictColor: [number, number, number] = pdeAnalysis.verdict === 'approved' ? [34, 197, 94] : pdeAnalysis.verdict === 'approved_with_reservations' ? [245, 158, 11] : [239, 68, 68];
+    const verdictBoxW = Math.max(doc.getTextWidth(verdictLabel) + 16, 50);
     doc.setFillColor(...verdictColor);
-    doc.roundedRect(margin, y, 50, 10, 2, 2, 'F');
+    doc.roundedRect(margin, y, verdictBoxW, 10, 2, 2, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.text(verdictLabel, margin + 25, y + 7, { align: 'center' });
+    doc.text(verdictLabel, margin + verdictBoxW / 2, y + 7, { align: 'center' });
 
     // Summary
     y += 18;
@@ -988,15 +1015,15 @@ export function useIncompaticheck() {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(60, 60, 60);
-    const summaryLines = doc.splitTextToSize(pdeAnalysis.ai_analysis?.summary || '', pageWidth - margin * 2);
-    doc.text(summaryLines, margin, y);
-    y += summaryLines.length * 4.5 + 5;
+    y = printWrapped(pdeAnalysis.ai_analysis?.summary || '', margin, y, contentWidth, lineH);
+    y += 5;
 
     // Documents analyzed
     const pdeDocs = pdeDocsList.filter(d => d.doc_type === 'pde');
     const desenhoDocs = pdeDocsList.filter(d => d.doc_type === 'desenho_preparacao');
     const respostaDocs = pdeDocsList.filter(d => d.doc_type === 'resposta_pde');
 
+    y = ensureSpace(y, 20);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.setTextColor(30, 30, 30);
@@ -1004,42 +1031,55 @@ export function useIncompaticheck() {
     y += 7;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
-    if (pdeDocs.length > 0) { doc.text(`PDE: ${pdeDocs.map(d => d.file_name).join(', ')}`, margin, y); y += 5; }
-    if (desenhoDocs.length > 0) { doc.text(`Desenhos de Preparação: ${desenhoDocs.map(d => d.file_name).join(', ')}`, margin, y); y += 5; }
-    if (respostaDocs.length > 0) { doc.text(`Respostas ao PDE: ${respostaDocs.map(d => d.file_name).join(', ')}`, margin, y); y += 5; }
+    doc.setTextColor(60, 60, 60);
+    if (pdeDocs.length > 0) {
+      y = printWrapped(`PDE: ${pdeDocs.map(d => d.file_name).join(', ')}`, margin, y, contentWidth, lineH);
+      y += 1;
+    }
+    if (desenhoDocs.length > 0) {
+      y = printWrapped(`Desenhos de Preparação: ${desenhoDocs.map(d => d.file_name).join(', ')}`, margin, y, contentWidth, lineH);
+      y += 1;
+    }
+    if (respostaDocs.length > 0) {
+      y = printWrapped(`Respostas ao PDE: ${respostaDocs.map(d => d.file_name).join(', ')}`, margin, y, contentWidth, lineH);
+      y += 1;
+    }
     y += 5;
 
     // Findings addressed
     if (pdeAnalysis.ai_analysis?.findings_addressed?.length) {
-      if (y > 250) { doc.addPage(); y = 20; }
+      y = ensureSpace(y, 15);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
       doc.setTextColor(30, 30, 30);
       doc.text('Incompatibilidades Abordadas', margin, y);
       y += 7;
 
+      const indentX = margin + 6;
+      const indentWidth = contentWidth - 6;
+
       for (const fa of pdeAnalysis.ai_analysis.findings_addressed) {
-        if (y > 270) { doc.addPage(); y = 20; }
+        y = ensureSpace(y, 15);
         const icon = fa.resolved ? '✓' : '✗';
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(9);
         doc.setTextColor(fa.resolved ? 34 : 239, fa.resolved ? 197 : 68, fa.resolved ? 94 : 68);
         doc.text(icon, margin, y);
         doc.setTextColor(30, 30, 30);
-        doc.text(fa.finding_title, margin + 6, y);
-        y += 5;
+        // Wrap finding title too
+        y = printWrapped(fa.finding_title, indentX, y, indentWidth, lineH);
+        y += 1;
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(80, 80, 80);
-        const commentLines = doc.splitTextToSize(fa.comment, pageWidth - margin * 2 - 6);
-        doc.text(commentLines, margin + 6, y);
-        y += commentLines.length * 4 + 3;
+        y = printWrapped(fa.comment, indentX, y, indentWidth, lineH);
+        y += 3;
       }
       y += 5;
     }
 
     // New issues
     if (pdeAnalysis.ai_analysis?.new_issues?.length) {
-      if (y > 250) { doc.addPage(); y = 20; }
+      y = ensureSpace(y, 15);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
       doc.setTextColor(239, 68, 68);
@@ -1047,25 +1087,31 @@ export function useIncompaticheck() {
       y += 7;
 
       for (const ni of pdeAnalysis.ai_analysis.new_issues) {
-        if (y > 270) { doc.addPage(); y = 20; }
+        y = ensureSpace(y, 15);
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(9);
         doc.setTextColor(30, 30, 30);
-        doc.text(`[${ni.severity.toUpperCase()}] ${ni.title}`, margin, y);
-        y += 5;
+        // Wrap title with severity tag
+        y = printWrapped(`[${ni.severity.toUpperCase()}] ${ni.title}`, margin, y, contentWidth, lineH);
+        y += 1;
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(80, 80, 80);
-        const descLines = doc.splitTextToSize(ni.description, pageWidth - margin * 2);
-        doc.text(descLines, margin, y);
-        y += descLines.length * 4 + 3;
-        if (ni.location) { doc.text(`Local: ${ni.location}`, margin, y); y += 5; }
+        y = printWrapped(ni.description, margin, y, contentWidth, lineH);
+        y += 1;
+        if (ni.location) {
+          doc.setTextColor(100, 100, 100);
+          doc.setFontSize(8);
+          y = printWrapped(`Local: ${ni.location}`, margin, y, contentWidth, 3.8);
+          doc.setFontSize(9);
+        }
+        y += 4;
       }
-      y += 5;
+      y += 3;
     }
 
     // Technical notes
     if (pdeAnalysis.ai_analysis?.technical_notes?.length) {
-      if (y > 250) { doc.addPage(); y = 20; }
+      y = ensureSpace(y, 15);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
       doc.setTextColor(30, 30, 30);
@@ -1073,18 +1119,18 @@ export function useIncompaticheck() {
       y += 7;
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
+      doc.setTextColor(60, 60, 60);
       for (const note of pdeAnalysis.ai_analysis.technical_notes) {
-        if (y > 270) { doc.addPage(); y = 20; }
-        const noteLines = doc.splitTextToSize(`• ${note}`, pageWidth - margin * 2);
-        doc.text(noteLines, margin, y);
-        y += noteLines.length * 4 + 2;
+        y = ensureSpace(y, 10);
+        y = printWrapped(`• ${note}`, margin, y, contentWidth, lineH);
+        y += 2;
       }
       y += 5;
     }
 
     // Recommendation
     if (pdeAnalysis.ai_analysis?.recommendation) {
-      if (y > 250) { doc.addPage(); y = 20; }
+      y = ensureSpace(y, 15);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
       doc.setTextColor(30, 30, 30);
@@ -1093,18 +1139,17 @@ export function useIncompaticheck() {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
       doc.setTextColor(60, 60, 60);
-      const recLines = doc.splitTextToSize(pdeAnalysis.ai_analysis.recommendation, pageWidth - margin * 2);
-      doc.text(recLines, margin, y);
+      y = printWrapped(pdeAnalysis.ai_analysis.recommendation, margin, y, contentWidth, lineH);
     }
 
-    // Footer
+    // Footer on all pages
     const pageCount = doc.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
-      doc.text(`Relatório gerado em — ${new Date().toLocaleDateString('pt-PT')}`, margin, 285);
-      doc.text(`Página ${i} de ${pageCount}`, pageWidth - margin, 285, { align: 'right' });
+      doc.text(`Relatório gerado em — ${new Date().toLocaleDateString('pt-PT')}`, margin, footerY);
+      doc.text(`Página ${i} de ${pageCount}`, pageWidth - margin, footerY, { align: 'right' });
     }
 
     doc.save(`Parecer_PDE_${obraAtiva.nome.replace(/\s+/g, '_')}_${Date.now()}.pdf`);
