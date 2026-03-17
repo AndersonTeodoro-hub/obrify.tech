@@ -213,7 +213,7 @@ export default function IncompatiCheck() {
         }
       }
 
-      await ic.generateReportWithAnnotations(resultToExport, annotatedImages, clientLogo);
+      await ic.generateReportWithAnnotations(resultToExport, annotatedImages, clientLogo, fiscalLogo);
       toast.success('Relatório gerado com sucesso!');
     } catch (err) {
       console.error('PDF generation error:', err);
