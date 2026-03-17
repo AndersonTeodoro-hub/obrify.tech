@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import { AppSidebar } from './AppSidebar';
 import { AppHeader } from './AppHeader';
@@ -16,6 +16,10 @@ export function AppLayout() {
   const [showPulse, setShowPulse] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
   const [silvaOpen, setSilvaOpen] = useState(false);
+  const location = useLocation();
+
+  // Hide global Eng. Silva FAB on IncompatiCheck (has its own integrated chat)
+  const isIncompatiCheck = location.pathname.includes('/incompaticheck');
 
   const toggleAgent = useCallback(() => setAgentOpen(prev => !prev), []);
   const closeAgent = useCallback(() => setAgentOpen(false), []);
@@ -60,8 +64,8 @@ export function AppLayout() {
       </div>
 
       <HelpButton showPulse={showPulse} onTourComplete={() => setShowPulse(false)} />
-      <ObrifyAgent open={agentOpen} onOpenChange={setAgentOpen} />
-      <EngSilvaFAB onClick={() => setSilvaOpen(true)} />
+      {!isIncompatiCheck && <ObrifyAgent open={agentOpen} onOpenChange={setAgentOpen} />}
+      {!isIncompatiCheck && <EngSilvaFAB onClick={() => setSilvaOpen(true)} />}
       <EngSilvaCallOverlay open={silvaOpen} onClose={() => setSilvaOpen(false)} />
 
       <WelcomeModal
