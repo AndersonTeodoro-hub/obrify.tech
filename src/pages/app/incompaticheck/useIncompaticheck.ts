@@ -580,39 +580,44 @@ export function useIncompaticheck() {
     const doc = new jsPDF('p', 'mm', 'a4');
     const pageWidth = doc.internal.pageSize.getWidth();
 
-    // Header
-    doc.setFillColor(10, 12, 16);
-    doc.rect(0, 0, pageWidth, 40, 'F');
+    // Header — clean professional layout
+    const headerH = 35;
+    const margin = 20;
 
-    let titleX = 20;
+    // Fiscal logo (left)
     if (fiscalLogoBase64) {
       try {
-        doc.addImage(fiscalLogoBase64, 'PNG', 15, 5, 25, 15);
-        titleX = 45;
+        doc.addImage(fiscalLogoBase64, 'PNG', margin, 10, 28, 18);
       } catch { /* skip */ }
     }
 
-    doc.setTextColor(255, 107, 53);
-    doc.setFontSize(18);
-    doc.text('IncompatiCheck', titleX, 20);
-    doc.setFontSize(11);
-    doc.setTextColor(200, 200, 200);
-    doc.text('Relatório de Incompatibilidades', titleX, 30);
-
+    // Client logo (right)
     if (clientLogoBase64) {
       try {
-        doc.addImage(clientLogoBase64, 'PNG', pageWidth - 20 - 40, 5, 40, 16);
+        doc.addImage(clientLogoBase64, 'PNG', pageWidth - margin - 35, 8, 35, 20);
       } catch { /* skip */ }
     }
 
+    // Title centered
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.setTextColor(30, 30, 30);
+    doc.text('Análise de Incompatibilidades', pageWidth / 2, 18, { align: 'center' });
+
+    // Separator line
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.5);
+    doc.line(margin, headerH, pageWidth - margin, headerH);
+
     // Obra info
+    doc.setFont('helvetica', 'normal');
     doc.setTextColor(60, 60, 60);
     doc.setFontSize(10);
-    let y = 50;
-    doc.text(`Obra: ${obraAtiva.nome}`, 20, y);
-    if (obraAtiva.cidade) doc.text(`Localização: ${obraAtiva.cidade}`, 20, y + 6);
-    if (obraAtiva.fiscal) doc.text(`Fiscal: ${obraAtiva.fiscal}`, 20, y + 12);
-    doc.text(`Data: ${new Date().toLocaleDateString('pt-PT')}`, 20, y + 18);
+    let y = headerH + 8;
+    doc.text(`Obra: ${obraAtiva.nome}`, margin, y);
+    if (obraAtiva.cidade) doc.text(`Localização: ${obraAtiva.cidade}`, margin, y + 6);
+    if (obraAtiva.fiscal) doc.text(`Fiscal: ${obraAtiva.fiscal}`, margin, y + 12);
+    doc.text(`Data: ${new Date().toLocaleDateString('pt-PT')}`, margin, y + 18);
 
     // Summary
     y += 30;
@@ -657,7 +662,7 @@ export function useIncompaticheck() {
       doc.setPage(i);
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
-      doc.text(`Gerado por IncompatiCheck — ${new Date().toLocaleDateString('pt-PT')}`, 20, 285);
+      doc.text(`Relatório gerado em — ${new Date().toLocaleDateString('pt-PT')}`, 20, 285);
       doc.text(`Página ${i} de ${pageCount}`, pageWidth - 40, 285);
     }
 
@@ -693,35 +698,39 @@ export function useIncompaticheck() {
     const margin = 20;
     const contentWidth = pageWidth - margin * 2;
 
-    // Header
-    doc.setFillColor(10, 12, 16);
-    doc.rect(0, 0, pageWidth, 40, 'F');
+    // Header — clean professional layout
+    const headerH = 35;
 
-    let titleX = margin;
+    // Fiscal logo (left)
     if (fiscalLogoBase64) {
       try {
-        doc.addImage(fiscalLogoBase64, 'PNG', 15, 5, 25, 15);
-        titleX = 45;
+        doc.addImage(fiscalLogoBase64, 'PNG', margin, 10, 28, 18);
       } catch { /* skip */ }
     }
 
-    doc.setTextColor(255, 107, 53);
-    doc.setFontSize(18);
-    doc.text('IncompatiCheck', titleX, 20);
-    doc.setFontSize(11);
-    doc.setTextColor(200, 200, 200);
-    doc.text('Relatório de Incompatibilidades com Anotações', titleX, 30);
-
+    // Client logo (right)
     if (clientLogoBase64) {
       try {
-        doc.addImage(clientLogoBase64, 'PNG', pageWidth - margin - 40, 5, 40, 16);
+        doc.addImage(clientLogoBase64, 'PNG', pageWidth - margin - 35, 8, 35, 20);
       } catch { /* skip */ }
     }
 
+    // Title centered
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.setTextColor(30, 30, 30);
+    doc.text('Análise de Incompatibilidades', pageWidth / 2, 18, { align: 'center' });
+
+    // Separator line
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.5);
+    doc.line(margin, headerH, pageWidth - margin, headerH);
+
     // Obra info
+    doc.setFont('helvetica', 'normal');
     doc.setTextColor(60, 60, 60);
     doc.setFontSize(10);
-    let y = 50;
+    let y = headerH + 8;
     doc.text(`Obra: ${obraAtiva.nome}`, margin, y);
     if (obraAtiva.cidade) { y += 6; doc.text(`Localização: ${obraAtiva.cidade}`, margin, y); }
     if (obraAtiva.fiscal) { y += 6; doc.text(`Fiscal: ${obraAtiva.fiscal}`, margin, y); }
@@ -871,7 +880,7 @@ export function useIncompaticheck() {
       doc.setPage(i);
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
-      doc.text(`Gerado por IncompatiCheck — ${new Date().toLocaleDateString('pt-PT')}`, margin, 285);
+      doc.text(`Relatório gerado em — ${new Date().toLocaleDateString('pt-PT')}`, margin, 285);
       doc.text(`Página ${i} de ${pageCount}`, pageWidth - 40, 285);
     }
 
@@ -910,33 +919,37 @@ export function useIncompaticheck() {
     const pageWidth = doc.internal.pageSize.getWidth();
     const margin = 20;
 
-    // Header
-    doc.setFillColor(10, 12, 16);
-    doc.rect(0, 0, pageWidth, 40, 'F');
+    // Header — clean professional layout
+    const headerH = 35;
 
-    let titleX = margin;
+    // Fiscal logo (left)
     if (fiscalLogoBase64) {
       try {
-        doc.addImage(fiscalLogoBase64, 'PNG', 15, 5, 25, 15);
-        titleX = 45;
+        doc.addImage(fiscalLogoBase64, 'PNG', margin, 10, 28, 18);
       } catch { /* skip */ }
     }
 
-    doc.setTextColor(255, 107, 53);
-    doc.setFontSize(16);
-    doc.text('Parecer Técnico — Proposta do Empreiteiro', titleX, 18);
-    doc.setFontSize(10);
-    doc.setTextColor(200, 200, 200);
-    doc.text('IncompatiCheck · Esclarecimentos & Propostas', titleX, 28);
-
+    // Client logo (right)
     if (clientLogoBase64) {
       try {
-        doc.addImage(clientLogoBase64, 'PNG', pageWidth - margin - 40, 5, 40, 16);
+        doc.addImage(clientLogoBase64, 'PNG', pageWidth - margin - 35, 8, 35, 20);
       } catch { /* skip */ }
     }
 
+    // Title centered
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(30, 30, 30);
+    doc.text('Parecer Técnico — Proposta do Empreiteiro', pageWidth / 2, 18, { align: 'center' });
+
+    // Separator line
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.5);
+    doc.line(margin, headerH, pageWidth - margin, headerH);
+
     // Obra info
-    let y = 50;
+    let y = headerH + 8;
+    doc.setFont('helvetica', 'normal');
     doc.setTextColor(60, 60, 60);
     doc.setFontSize(10);
     doc.text(`Obra: ${obraAtiva.nome}`, margin, y);
@@ -1080,7 +1093,7 @@ export function useIncompaticheck() {
       doc.setPage(i);
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
-      doc.text(`Gerado por IncompatiCheck — ${new Date().toLocaleDateString('pt-PT')}`, margin, 285);
+      doc.text(`Relatório gerado em — ${new Date().toLocaleDateString('pt-PT')}`, margin, 285);
       doc.text(`Página ${i} de ${pageCount}`, pageWidth - margin, 285, { align: 'right' });
     }
 
