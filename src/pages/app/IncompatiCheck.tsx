@@ -690,7 +690,19 @@ export default function IncompatiCheck() {
                       className="gap-1.5 flex-1"
                     >
                       {exportingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                      PDF
+                      PDF Completo
+                    </Button>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => {
+                        ic.generateExecutiveSummary(displayFindings, clientLogo, fiscalLogo);
+                        toast.success('Resumo executivo gerado.');
+                      }}
+                      className="gap-1.5 flex-1"
+                    >
+                      <FileSearch className="w-3.5 h-3.5" />
+                      Resumo 1pg
                     </Button>
                     {ic.analysis && (
                       <Button

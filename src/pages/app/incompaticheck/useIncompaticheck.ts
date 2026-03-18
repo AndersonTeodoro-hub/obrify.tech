@@ -1205,6 +1205,197 @@ export function useIncompaticheck() {
     doc.save(`Parecer_PDE_${obraAtiva.nome.replace(/\s+/g, '_')}_${Date.now()}.pdf`);
   }, [obraAtiva]);
 
+  // ---- EXECUTIVE SUMMARY (1-page simplified report) ----
+  const generateExecutiveSummary = useCallback(async (
+    analysisFindings: Array<{ id: string; severity: string; title: string; description: string; location?: string; recommendation?: string }>,
+    clientLogoBase64?: string | null,
+    fiscalLogoBase64?: string | null
+  ) => {
+    if (!obraAtiva) return;
+
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 20;
+    const contentWidth = pageWidth - margin * 2;
+
+    // Helper: sanitize special chars
+    const sanitize = (text: string): string => {
+      return text
+        .replace(/≥/g, '>=').replace(/≤/g, '<=').replace(/→/g, '->').replace(/←/g, '<-')
+        .replace(/Ø/g, 'O/').replace(/±/g, '+/-').replace(/²/g, '2').replace(/³/g, '3')
+        .replace(/×/g, 'x').replace(/°/g, 'o').replace(/…/g, '...').replace(/–/g, '-').replace(/—/g, ' - ')
+        .replace(/"/g, '"').replace(/"/g, '"').replace(/'/g, "'").replace(/'/g, "'")
+        .replace(/[^\x00-\x7F\xC0-\xFF]/g, (ch) => ch.charCodeAt(0) >= 0x100 ? '?' : ch);
+    };
+
+    // Header
+    if (fiscalLogoBase64) {
+      try { doc.addImage(fiscalLogoBase64, 'PNG', margin, 8, 25, 16); } catch {}
+    }
+    if (clientLogoBase64) {
+      try { doc.addImage(clientLogoBase64, 'PNG', pageWidth - margin - 32, 6, 32, 18); } catch {}
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(30, 30, 30);
+    doc.text('Resumo Executivo', pageWidth / 2, 14, { align: 'center' });
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 100, 100);
+    doc.text('Incompatibilidades Criticas', pageWidth / 2, 20, { align: 'center' });
+
+    // Separator
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.4);
+    doc.line(margin, 28, pageWidth - margin, 28);
+
+    // Obra info line
+    let y = 34;
+    doc.setFontSize(9);
+    doc.setTextColor(80, 80, 80);
+    doc.text(sanitize(`Obra: ${obraAtiva.nome}  |  Fiscal: ${obraAtiva.fiscal || '-'}  |  Data: ${new Date().toLocaleDateString('pt-PT')}`), margin, y);
+
+    // Filter only critical findings (alta / critical)
+    const critical = analysisFindings.filter(f => 
+      f.severity === 'alta' || f.severity === 'critical'
+    );
+    const warnings = analysisFindings.filter(f => 
+      f.severity === 'media' || f.severity === 'warning'
+    );
+    const total = analysisFindings.length;
+
+    // Summary bar
+    y += 10;
+    const barW = contentWidth / 3;
+
+    // Critical count box
+    doc.setFillColor(220, 38, 38);
+    doc.roundedRect(margin, y, barW - 2, 14, 2, 2, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text(String(critical.length), margin + (barW - 2) / 2, y + 8, { align: 'center' });
+    doc.setFontSize(7);
+    doc.text('CRITICAS', margin + (barW - 2) / 2, y + 12, { align: 'center' });
+
+    // Warning count box
+    doc.setFillColor(217, 119, 6);
+    doc.roundedRect(margin + barW, y, barW - 2, 14, 2, 2, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.text(String(warnings.length), margin + barW + (barW - 2) / 2, y + 8, { align: 'center' });
+    doc.setFontSize(7);
+    doc.text('ALERTAS', margin + barW + (barW - 2) / 2, y + 12, { align: 'center' });
+
+    // Total box
+    doc.setFillColor(100, 116, 139);
+    doc.roundedRect(margin + barW * 2, y, barW - 2, 14, 2, 2, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.text(String(total), margin + barW * 2 + (barW - 2) / 2, y + 8, { align: 'center' });
+    doc.setFontSize(7);
+    doc.text('TOTAL', margin + barW * 2 + (barW - 2) / 2, y + 12, { align: 'center' });
+
+    y += 22;
+
+    // Critical findings — compact format
+    if (critical.length > 0) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(220, 38, 38);
+      doc.text('Incompatibilidades Criticas', margin, y);
+      y += 7;
+
+      // Table
+      const tableBody = critical.slice(0, 8).map((f, i) => [
+        String(i + 1),
+        sanitize(f.title),
+        sanitize(f.description.length > 100 ? f.description.substring(0, 100) + '...' : f.description),
+        sanitize(f.location || '-'),
+      ]);
+
+      autoTable(doc, {
+        startY: y,
+        head: [['#', 'Problema', 'Descricao', 'Local']],
+        body: tableBody,
+        theme: 'striped',
+        headStyles: {
+          fillColor: [220, 38, 38],
+          textColor: [255, 255, 255],
+          fontSize: 8,
+          fontStyle: 'bold',
+        },
+        bodyStyles: { fontSize: 7.5, textColor: [50, 50, 50], cellPadding: 2.5 },
+        columnStyles: {
+          0: { cellWidth: 8, halign: 'center' },
+          1: { cellWidth: 42 },
+          2: { cellWidth: 85 },
+          3: { cellWidth: 30 },
+        },
+        margin: { left: margin, right: margin },
+      });
+
+      y = (doc as any).lastAutoTable.finalY + 6;
+    } else {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(34, 197, 94);
+      doc.text('Sem incompatibilidades criticas detectadas.', margin, y);
+      y += 8;
+    }
+
+    // Warnings summary (if space allows, just list titles)
+    if (warnings.length > 0 && y < 220) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(217, 119, 6);
+      doc.text('Alertas', margin, y);
+      y += 5;
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(80, 80, 80);
+      for (const w of warnings.slice(0, 5)) {
+        if (y > 255) break;
+        const line = sanitize(`- ${w.title}`);
+        const lines = doc.splitTextToSize(line, contentWidth);
+        doc.text(lines[0], margin, y);
+        y += 4;
+      }
+      if (warnings.length > 5) {
+        doc.text(`... e mais ${warnings.length - 5} alerta(s)`, margin, y);
+        y += 4;
+      }
+      y += 4;
+    }
+
+    // Action required box
+    if (critical.length > 0 && y < 260) {
+      doc.setFillColor(254, 242, 242);
+      doc.roundedRect(margin, y, contentWidth, 16, 2, 2, 'F');
+      doc.setDrawColor(220, 38, 38);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(margin, y, contentWidth, 16, 2, 2, 'S');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(220, 38, 38);
+      doc.text('ACCAO REQUERIDA', margin + 4, y + 6);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(80, 50, 50);
+      doc.setFontSize(8);
+      doc.text(sanitize(`Resolver ${critical.length} incompatibilidade(s) critica(s) antes de prosseguir com a execucao.`), margin + 4, y + 12);
+    }
+
+    // Footer
+    doc.setFontSize(7);
+    doc.setTextColor(150, 150, 150);
+    doc.text(`Obrify IncompatiCheck — ${new Date().toLocaleDateString('pt-PT')}`, margin, 289);
+    doc.text('Pagina 1 de 1', pageWidth - margin, 289, { align: 'right' });
+
+    doc.save(`Resumo_Executivo_${obraAtiva.nome.replace(/\s+/g, '_')}_${Date.now()}.pdf`);
+  }, [obraAtiva]);
+
   return {
     // State
     obras,
@@ -1236,6 +1427,7 @@ export function useIncompaticheck() {
     generateReport,
     generateReportWithAnnotations,
     generatePdeReport,
+    generateExecutiveSummary,
     setUploadProgress,
     // PDE Actions
     uploadPdeDocument,
