@@ -61,8 +61,8 @@ serve(async (req) => {
 
   try {
     const { messages, findings, obraName, pdeAnalyses, projects, pageContext } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+    const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!anthropicKey) throw new Error("ANTHROPIC_API_KEY is not configured");
 
     // Build dynamic context
     let context = "";
@@ -115,46 +115,36 @@ serve(async (req) => {
       }
     }
 
-    const apiMessages = [
-      { role: "system", content: SYSTEM_PROMPT + context },
-      ...(messages || []).slice(-20).map((m: any) => ({
-        role: m.role === "user" ? "user" : "assistant",
-        content: m.content,
-      })),
-    ];
+    const apiMessages = (messages || []).slice(-20).map((m: any) => ({
+      role: m.role === "user" ? "user" : "assistant",
+      content: m.content,
+    }));
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
+        "x-api-key": anthropicKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "claude-sonnet-4-5-20250929",
+        max_tokens: 2000,
+        system: SYSTEM_PROMPT + context,
         messages: apiMessages,
       }),
     });
 
     if (!response.ok) {
-      if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Limite de pedidos excedido. Tente novamente em breve." }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "Créditos esgotados. Adicione créditos na área de configurações." }), {
-          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
       const t = await response.text();
-      console.error("AI gateway error:", response.status, t);
+      console.error("Anthropic API error:", response.status, t);
       return new Response(JSON.stringify({ error: "Erro no serviço de IA." }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const data = await response.json();
-    const reply = data.choices?.[0]?.message?.content || "Desculpe, não consegui processar. Tente novamente.";
+    const reply = data.content?.[0]?.text || "Desculpe, não consegui processar. Tente novamente.";
 
     return new Response(JSON.stringify({ reply }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
