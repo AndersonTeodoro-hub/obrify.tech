@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 import {
   FileCheck, Plus, Upload, ChevronDown, ChevronUp, Trash2, CheckCircle2, AlertTriangle, XCircle, Clock, Loader2, Building2, ArrowLeft, FileText, Award, Factory, X, Download, ScrollText, FileSignature, ImageIcon, BookOpen,
 } from 'lucide-react';
-import { generateMaterialApprovalPDF } from '@/utils/material-approval-pdf';
+import { generateMaterialApprovalPDF, generateMaterialApprovalExecutive } from '@/utils/material-approval-pdf';
 
 const CATEGORIES = [
   'Betão (classes)', 'Aço (armaduras)', 'Cofragem', 'Impermeabilização',
@@ -795,7 +795,23 @@ export default function MaterialApprovals() {
                               setPdfModalOpen(true);
                             }}
                           >
-                            <Download className="w-3 h-3" /> Exportar PDF
+                            <Download className="w-3 h-3" /> PDF Completo
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="default"
+                            className="gap-1 text-xs"
+                            onClick={() => {
+                              if (!selectedObra) return;
+                              generateMaterialApprovalExecutive(
+                                a, a.ai_analysis, selectedObra.nome,
+                                pdfFiscalName, pdfFiscalCompany,
+                                pdfLogo || undefined, pdfClientLogo || undefined
+                              );
+                              toast.success('Resumo executivo gerado.');
+                            }}
+                          >
+                            <FileText className="w-3 h-3" /> Resumo 1pg
                           </Button>
                         </div>
                       </>

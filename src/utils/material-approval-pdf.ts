@@ -575,3 +575,270 @@ export function generateMaterialApprovalPDF(
   const filename = `PAM_${approval.material_category.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`;
   doc.save(filename);
 }
+
+/**
+ * Generate a 1-page executive summary PDF for material approval
+ */
+export function generateMaterialApprovalExecutive(
+  approval: ApprovalData,
+  analysis: AnalysisData,
+  obraName: string,
+  fiscalName?: string,
+  fiscalCompany?: string,
+  logoBase64?: string,
+  clientLogoBase64?: string
+) {
+  const doc = new jsPDF('p', 'mm', 'a4');
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('pt-PT');
+
+  const sanitize = (text: string): string => {
+    return text
+      .replace(/≥/g, '>=').replace(/≤/g, '<=').replace(/→/g, '->').replace(/←/g, '<-')
+      .replace(/Ø/g, 'O/').replace(/±/g, '+/-').replace(/²/g, '2').replace(/³/g, '3')
+      .replace(/×/g, 'x').replace(/°/g, 'o').replace(/…/g, '...').replace(/–/g, '-').replace(/—/g, ' - ')
+      .replace(/"/g, '"').replace(/"/g, '"').replace(/'/g, "'").replace(/'/g, "'")
+      .replace(/[^\x00-\x7F\xC0-\xFF]/g, (ch) => ch.charCodeAt(0) >= 0x100 ? '?' : ch);
+  };
+
+  let y = MT;
+
+  // Header with logos
+  if (logoBase64) {
+    try { doc.addImage(logoBase64, 'PNG', ML, 8, 22, 14); } catch {}
+  }
+  if (clientLogoBase64) {
+    try { doc.addImage(clientLogoBase64, 'PNG', PAGE_W - MR - 30, 6, 30, 16); } catch {}
+  }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(30, 41, 59);
+  doc.text('Resumo Executivo PAM', PAGE_W / 2, 14, { align: 'center' });
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  doc.text('Pedido de Aprovacao de Materiais', PAGE_W / 2, 20, { align: 'center' });
+
+  // Separator
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.4);
+  doc.line(ML, 26, PAGE_W - MR, 26);
+
+  // Info line
+  y = 32;
+  doc.setFontSize(9);
+  doc.setTextColor(80, 80, 80);
+  doc.text(sanitize(`Obra: ${obraName}  |  Categoria: ${approval.material_category}  |  Data: ${dateStr}`), ML, y);
+  if (fiscalName) {
+    y += 5;
+    doc.text(sanitize(`Fiscal: ${fiscalName}${fiscalCompany ? ` - ${fiscalCompany}` : ''}`), ML, y);
+  }
+
+  // Verdict badge
+  y += 10;
+  const rec = analysis.recommendation || approval.status;
+  const statusLabel = rec === 'approved' ? 'APROVADO' : rec === 'approved_with_reservations' ? 'APROVADO C/ RESERVAS' : rec === 'rejected' ? 'REJEITADO' : 'PENDENTE';
+  const statusColor: [number, number, number] = rec === 'approved' ? [34, 197, 94] : rec === 'approved_with_reservations' ? [245, 158, 11] : rec === 'rejected' ? [220, 38, 38] : [148, 163, 184];
+  const verdictW = Math.max(doc.getTextWidth(statusLabel) + 16, 50);
+
+  doc.setFillColor(...statusColor);
+  doc.roundedRect(ML, y, verdictW, 10, 3, 3, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text(statusLabel, ML + verdictW / 2, y + 7, { align: 'center' });
+
+  // Confidence
+  if (analysis.confidence) {
+    doc.setFontSize(9);
+    doc.setTextColor(100, 116, 139);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Confianca: ${analysis.confidence}%`, ML + verdictW + 8, y + 7);
+  }
+
+  // Material info box
+  y += 18;
+  const boxStartY = y;
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(ML, y, CW, 30, 2, 2, 'F');
+
+  y += 6;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(30, 41, 59);
+  doc.text('Material Proposto', ML + 5, y);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  y += 5;
+  if (analysis.material_proposed?.name) {
+    doc.text(sanitize(analysis.material_proposed.name), ML + 5, y);
+    y += 4;
+  }
+  if (analysis.material_proposed?.manufacturer) {
+    doc.text(sanitize(`Fabricante: ${analysis.material_proposed.manufacturer}`), ML + 5, y);
+    y += 4;
+  }
+  if (analysis.material_proposed?.model) {
+    doc.text(sanitize(`Modelo: ${analysis.material_proposed.model}`), ML + 5, y);
+  }
+
+  // Right side: Material specified
+  const rightX = ML + CW / 2 + 5;
+  let ry = boxStartY + 6;
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(30, 41, 59);
+  doc.text('Especificado no Projecto', rightX, ry);
+  ry += 5;
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  if (analysis.material_specified?.description) {
+    const specLines = doc.splitTextToSize(sanitize(analysis.material_specified.description), CW / 2 - 10);
+    for (const line of specLines.slice(0, 4)) {
+      doc.text(line, rightX, ry);
+      ry += 4;
+    }
+  }
+
+  // Compliance checks table
+  y = boxStartY + 34;
+  if (analysis.compliance_checks?.length) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(30, 41, 59);
+    doc.text('Verificacoes de Conformidade', ML, y);
+    y += 3;
+
+    const conformeCount = analysis.compliance_checks.filter(c => c.status === 'conforme').length;
+    const ncCount = analysis.compliance_checks.filter(c => c.status === 'não_conforme' || c.status === 'nao_conforme').length;
+    const verifyCount = analysis.compliance_checks.filter(c => c.status === 'a_verificar').length;
+    const total = analysis.compliance_checks.length;
+
+    autoTable(doc, {
+      startY: y,
+      head: [['Aspecto', 'Estado', 'Detalhe']],
+      body: analysis.compliance_checks.slice(0, 8).map(c => [
+        sanitize(c.aspect),
+        c.status === 'conforme' ? 'Conforme' : c.status === 'não_conforme' || c.status === 'nao_conforme' ? 'Nao Conforme' : 'A Verificar',
+        sanitize(c.detail.length > 60 ? c.detail.substring(0, 60) + '...' : c.detail),
+      ]),
+      theme: 'striped',
+      headStyles: { fillColor: [71, 85, 105], textColor: [255, 255, 255], fontSize: 7.5, fontStyle: 'bold' },
+      bodyStyles: { fontSize: 7, textColor: [50, 50, 50], cellPadding: 2 },
+      columnStyles: {
+        0: { cellWidth: 35 },
+        1: { cellWidth: 25 },
+        2: { cellWidth: CW - 60 },
+      },
+      margin: { left: ML, right: MR },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 1) {
+          const val = data.cell.text[0];
+          if (val === 'Conforme') data.cell.styles.textColor = [34, 197, 94];
+          else if (val === 'Nao Conforme') data.cell.styles.textColor = [220, 38, 38];
+          else data.cell.styles.textColor = [245, 158, 11];
+          data.cell.styles.fontStyle = 'bold';
+        }
+      },
+    });
+
+    y = (doc as any).lastAutoTable.finalY + 4;
+
+    // Summary bar
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(sanitize(`${conformeCount}/${total} conforme  |  ${ncCount} nao conforme  |  ${verifyCount} a verificar`), ML, y);
+    y += 6;
+  }
+
+  // Issues (compact)
+  if (analysis.issues?.length && analysis.issues[0] && y < 230) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(220, 38, 38);
+    doc.text('Problemas', ML, y);
+    y += 4;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(80, 50, 50);
+    for (const issue of analysis.issues.slice(0, 3)) {
+      const lines = doc.splitTextToSize(sanitize(`- ${issue}`), CW);
+      doc.text(lines[0], ML, y);
+      y += 4;
+    }
+    y += 2;
+  }
+
+  // Conditions (compact)
+  if (analysis.conditions?.length && analysis.conditions[0] && y < 245) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(146, 64, 14);
+    doc.text('Condicoes de Aprovacao', ML, y);
+    y += 4;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(100, 80, 40);
+    for (const cond of analysis.conditions.slice(0, 3)) {
+      const lines = doc.splitTextToSize(sanitize(`- ${cond}`), CW);
+      doc.text(lines[0], ML, y);
+      y += 4;
+    }
+    y += 2;
+  }
+
+  // Justification (short)
+  if (analysis.justification && y < 255) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(30, 41, 59);
+    doc.text('Justificacao', ML, y);
+    y += 5;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(71, 85, 105);
+    const justLines = doc.splitTextToSize(sanitize(analysis.justification), CW);
+    for (const line of justLines.slice(0, 4)) {
+      doc.text(line, ML, y);
+      y += 3.8;
+    }
+    if (justLines.length > 4) {
+      doc.text('...', ML, y);
+      y += 4;
+    }
+  }
+
+  // Action box
+  if (rec === 'rejected' || rec === 'approved_with_reservations') {
+    if (y < 268) {
+      y += 2;
+      const actionColor: [number, number, number] = rec === 'rejected' ? [254, 242, 242] : [254, 252, 232];
+      const actionBorder: [number, number, number] = rec === 'rejected' ? [220, 38, 38] : [245, 158, 11];
+      const actionText = rec === 'rejected'
+        ? 'REJEITADO — O empreiteiro deve submeter material alternativo conforme especificacoes do projecto.'
+        : `APROVADO C/ RESERVAS — ${analysis.conditions?.length || 0} condicao(oes) a cumprir antes da aplicacao.`;
+
+      doc.setFillColor(...actionColor);
+      doc.roundedRect(ML, y, CW, 12, 2, 2, 'F');
+      doc.setDrawColor(...actionBorder);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(ML, y, CW, 12, 2, 2, 'S');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(...actionBorder);
+      const actionLines = doc.splitTextToSize(sanitize(actionText), CW - 8);
+      doc.text(actionLines[0], ML + 4, y + 5);
+      if (actionLines[1]) doc.text(actionLines[1], ML + 4, y + 9);
+    }
+  }
+
+  // Footer
+  doc.setFontSize(7);
+  doc.setTextColor(148, 163, 184);
+  doc.text(fiscalCompany ? `${fiscalCompany} — Fiscalizacao de Obras` : 'Obrify — Fiscalizacao de Obras', ML, FOOTER_Y);
+  doc.text('Pagina 1 de 1', PAGE_W - MR, FOOTER_Y, { align: 'right' });
+
+  const filename = `PAM_Resumo_${approval.material_category.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`;
+  doc.save(filename);
+}
