@@ -226,13 +226,15 @@ Para cada incompatibilidade encontrada, responde APENAS com um JSON array (sem m
       "y_percent": 50,
       "radius_percent": 5,
       "source_project": "nome-do-ficheiro.pdf"
-    }
+    },
+    "conflicting_projects": ["ficheiro-projecto-A.pdf", "ficheiro-projecto-B.pdf"]
   }
 ]
 
 Regras:
 - severity: "alta" (conflito estrutural, segurança), "media" (conflito funcional, pode causar problemas), "baixa" (inconsistência menor, documentação)
 - Sê específico nas localizações e referências aos documentos
+- conflicting_projects: OBRIGATÓRIO — indica os nomes EXACTOS dos 2 ficheiros de projecto que geram o conflito (copia os nomes dos ficheiros fornecidos acima)
 - Se encontrares cotas conflituantes, dimensões incompatíveis, sobreposições de redes com fundações, conflitos de infraestruturas com elementos estruturais — reporta tudo
 - Se os documentos forem plantas, analisa visualmente as sobreposições e conflitos geométricos
 - Se forem memórias descritivas, compara especificações, materiais, dimensões, cotas

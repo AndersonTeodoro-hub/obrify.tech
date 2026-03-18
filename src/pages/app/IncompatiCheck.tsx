@@ -61,6 +61,7 @@ interface AIFinding {
   location: string;
   recommendation: string;
   zone?: AIFindingZone;
+  conflicting_projects?: string[];
 }
 
 interface AnalysisResult {
@@ -83,7 +84,7 @@ export default function IncompatiCheck() {
   const [zoneImages, setZoneImages] = useState<Map<string, string>>(new Map());
   const [loadingZones, setLoadingZones] = useState<Set<string>>(new Set());
   const [exportingPdf, setExportingPdf] = useState(false);
-  const [showOverlay, setShowOverlay] = useState(false);
+  const [overlayFinding, setOverlayFinding] = useState<AIFinding | null>(null);
   const [clientLogo, setClientLogo] = useState<string | null>(() => localStorage.getItem('incompaticheck_client_logo'));
   const [fiscalLogo, setFiscalLogo] = useState<string | null>(() => localStorage.getItem('incompaticheck_fiscal_logo'));
 
@@ -725,19 +726,6 @@ export default function IncompatiCheck() {
                     )}
                   </div>
 
-                  {/* Overlay button */}
-                  {ic.projects.length >= 2 && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowOverlay(true)}
-                      className="w-full gap-2 border-dashed"
-                    >
-                      <Layers className="w-3.5 h-3.5" />
-                      Sobrepor Plantas
-                    </Button>
-                  )}
-
                   {/* Logo uploads for PDF */}
                   <div className="grid grid-cols-2 gap-2">
                     <div className="space-y-1">
@@ -890,22 +878,36 @@ export default function IncompatiCheck() {
                     {/* Zone annotation button */}
                     {finding.zone && (
                       <div className="space-y-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="gap-1.5 text-xs h-7"
-                          onClick={() => handleToggleZone(finding)}
-                          disabled={loadingZones.has(finding.id)}
-                        >
-                          {loadingZones.has(finding.id) ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : expandedZones.has(finding.id) ? (
-                            <EyeOff className="w-3 h-3" />
-                          ) : (
-                            <Eye className="w-3 h-3" />
+                        <div className="flex gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="gap-1.5 text-xs h-7"
+                            onClick={() => handleToggleZone(finding)}
+                            disabled={loadingZones.has(finding.id)}
+                          >
+                            {loadingZones.has(finding.id) ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : expandedZones.has(finding.id) ? (
+                              <EyeOff className="w-3 h-3" />
+                            ) : (
+                              <Eye className="w-3 h-3" />
+                            )}
+                            {expandedZones.has(finding.id) ? 'Ocultar zona' : 'Ver zona'}
+                          </Button>
+
+                          {(finding.severity === 'alta' || finding.severity === 'critical') && ic.projects.length >= 2 && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-1.5 text-xs h-7"
+                              onClick={() => setOverlayFinding(finding)}
+                            >
+                              <Layers className="w-3 h-3" />
+                              Sobrepor Plantas
+                            </Button>
                           )}
-                          {expandedZones.has(finding.id) ? 'Ocultar zona' : 'Ver zona na planta'}
-                        </Button>
+                        </div>
 
                         {expandedZones.has(finding.id) && zoneImages.has(finding.id) && (
                           <div className="space-y-1.5">
@@ -920,6 +922,19 @@ export default function IncompatiCheck() {
                           </div>
                         )}
                       </div>
+                    )}
+
+                    {/* Overlay button for findings without zone but with severity alta */}
+                    {!finding.zone && (finding.severity === 'alta' || finding.severity === 'critical') && ic.projects.length >= 2 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5 text-xs h-7"
+                        onClick={() => setOverlayFinding(finding)}
+                      >
+                        <Layers className="w-3 h-3" />
+                        Sobrepor Plantas
+                      </Button>
                     )}
                   </div>
                 ))}
@@ -960,10 +975,10 @@ export default function IncompatiCheck() {
       <ProjectPreviewModal project={previewProject} onClose={() => setPreviewProject(null)}
         onDelete={(id, path) => ic.deleteProject(id, path)} />
       <OverlayModal
-        isOpen={showOverlay}
-        onClose={() => setShowOverlay(false)}
+        isOpen={!!overlayFinding}
+        onClose={() => setOverlayFinding(null)}
+        finding={overlayFinding}
         projects={ic.projects}
-        findings={displayFindings}
       />
     </div>
   );
