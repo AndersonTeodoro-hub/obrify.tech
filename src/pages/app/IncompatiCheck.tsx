@@ -8,6 +8,7 @@ import ShareModal from './incompaticheck/ShareModal';
 import ObraRegistModal from './incompaticheck/ObraRegistModal';
 import ObraListModal from './incompaticheck/ObraListModal';
 import ProjectPreviewModal from './incompaticheck/ProjectPreviewModal';
+import OverlayModal from './incompaticheck/OverlayModal';
 import { useEngSilvaContext } from '@/hooks/use-eng-silva-context';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -34,6 +35,7 @@ import {
   CheckCircle2,
   MapPin,
   Lightbulb,
+  Layers,
 } from 'lucide-react';
 import { Eye, EyeOff } from 'lucide-react';
 import { format } from 'date-fns';
@@ -81,6 +83,7 @@ export default function IncompatiCheck() {
   const [zoneImages, setZoneImages] = useState<Map<string, string>>(new Map());
   const [loadingZones, setLoadingZones] = useState<Set<string>>(new Set());
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(false);
   const [clientLogo, setClientLogo] = useState<string | null>(() => localStorage.getItem('incompaticheck_client_logo'));
   const [fiscalLogo, setFiscalLogo] = useState<string | null>(() => localStorage.getItem('incompaticheck_fiscal_logo'));
 
@@ -722,6 +725,19 @@ export default function IncompatiCheck() {
                     )}
                   </div>
 
+                  {/* Overlay button */}
+                  {ic.projects.length >= 2 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowOverlay(true)}
+                      className="w-full gap-2 border-dashed"
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      Sobrepor Plantas
+                    </Button>
+                  )}
+
                   {/* Logo uploads for PDF */}
                   <div className="grid grid-cols-2 gap-2">
                     <div className="space-y-1">
@@ -943,6 +959,12 @@ export default function IncompatiCheck() {
         onGenerateReport={() => ic.generateReport(clientLogo, fiscalLogo)} />
       <ProjectPreviewModal project={previewProject} onClose={() => setPreviewProject(null)}
         onDelete={(id, path) => ic.deleteProject(id, path)} />
+      <OverlayModal
+        isOpen={showOverlay}
+        onClose={() => setShowOverlay(false)}
+        projects={ic.projects}
+        findings={displayFindings}
+      />
     </div>
   );
 }
