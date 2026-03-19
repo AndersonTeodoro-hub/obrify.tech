@@ -14,132 +14,128 @@ async function fetchProjectKnowledge(
   userId: string | null,
 ): Promise<string> {
   try {
-    // 1. Get ALL processed documents for this obra
-    let query = supabase
+    // 1. Map material category to relevant specialties (STRICT filter)
+    const categorySpecialties: Record<string, string[]> = {
+      "Aço (armaduras)": ["Estrutural", "Fundações"],
+      "Betão (classes)": ["Estrutural", "Fundações"],
+      "Cofragem": ["Estrutural"],
+      "Impermeabilização": ["Arquitectura"],
+      "Isolamento Térmico": ["Térmica", "Arquitectura"],
+      "Isolamento Acústico": ["Acústica", "Arquitectura"],
+      "Revestimentos": ["Arquitectura"],
+      "Tubagens e Acessórios": ["Águas e Esgotos", "Rede Enterrada"],
+      "Equipamentos AVAC": ["AVAC"],
+      "Equipamentos Eléctricos": ["Electricidade"],
+      "Caixilharia": ["Arquitectura"],
+      "Tintas e Acabamentos": ["Arquitectura"],
+    };
+
+    const relevantSpecialties = categorySpecialties[materialCategory] || [];
+
+    // 2. Fetch ONLY relevant documents: matching specialty + contract docs
+    // Query 1: Documents from relevant specialties
+    let specQuery = supabase
+      .from("eng_silva_project_knowledge")
+      .select("document_name, document_type, specialty, summary, key_elements")
+      .eq("obra_id", obraId)
+      .eq("processed", true);
+    if (userId) specQuery = specQuery.eq("user_id", userId);
+    if (relevantSpecialties.length > 0) {
+      specQuery = specQuery.in("specialty", relevantSpecialties);
+    }
+    const { data: specDocs } = await specQuery;
+
+    // Query 2: Always include contract-type documents (Caderno de Encargos, MQT, Contrato, Condições Técnicas)
+    const contractTypes = ["Caderno de Encargos", "Condições Técnicas", "Contrato", "Mapa de Quantidades (MQT)"];
+    let contractQuery = supabase
       .from("eng_silva_project_knowledge")
       .select("document_name, document_type, specialty, summary, key_elements")
       .eq("obra_id", obraId)
       .eq("processed", true)
-      .order("specialty");
+      .in("document_type", contractTypes);
+    if (userId) contractQuery = contractQuery.eq("user_id", userId);
+    const { data: contractDocs } = await contractQuery;
 
-    // Filter by user_id if available
-    if (userId) {
-      query = query.eq("user_id", userId);
+    // Merge and deduplicate
+    const allDocs: any[] = [];
+    const seen = new Set<string>();
+    for (const doc of [...(specDocs || []), ...(contractDocs || [])]) {
+      if (!seen.has(doc.document_name)) {
+        seen.add(doc.document_name);
+        allDocs.push(doc);
+      }
     }
 
-    const { data: allDocs, error } = await query;
-
-    if (error || !allDocs || allDocs.length === 0) {
-      console.log("PAM-KNOWLEDGE: No knowledge docs found for obra", obraId);
+    if (allDocs.length === 0) {
+      console.log("PAM-KNOWLEDGE: No relevant docs found for", materialCategory);
       return "";
     }
 
-    console.log(`PAM-KNOWLEDGE: Found ${allDocs.length} total knowledge docs for obra`);
+    console.log(`PAM-KNOWLEDGE: Pre-filtered to ${allDocs.length} docs (specialties: ${relevantSpecialties.join(",")})`);
 
-    // 2. Determine keywords from the material category for relevance scoring
+    // 3. Score by keyword relevance within the pre-filtered set
     const categoryKeywords: Record<string, string[]> = {
-      "Aço (armaduras)": ["aço", "aco", "armadura", "armaduras", "ferro", "ferros", "varão", "varões", "malha", "a500", "nr", "sd", "nervurado", "liso", "certificado", "ensaio", "tracção", "tracao", "dobragem", "soldabilidade", "carbono", "lote", "siderurgia", "conformidade", "ce", "dop", "desempenho", "en 10080", "npen", "estrutural"],
-      "Betão (classes)": ["betão", "betao", "cimento", "c25", "c30", "c35", "c40", "resistência", "consistência", "exposição", "en 206", "npen", "ensaio", "abrams", "compressão", "cura", "adjuvante", "central", "conformidade"],
-      "Cofragem": ["cofragem", "cofragens", "molde", "descofragem", "taipal", "contraplacado", "escoramento"],
-      "Impermeabilização": ["impermeabilização", "impermeabilizacao", "membrana", "tela", "betuminosa", "dreno", "drenagem", "geotêxtil"],
-      "Isolamento Térmico": ["térmico", "termico", "etics", "xps", "eps", "poliuretano", "lã mineral", "la mineral", "reh", "recs"],
-      "Isolamento Acústico": ["acústico", "acustico", "rrae", "ruído", "ruido", "lã", "la", "resiliente"],
-      "Revestimentos": ["revestimento", "cerâmico", "ceramico", "mosaico", "pedra", "mármore", "granito", "reboco", "argamassa", "acabamento"],
-      "Tubagens e Acessórios": ["tubagem", "tubo", "tubos", "ppr", "pvc", "pead", "acessório", "válvula", "ligação"],
-      "Equipamentos AVAC": ["avac", "climatização", "ventilação", "ar condicionado", "conduta", "chiller", "vrf", "split"],
-      "Equipamentos Eléctricos": ["eléctrico", "eletrico", "quadro", "cabo", "disjuntor", "tomada", "iluminação"],
-      "Caixilharia": ["caixilharia", "alumínio", "pvc", "janela", "porta", "vidro", "vidros", "correr", "batente"],
-      "Tintas e Acabamentos": ["tinta", "tintas", "verniz", "primário", "acabamento", "pintura", "latex", "esmalte"],
+      "Aço (armaduras)": ["aço", "aco", "armadura", "armaduras", "ferro", "varão", "malha", "a500", "nervurado", "certificado", "ensaio", "tracção", "tracao", "dobragem", "soldabilidade", "en 10080", "lote", "siderurgia", "conformidade", "dop"],
+      "Betão (classes)": ["betão", "betao", "cimento", "c25", "c30", "c35", "c40", "resistência", "en 206", "ensaio", "compressão", "conformidade"],
+      "Cofragem": ["cofragem", "cofragens", "molde", "descofragem", "escoramento"],
+      "Impermeabilização": ["impermeabilização", "membrana", "tela", "betuminosa", "geotêxtil"],
+      "Isolamento Térmico": ["térmico", "etics", "xps", "eps", "poliuretano", "lã mineral", "reh"],
+      "Isolamento Acústico": ["acústico", "rrae", "ruído", "lã", "resiliente"],
+      "Revestimentos": ["revestimento", "cerâmico", "mosaico", "pedra", "reboco", "argamassa"],
+      "Tubagens e Acessórios": ["tubagem", "tubo", "ppr", "pvc", "pead", "válvula"],
+      "Equipamentos AVAC": ["avac", "climatização", "ventilação", "conduta", "chiller", "vrf"],
+      "Equipamentos Eléctricos": ["eléctrico", "quadro", "cabo", "disjuntor", "iluminação"],
+      "Caixilharia": ["caixilharia", "alumínio", "janela", "porta", "vidro"],
+      "Tintas e Acabamentos": ["tinta", "verniz", "primário", "pintura", "esmalte"],
     };
+    const keywords = categoryKeywords[materialCategory] || [];
 
-    const keywords = categoryKeywords[materialCategory] || materialCategory.toLowerCase().split(/[\s(),]+/).filter(Boolean);
-
-    // 3. Score and rank documents by relevance
     const scored = allDocs.map((doc: any) => {
-      let score = 0;
-      const summaryLower = (doc.summary || "").toLowerCase();
-      const elementsStr = JSON.stringify(doc.key_elements || []).toLowerCase();
-      const docNameLower = (doc.document_name || "").toLowerCase();
-      const combined = summaryLower + " " + elementsStr + " " + docNameLower;
+      let score = 1; // All pre-filtered docs get at least 1
+      const combined = ((doc.summary || "") + " " + (doc.document_name || "")).toLowerCase();
 
-      // High priority: contract-related docs (Caderno de Encargos, Contrato, MQT, Condições Técnicas)
-      const highPriorityTypes = ["Caderno de Encargos", "Condições Técnicas", "Contrato", "Mapa de Quantidades (MQT)"];
-      if (highPriorityTypes.includes(doc.document_type)) {
-        score += 10;
-      }
+      // Contract docs always high priority
+      if (contractTypes.includes(doc.document_type)) score += 10;
 
       // Keyword matching
       keywords.forEach((kw: string) => {
         if (combined.includes(kw)) score += 3;
-        if (docNameLower.includes(kw)) score += 5; // Extra weight for filename match
       });
-
-      // Specialty match
-      if (doc.specialty === "Estrutural" && (materialCategory.includes("Aço") || materialCategory.includes("Betão") || materialCategory.includes("Cofragem"))) {
-        score += 8;
-      }
 
       return { ...doc, _score: score };
     });
 
-    // Sort by score, take top documents
     scored.sort((a: any, b: any) => b._score - a._score);
 
-    // Take all high-relevance docs (score > 0) up to 15
-    const relevant = scored.filter((d: any) => d._score > 0).slice(0, 15);
+    // Take top 8 documents MAX — keeps context manageable
+    const finalDocs = scored.slice(0, 8);
 
-    // Also include any contract-type docs even if score is 0 (always useful)
-    const contractDocs = scored.filter((d: any) => 
-      d._score === 0 && ["Caderno de Encargos", "Condições Técnicas", "Contrato", "Mapa de Quantidades (MQT)"].includes(d.document_type)
-    );
-    const finalDocs = [...relevant];
-    for (const cd of contractDocs) {
-      if (!finalDocs.find((d: any) => d.document_name === cd.document_name)) {
-        finalDocs.push(cd);
-      }
-    }
+    console.log(`PAM-KNOWLEDGE: Using ${finalDocs.length} docs: ${finalDocs.map((d: any) => `${d.document_name}(${d._score})`).join(", ")}`);
 
-    if (finalDocs.length === 0) {
-      console.log("PAM-KNOWLEDGE: No relevant docs scored for category", materialCategory);
-      return "";
-    }
+    // 4. Build context — compact summaries (max 400 words each)
+    let context = `\n\nBASE DE CONHECIMENTO DO PROJECTO (${finalDocs.length} documentos relevantes):`;
 
-    console.log(`PAM-KNOWLEDGE: Using ${finalDocs.length} relevant docs: ${finalDocs.map((d: any) => `${d.document_name} (score:${d._score})`).join(", ")}`);
-
-    // 4. Build context string
-    let context = `\n\nBASE DE CONHECIMENTO DO PROJECTO (${finalDocs.length} documentos relevantes da obra):`;
-
-    const bySpecialty: Record<string, any[]> = {};
     finalDocs.forEach((doc: any) => {
-      const key = doc.specialty || doc.document_type || "Geral";
-      if (!bySpecialty[key]) bySpecialty[key] = [];
-      bySpecialty[key].push(doc);
-    });
+      const summary = (doc.summary || "").split(" ").slice(0, 400).join(" ");
+      context += `\n\n--- ${doc.document_name} [${doc.document_type || doc.specialty || "—"}] ---`;
+      context += `\n${summary}`;
 
-    Object.entries(bySpecialty).forEach(([specialty, specDocs]) => {
-      context += `\n\n--- ${specialty.toUpperCase()} ---`;
-      specDocs.forEach((doc: any) => {
-        const summary = (doc.summary || "").split(" ").slice(0, 800).join(" ");
-        context += `\n\n📄 ${doc.document_name} [${doc.document_type || "—"}]:`;
-        context += `\n${summary}`;
-
-        if (doc.key_elements && doc.key_elements.length > 0) {
-          const validElements = doc.key_elements
-            .filter((e: any) => e && e.type && e.id)
-            .slice(0, 20);
-          if (validElements.length > 0) {
-            context += `\nElementos-chave: ${validElements.map((e: any) => `${e.type}:${e.id}${e.details ? ` (${e.details})` : ""}`).join("; ")}`;
-          }
+      if (doc.key_elements && doc.key_elements.length > 0) {
+        const validElements = doc.key_elements
+          .filter((e: any) => e && e.type && e.id)
+          .slice(0, 10);
+        if (validElements.length > 0) {
+          context += `\nElementos: ${validElements.map((e: any) => `${e.type}:${e.id}${e.details ? ` (${e.details})` : ""}`).join("; ")}`;
         }
-      });
+      }
     });
 
-    // Cap at 15000 chars to leave room for PAM + prompt
-    if (context.length > 15000) {
-      context = context.substring(0, 15000) + "\n[... informação adicional disponível na Base de Conhecimento]";
+    // Hard cap at 8000 chars
+    if (context.length > 8000) {
+      context = context.substring(0, 8000) + "\n[...]";
     }
 
-    context += `\n\nUSA ESTA INFORMAÇÃO para cruzar com o PAM. Quando referenciares dados de um documento, menciona o seu nome. Se precisares de informação que não está nos documentos acima, indica que falta e sugere que o fiscal carregue o documento relevante na Base de Conhecimento do Projecto.`;
+    context += `\n\nCruza esta informação com o PAM. Quando referires dados de um documento, menciona o nome.`;
 
     return context;
   } catch (err) {
