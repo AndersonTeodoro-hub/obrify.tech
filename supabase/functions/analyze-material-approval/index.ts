@@ -194,7 +194,14 @@ Responde APENAS com JSON (sem markdown, sem backticks):
   "norms_referenced": ["EN 10080", "LNEC E 460-2017"]
 }
 
-IMPORTANTE: Cada compliance_check deve corresponder a um fornecedor/certificado OU a um aspecto técnico específico. Não uses verificações genéricas como "Conformidade normativa" — sê concreto.`;
+IMPORTANTE: Cada compliance_check deve corresponder a um fornecedor/certificado OU a um aspecto técnico específico. Não uses verificações genéricas como "Conformidade normativa" — sê concreto.
+
+REGRA CRÍTICA DE FIABILIDADE:
+- NUNCA inventes nomes de fornecedores, números de certificados PSG, números de DC, ou datas. Usa APENAS dados que encontras nos documentos da Base de Conhecimento.
+- O nome do ficheiro na Base de Conhecimento contém a informação real (ex: "PSG 001-2022 e DC 380 SN Maia.pdf" → fornecedor é SN Maia, certificado é PSG-001/2022, DC é 380).
+- Em cada compliance_check, no campo "detail", inclui SEMPRE a referência ao documento fonte entre parêntesis no final, ex: "(Fonte: PSG 001-2022 e DC 380 SN Maia.pdf)"
+- Se não encontras informação sobre um fornecedor ou certificado na Base de Conhecimento, diz explicitamente "Sem documentação na Base de Conhecimento" — NUNCA inventes dados.
+- Na justificação, lista os documentos consultados com os nomes exactos dos ficheiros.`;
 }
 
 serve(async (req) => {
@@ -371,6 +378,8 @@ COMO TRABALHAS:
 - Escreves a justificação como se fosse um email ao empreiteiro — profissional mas humano
 
 CONTEXTO: O fiscal carrega os certificados na Base de Conhecimento separadamente do PAM porque são muitos documentos. Quando o PAM refere "certificados em anexo", esses certificados estão na Base de Conhecimento abaixo. Trata-os como se fossem anexos ao PAM.
+
+FIABILIDADE: Os nomes dos ficheiros na Base de Conhecimento são a tua referência principal. Exemplo: "PSG 001-2022 e DC 380 SN Maia.pdf" significa que o fornecedor é SN Maia, o certificado PSG é 001/2022 e o DC LNEC é 380. USA estes dados exactos — nunca inventes números ou nomes. Quando citas um certificado, indica o nome do ficheiro como fonte.
 
 Responde em português europeu.`;
 
