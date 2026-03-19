@@ -369,10 +369,25 @@ ${getAnalysisPrompt(material_category)}`,
 
     let analysis;
     try {
-      const cleaned = replyText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      // Robust JSON extraction: handle ```json, ```, text before/after JSON, etc.
+      let cleaned = replyText;
+      
+      // Remove markdown code fences
+      cleaned = cleaned.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
+      
+      // Extract JSON object: find first { and last }
+      const firstBrace = cleaned.indexOf('{');
+      const lastBrace = cleaned.lastIndexOf('}');
+      
+      if (firstBrace !== -1 && lastBrace > firstBrace) {
+        cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+      }
+      
+      cleaned = cleaned.trim();
       analysis = JSON.parse(cleaned);
-    } catch {
-      console.error("PAM: Parse error:", replyText.substring(0, 200));
+      console.log("PAM: JSON parsed successfully, recommendation:", analysis.recommendation);
+    } catch (parseErr) {
+      console.error("PAM: Parse error:", replyText.substring(0, 300));
       analysis = {
         recommendation: "approved_with_reservations",
         justification: "Não foi possível processar a análise automaticamente. Revisão manual necessária.",
