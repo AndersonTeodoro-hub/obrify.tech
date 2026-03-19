@@ -323,22 +323,29 @@ serve(async (req) => {
       type: "text",
       text: `${contextNote}
 
-Analisa este PAM considerando:
-1. O pedido de aprovação do empreiteiro (documento PDF acima)
-2. O MQT / Mapa de Quantidades (se fornecido como PDF)
-3. O Caderno de Encargos (se fornecido como PDF)
-4. O Contrato da Obra (se fornecido como PDF)
-5. Os certificados e laudos fornecidos (se existirem como PDF)
-6. Os documentos do fabricante (se existirem como PDF)
-7. A BASE DE CONHECIMENTO DO PROJECTO — resumos de certificados, fichas técnicas, relatórios de ensaio, cadernos de encargos e outros documentos já processados pelo Eng. Silva (incluídos no system prompt)
+Analisa este PAM considerando TODAS as fontes de informação disponíveis:
 
-IMPORTANTE: A Base de Conhecimento pode conter resumos de dezenas de certificados e relatórios de ensaio que não foram enviados como PDF nesta análise. Usa essa informação para validar o material proposto no PAM.
+1. O pedido de aprovação do empreiteiro (documento PDF acima)
+2. Documentos PDF anexados directamente (MQT, Caderno de Encargos, Contrato, se existirem)
+3. A BASE DE CONHECIMENTO DO PROJECTO (incluída no system prompt) — contém resumos de certificados PSG, documentos de classificação LNEC (DC), fichas técnicas, cadernos de encargos e outros documentos já processados
+
+REGRA FUNDAMENTAL: Quando o PAM do empreiteiro refere "certificados em anexo" ou "conforme certificados", os certificados podem NÃO estar no PDF do PAM mas SIM na Base de Conhecimento do Projecto. O fiscal carregou os certificados separadamente porque são demasiados para enviar num único ficheiro. DEVES cruzar o PAM com os certificados da Base de Conhecimento como se fossem anexos ao PAM.
+
+COMO AVALIAR:
+- Se a Base de Conhecimento contém certificados PSG/Certif válidos para o tipo de aço proposto (ex: A500NR SD) de fabricantes identificados → os certificados EXISTEM, não são "ausentes"
+- Se existem Documentos de Classificação LNEC (DC) para os fabricantes → a conformidade normativa está documentada
+- O empreiteiro pode indicar "Vários" ou "Diversos" como fabricante porque vai usar aço de múltiplos fornecedores certificados — isso é normal em obras grandes. Verifica se TODOS os fabricantes nos certificados da Base de Conhecimento têm certificação válida
+- Avalia a conformidade real do material, não apenas a qualidade documental do formulário PAM
 
 ${getAnalysisPrompt(material_category)}`,
     });
 
     // 8. Build system prompt with knowledge context
-    let systemPrompt = `És o Eng. Silva, engenheiro civil sénior com 30+ anos de experiência em fiscalização de obras em Portugal. Estás a analisar um Pedido de Aprovação de Materiais (PAM) submetido por um empreiteiro. A tua análise deve ser rigorosa, técnica e baseada nas normas portuguesas e europeias. Cruza a informação do PAM com TODOS os documentos e conhecimento disponíveis. Verifica se o material proposto cumpre as especificações do projecto e as normas aplicáveis. Responde em português europeu.`;
+    let systemPrompt = `És o Eng. Silva, engenheiro civil sénior com 30+ anos de experiência em fiscalização de obras em Portugal. Estás a analisar um Pedido de Aprovação de Materiais (PAM) submetido por um empreiteiro.
+
+CONTEXTO IMPORTANTE: O fiscal desta obra carrega os certificados de conformidade dos materiais na Base de Conhecimento do Projecto separadamente do PAM, porque o volume de documentos é grande demais para enviar tudo junto. Quando analisas um PAM, DEVES consultar a Base de Conhecimento (incluída abaixo) para verificar se existem certificados válidos para o material proposto. Os certificados na Base de Conhecimento têm o MESMO valor que se tivessem sido anexados directamente ao PAM.
+
+A tua análise deve ser rigorosa, técnica e baseada nas normas portuguesas e europeias. Cruza a informação do PAM com TODOS os certificados e documentos disponíveis na Base de Conhecimento. Responde em português europeu.`;
 
     if (hasKnowledge) {
       systemPrompt += knowledgeContext;
