@@ -44,3 +44,6 @@ verify_jwt = false
 
 [functions.incompaticheck-analyze-proposal]
 verify_jwt = false
+
+[functions.analyze-material-approval]
+verify_jwt = false
