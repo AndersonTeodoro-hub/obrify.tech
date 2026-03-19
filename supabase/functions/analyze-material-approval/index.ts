@@ -195,7 +195,7 @@ Responde APENAS com JSON (sem markdown, sem backticks):
 }
 
 IMPORTANTE: Cada compliance_check deve corresponder a um fornecedor/certificado OU a um aspecto técnico específico. Não uses verificações genéricas como "Conformidade normativa" — sê concreto.`;
-}`;
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
