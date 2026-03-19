@@ -103,8 +103,8 @@ async function fetchProjectKnowledge(
     const relevant = scored.filter((d: any) => d._score > 0);
     relevant.sort((a: any, b: any) => b._score - a._score);
 
-    // Take top 10 documents MAX
-    const finalDocs = relevant.slice(0, 10);
+    // Take top 20 documents — must include ALL certificates
+    const finalDocs = relevant.slice(0, 20);
 
     if (finalDocs.length === 0) {
       console.log("PAM-KNOWLEDGE: No relevant docs found for", materialCategory);
@@ -113,27 +113,27 @@ async function fetchProjectKnowledge(
 
     console.log(`PAM-KNOWLEDGE: Using ${finalDocs.length}/${allDocs.length} docs: ${finalDocs.map((d: any) => `${d.document_name}(s:${d._score},h:${d._hits})`).join(", ")}`);
 
-    // Build context — compact summaries (max 400 words each)
+    // Build context — compact summaries (max 200 words each to fit more docs)
     let context = `\n\nBASE DE CONHECIMENTO DO PROJECTO (${finalDocs.length} documentos relevantes):`;
 
     finalDocs.forEach((doc: any) => {
-      const summary = (doc.summary || "").split(" ").slice(0, 400).join(" ");
+      const summary = (doc.summary || "").split(" ").slice(0, 200).join(" ");
       context += `\n\n--- ${doc.document_name} [${doc.document_type || doc.specialty || "—"}] ---`;
       context += `\n${summary}`;
 
       if (doc.key_elements && doc.key_elements.length > 0) {
         const validElements = doc.key_elements
           .filter((e: any) => e && e.type && e.id)
-          .slice(0, 10);
+          .slice(0, 5);
         if (validElements.length > 0) {
           context += `\nElementos: ${validElements.map((e: any) => `${e.type}:${e.id}${e.details ? ` (${e.details})` : ""}`).join("; ")}`;
         }
       }
     });
 
-    // Hard cap at 10000 chars
-    if (context.length > 10000) {
-      context = context.substring(0, 10000) + "\n[...]";
+    // Hard cap at 15000 chars — enough for 12-15 certificates with summaries
+    if (context.length > 15000) {
+      context = context.substring(0, 15000) + "\n[...]";
     }
 
     context += `\n\nCruza esta informação com o PAM. Quando referires dados de um documento, menciona o nome. Se encontrares certificados ou ensaios nos documentos acima, usa-os para validar o material proposto.`;
