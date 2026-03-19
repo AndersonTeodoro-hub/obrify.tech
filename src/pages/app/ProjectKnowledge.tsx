@@ -31,7 +31,8 @@ const PROJECT_SPECIALTIES = [
 
 const DOCUMENT_TYPES = [
   'Contrato', 'Caderno de Encargos', 'Condições Técnicas', 'Mapa de Quantidades (MQT)',
-  'Memória Descritiva', 'Acta de Reunião', 'Relatório Fotográfico', 'Pormenores Construtivos',
+  'Memória Descritiva', 'Certificados e Ensaios', 'Fichas Técnicas', 'Declarações de Desempenho (DoP)',
+  'Acta de Reunião', 'Relatório Fotográfico', 'Pormenores Construtivos',
   'Mapa de Acabamentos', 'Plano de Segurança', 'Plano de Qualidade', 'Correspondência', 'Outros',
 ];
 

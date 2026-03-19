@@ -14,71 +14,30 @@ async function fetchProjectKnowledge(
   userId: string | null,
 ): Promise<string> {
   try {
-    // 1. Map material category to relevant specialties (STRICT filter)
-    const categorySpecialties: Record<string, string[]> = {
-      "Aço (armaduras)": ["Estrutural", "Fundações"],
-      "Betão (classes)": ["Estrutural", "Fundações"],
-      "Cofragem": ["Estrutural"],
-      "Impermeabilização": ["Arquitectura"],
-      "Isolamento Térmico": ["Térmica", "Arquitectura"],
-      "Isolamento Acústico": ["Acústica", "Arquitectura"],
-      "Revestimentos": ["Arquitectura"],
-      "Tubagens e Acessórios": ["Águas e Esgotos", "Rede Enterrada"],
-      "Equipamentos AVAC": ["AVAC"],
-      "Equipamentos Eléctricos": ["Electricidade"],
-      "Caixilharia": ["Arquitectura"],
-      "Tintas e Acabamentos": ["Arquitectura"],
-    };
-
-    const relevantSpecialties = categorySpecialties[materialCategory] || [];
-
-    // 2. Fetch ONLY relevant documents: matching specialty + contract docs
-    // Query 1: Documents from relevant specialties
-    let specQuery = supabase
+    // Strategy: fetch ALL docs for the obra, then score by relevance to this material category.
+    // This ensures we find certificates classified under any type (e.g. "Pormenores Construtivos").
+    let query = supabase
       .from("eng_silva_project_knowledge")
       .select("document_name, document_type, specialty, summary, key_elements")
       .eq("obra_id", obraId)
       .eq("processed", true);
-    if (userId) specQuery = specQuery.eq("user_id", userId);
-    if (relevantSpecialties.length > 0) {
-      specQuery = specQuery.in("specialty", relevantSpecialties);
-    }
-    const { data: specDocs } = await specQuery;
+    if (userId) query = query.eq("user_id", userId);
 
-    // Query 2: Always include contract-type documents (Caderno de Encargos, MQT, Contrato, Condições Técnicas)
-    const contractTypes = ["Caderno de Encargos", "Condições Técnicas", "Contrato", "Mapa de Quantidades (MQT)"];
-    let contractQuery = supabase
-      .from("eng_silva_project_knowledge")
-      .select("document_name, document_type, specialty, summary, key_elements")
-      .eq("obra_id", obraId)
-      .eq("processed", true)
-      .in("document_type", contractTypes);
-    if (userId) contractQuery = contractQuery.eq("user_id", userId);
-    const { data: contractDocs } = await contractQuery;
+    const { data: allDocs, error } = await query;
 
-    // Merge and deduplicate
-    const allDocs: any[] = [];
-    const seen = new Set<string>();
-    for (const doc of [...(specDocs || []), ...(contractDocs || [])]) {
-      if (!seen.has(doc.document_name)) {
-        seen.add(doc.document_name);
-        allDocs.push(doc);
-      }
-    }
-
-    if (allDocs.length === 0) {
-      console.log("PAM-KNOWLEDGE: No relevant docs found for", materialCategory);
+    if (error || !allDocs || allDocs.length === 0) {
+      console.log("PAM-KNOWLEDGE: No knowledge docs found for obra", obraId);
       return "";
     }
 
-    console.log(`PAM-KNOWLEDGE: Pre-filtered to ${allDocs.length} docs (specialties: ${relevantSpecialties.join(",")})`);
+    console.log(`PAM-KNOWLEDGE: Total docs in obra: ${allDocs.length}`);
 
-    // 3. Score by keyword relevance within the pre-filtered set
+    // Keywords per material category — used to score content relevance
     const categoryKeywords: Record<string, string[]> = {
-      "Aço (armaduras)": ["aço", "aco", "armadura", "armaduras", "ferro", "varão", "malha", "a500", "nervurado", "certificado", "ensaio", "tracção", "tracao", "dobragem", "soldabilidade", "en 10080", "lote", "siderurgia", "conformidade", "dop"],
-      "Betão (classes)": ["betão", "betao", "cimento", "c25", "c30", "c35", "c40", "resistência", "en 206", "ensaio", "compressão", "conformidade"],
-      "Cofragem": ["cofragem", "cofragens", "molde", "descofragem", "escoramento"],
-      "Impermeabilização": ["impermeabilização", "membrana", "tela", "betuminosa", "geotêxtil"],
+      "Aço (armaduras)": ["aço", "aco", "armadura", "armaduras", "ferro", "varão", "malha", "a500", "nervurado", "certificado", "ensaio", "tracção", "tracao", "dobragem", "soldabilidade", "en 10080", "lote", "siderurgia", "conformidade", "dop", "declaração de desempenho", "ficha técnica", "resistência à tracção", "megasteel", "chaveriat"],
+      "Betão (classes)": ["betão", "betao", "cimento", "c25", "c30", "c35", "c40", "resistência", "en 206", "ensaio", "compressão", "conformidade", "central", "abrams", "slump"],
+      "Cofragem": ["cofragem", "cofragens", "molde", "descofragem", "escoramento", "contraplacado"],
+      "Impermeabilização": ["impermeabilização", "membrana", "tela", "betuminosa", "geotêxtil", "dreno"],
       "Isolamento Térmico": ["térmico", "etics", "xps", "eps", "poliuretano", "lã mineral", "reh"],
       "Isolamento Acústico": ["acústico", "rrae", "ruído", "lã", "resiliente"],
       "Revestimentos": ["revestimento", "cerâmico", "mosaico", "pedra", "reboco", "argamassa"],
@@ -88,31 +47,73 @@ async function fetchProjectKnowledge(
       "Caixilharia": ["caixilharia", "alumínio", "janela", "porta", "vidro"],
       "Tintas e Acabamentos": ["tinta", "verniz", "primário", "pintura", "esmalte"],
     };
-    const keywords = categoryKeywords[materialCategory] || [];
+    const keywords = categoryKeywords[materialCategory] || materialCategory.toLowerCase().split(/[\s(),]+/).filter(Boolean);
 
+    // Relevant specialties for bonus scoring
+    const categorySpecialties: Record<string, string[]> = {
+      "Aço (armaduras)": ["Estrutural", "Fundações"],
+      "Betão (classes)": ["Estrutural", "Fundações"],
+      "Cofragem": ["Estrutural"],
+      "Impermeabilização": ["Arquitectura"],
+      "Isolamento Térmico": ["Térmica", "Arquitectura"],
+      "Isolamento Acústico": ["Acústica", "Arquitectura"],
+      "Tubagens e Acessórios": ["Águas e Esgotos", "Rede Enterrada"],
+      "Equipamentos AVAC": ["AVAC"],
+      "Equipamentos Eléctricos": ["Electricidade"],
+    };
+    const relevantSpecialties = new Set(categorySpecialties[materialCategory] || []);
+
+    // Contract/reference doc types (always relevant)
+    const contractTypes = new Set(["Caderno de Encargos", "Condições Técnicas", "Contrato", "Mapa de Quantidades (MQT)"]);
+    // Certificate doc types (always relevant if keyword matches)
+    const certTypes = new Set(["Certificados e Ensaios", "Fichas Técnicas", "Declarações de Desempenho (DoP)"]);
+
+    // Score every document
     const scored = allDocs.map((doc: any) => {
-      let score = 1; // All pre-filtered docs get at least 1
-      const combined = ((doc.summary || "") + " " + (doc.document_name || "")).toLowerCase();
+      let score = 0;
+      const docNameLower = (doc.document_name || "").toLowerCase();
+      const summaryLower = (doc.summary || "").toLowerCase();
+      const combined = docNameLower + " " + summaryLower;
 
-      // Contract docs always high priority
-      if (contractTypes.includes(doc.document_type)) score += 10;
+      // Contract docs: always include
+      if (contractTypes.has(doc.document_type)) score += 15;
 
-      // Keyword matching
+      // Certificate doc types: bonus
+      if (certTypes.has(doc.document_type)) score += 5;
+
+      // Matching specialty: bonus
+      if (relevantSpecialties.has(doc.specialty)) score += 5;
+
+      // KEYWORD MATCHING IN CONTENT — this is the key fix!
+      // Finds certificates even if classified as "Pormenores Construtivos"
+      let keywordHits = 0;
       keywords.forEach((kw: string) => {
-        if (combined.includes(kw)) score += 3;
+        if (combined.includes(kw)) {
+          keywordHits++;
+          score += 3;
+        }
+        // Extra weight for filename match
+        if (docNameLower.includes(kw)) score += 2;
       });
 
-      return { ...doc, _score: score };
+      return { ...doc, _score: score, _hits: keywordHits };
     });
 
-    scored.sort((a: any, b: any) => b._score - a._score);
+    // Filter: keep only docs with score > 0 (at least some relevance)
+    const relevant = scored.filter((d: any) => d._score > 0);
+    relevant.sort((a: any, b: any) => b._score - a._score);
 
-    // Take top 8 documents MAX — keeps context manageable
-    const finalDocs = scored.slice(0, 8);
+    // Take top 10 documents MAX
+    const finalDocs = relevant.slice(0, 10);
 
-    console.log(`PAM-KNOWLEDGE: Using ${finalDocs.length} docs: ${finalDocs.map((d: any) => `${d.document_name}(${d._score})`).join(", ")}`);
+    if (finalDocs.length === 0) {
+      console.log("PAM-KNOWLEDGE: No relevant docs found for", materialCategory);
+      return "";
+    }
 
-    // 4. Build context — compact summaries (max 400 words each)
+    console.log(`PAM-KNOWLEDGE: Using ${finalDocs.length}/${allDocs.length} docs: ${finalDocs.map((d: any) => `${d.document_name}(s:${d._score},h:${d._hits})`).join(", ")}`);
+
+    // Build context — compact summaries (max 400 words each)
     let context = `\n\nBASE DE CONHECIMENTO DO PROJECTO (${finalDocs.length} documentos relevantes):`;
 
     finalDocs.forEach((doc: any) => {
@@ -130,12 +131,12 @@ async function fetchProjectKnowledge(
       }
     });
 
-    // Hard cap at 8000 chars
-    if (context.length > 8000) {
-      context = context.substring(0, 8000) + "\n[...]";
+    // Hard cap at 10000 chars
+    if (context.length > 10000) {
+      context = context.substring(0, 10000) + "\n[...]";
     }
 
-    context += `\n\nCruza esta informação com o PAM. Quando referires dados de um documento, menciona o nome.`;
+    context += `\n\nCruza esta informação com o PAM. Quando referires dados de um documento, menciona o nome. Se encontrares certificados ou ensaios nos documentos acima, usa-os para validar o material proposto.`;
 
     return context;
   } catch (err) {
