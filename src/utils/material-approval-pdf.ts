@@ -657,11 +657,34 @@ export function generateMaterialApprovalExecutive(
     doc.text(`Confianca: ${analysis.confidence}%`, ML + verdictW + 8, y + 7);
   }
 
-  // Material info box
+  // Material info box — calculate dynamic height
   y += 18;
   const boxStartY = y;
+
+  // Pre-calculate text heights for both columns
+  const leftLines: string[] = [];
+  if (analysis.material_proposed?.name) leftLines.push(sanitize(analysis.material_proposed.name));
+  if (analysis.material_proposed?.manufacturer) leftLines.push(sanitize(`Fabricante: ${analysis.material_proposed.manufacturer}`));
+  if (analysis.material_proposed?.model) leftLines.push(sanitize(`Modelo: ${analysis.material_proposed.model}`));
+  // Wrap long lines
+  const wrappedLeftLines: string[] = [];
+  for (const line of leftLines) {
+    const split = doc.splitTextToSize(line, CW / 2 - 12);
+    wrappedLeftLines.push(...split);
+  }
+
+  const rightSpecLines: string[] = [];
+  if (analysis.material_specified?.description) {
+    const split = doc.splitTextToSize(sanitize(analysis.material_specified.description), CW / 2 - 10);
+    rightSpecLines.push(...split.slice(0, 6));
+  }
+
+  const leftHeight = 8 + wrappedLeftLines.length * 4 + 4;
+  const rightHeight = 8 + rightSpecLines.length * 4 + 4;
+  const boxH = Math.max(leftHeight, rightHeight, 24);
+
   doc.setFillColor(248, 250, 252);
-  doc.roundedRect(ML, y, CW, 30, 2, 2, 'F');
+  doc.roundedRect(ML, y, CW, boxH, 2, 2, 'F');
 
   y += 6;
   doc.setFont('helvetica', 'bold');
@@ -672,16 +695,9 @@ export function generateMaterialApprovalExecutive(
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
   y += 5;
-  if (analysis.material_proposed?.name) {
-    doc.text(sanitize(analysis.material_proposed.name), ML + 5, y);
+  for (const line of wrappedLeftLines) {
+    doc.text(line, ML + 5, y);
     y += 4;
-  }
-  if (analysis.material_proposed?.manufacturer) {
-    doc.text(sanitize(`Fabricante: ${analysis.material_proposed.manufacturer}`), ML + 5, y);
-    y += 4;
-  }
-  if (analysis.material_proposed?.model) {
-    doc.text(sanitize(`Modelo: ${analysis.material_proposed.model}`), ML + 5, y);
   }
 
   // Right side: Material specified
@@ -694,15 +710,14 @@ export function generateMaterialApprovalExecutive(
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
   if (analysis.material_specified?.description) {
-    const specLines = doc.splitTextToSize(sanitize(analysis.material_specified.description), CW / 2 - 10);
-    for (const line of specLines.slice(0, 4)) {
+    for (const line of rightSpecLines) {
       doc.text(line, rightX, ry);
       ry += 4;
     }
   }
 
   // Compliance checks table
-  y = boxStartY + 34;
+  y = boxStartY + boxH + 4;
   if (analysis.compliance_checks?.length) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
