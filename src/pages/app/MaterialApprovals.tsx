@@ -12,7 +12,7 @@ import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import {
-  FileCheck, Plus, Upload, ChevronDown, ChevronUp, Trash2, CheckCircle2, AlertTriangle, XCircle, Clock, Loader2, Building2, ArrowLeft, FileText, Award, Factory, X, Download, ScrollText, FileSignature, ImageIcon, BookOpen,
+  FileCheck, Plus, Upload, ChevronDown, ChevronUp, Trash2, CheckCircle2, AlertTriangle, XCircle, Clock, Loader2, Building2, ArrowLeft, FileText, Award, Factory, X, Download, ScrollText, FileSignature, ImageIcon, BookOpen, Brain,
 } from 'lucide-react';
 import { generateMaterialApprovalPDF, generateMaterialApprovalExecutive } from '@/utils/material-approval-pdf';
 
@@ -61,6 +61,9 @@ export default function MaterialApprovals() {
   // Expanded card
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  // Knowledge base count
+  const [knowledgeCount, setKnowledgeCount] = useState(0);
+
   // Decision
   const [decisionNotes, setDecisionNotes] = useState('');
   const [pendingDecision, setPendingDecision] = useState<{ id: string; decision: string } | null>(null);
@@ -100,6 +103,18 @@ export default function MaterialApprovals() {
   }, [user, selectedObra]);
 
   useEffect(() => { loadApprovals(); }, [loadApprovals]);
+
+  // Load knowledge count for selected obra
+  useEffect(() => {
+    if (!user || !selectedObra) { setKnowledgeCount(0); return; }
+    supabase
+      .from('eng_silva_project_knowledge')
+      .select('id', { count: 'exact', head: true })
+      .eq('obra_id', selectedObra.id)
+      .eq('user_id', user.id)
+      .eq('processed', true)
+      .then(({ count }) => { setKnowledgeCount(count || 0); });
+  }, [user, selectedObra]);
 
   // Select obra + save to Silva memory
   const selectObra = async (obra: Obra) => {
@@ -276,6 +291,7 @@ export default function MaterialApprovals() {
           manufacturer_docs_base64: mfgDocsBase64,
           material_category: approval.material_category,
           obra_id: approval.obra_id,
+          user_id: user?.id,
         },
       });
 
@@ -548,6 +564,31 @@ export default function MaterialApprovals() {
           <Plus className="w-4 h-4" /> Novo Pedido
         </Button>
       </div>
+
+      {/* Knowledge base integration banner */}
+      {knowledgeCount > 0 ? (
+        <div className="flex items-center gap-3 bg-primary/10 border border-primary/20 rounded-lg px-4 py-3">
+          <Brain className="w-5 h-5 text-primary shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground">Eng. Silva tem {knowledgeCount} documento{knowledgeCount !== 1 ? 's' : ''} na Base de Conhecimento</p>
+            <p className="text-xs text-muted-foreground">Certificados, fichas técnicas e relatórios serão usados automaticamente na análise de cada PAM</p>
+          </div>
+          <Badge variant="outline" className="shrink-0 gap-1 text-primary border-primary/30">
+            <CheckCircle2 className="w-3 h-3" /> Activo
+          </Badge>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-3">
+          <Brain className="w-5 h-5 text-amber-500 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground">Base de Conhecimento vazia</p>
+            <p className="text-xs text-muted-foreground">Carregue certificados e documentos no Conhecimento do Projecto para que o Eng. Silva os use na análise dos PAMs</p>
+          </div>
+          <Badge variant="outline" className="shrink-0 gap-1 text-amber-500 border-amber-500/30">
+            <AlertTriangle className="w-3 h-3" /> Sem dados
+          </Badge>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">

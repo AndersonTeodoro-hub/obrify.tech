@@ -6,6 +6,148 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// ── Fetch knowledge from eng_silva_project_knowledge ──
+async function fetchProjectKnowledge(
+  supabase: any,
+  obraId: string,
+  materialCategory: string,
+  userId: string | null,
+): Promise<string> {
+  try {
+    // 1. Get ALL processed documents for this obra
+    let query = supabase
+      .from("eng_silva_project_knowledge")
+      .select("document_name, document_type, specialty, summary, key_elements")
+      .eq("obra_id", obraId)
+      .eq("processed", true)
+      .order("specialty");
+
+    // Filter by user_id if available
+    if (userId) {
+      query = query.eq("user_id", userId);
+    }
+
+    const { data: allDocs, error } = await query;
+
+    if (error || !allDocs || allDocs.length === 0) {
+      console.log("PAM-KNOWLEDGE: No knowledge docs found for obra", obraId);
+      return "";
+    }
+
+    console.log(`PAM-KNOWLEDGE: Found ${allDocs.length} total knowledge docs for obra`);
+
+    // 2. Determine keywords from the material category for relevance scoring
+    const categoryKeywords: Record<string, string[]> = {
+      "Aço (armaduras)": ["aço", "aco", "armadura", "armaduras", "ferro", "ferros", "varão", "varões", "malha", "a500", "nr", "sd", "nervurado", "liso", "certificado", "ensaio", "tracção", "tracao", "dobragem", "soldabilidade", "carbono", "lote", "siderurgia", "conformidade", "ce", "dop", "desempenho", "en 10080", "npen", "estrutural"],
+      "Betão (classes)": ["betão", "betao", "cimento", "c25", "c30", "c35", "c40", "resistência", "consistência", "exposição", "en 206", "npen", "ensaio", "abrams", "compressão", "cura", "adjuvante", "central", "conformidade"],
+      "Cofragem": ["cofragem", "cofragens", "molde", "descofragem", "taipal", "contraplacado", "escoramento"],
+      "Impermeabilização": ["impermeabilização", "impermeabilizacao", "membrana", "tela", "betuminosa", "dreno", "drenagem", "geotêxtil"],
+      "Isolamento Térmico": ["térmico", "termico", "etics", "xps", "eps", "poliuretano", "lã mineral", "la mineral", "reh", "recs"],
+      "Isolamento Acústico": ["acústico", "acustico", "rrae", "ruído", "ruido", "lã", "la", "resiliente"],
+      "Revestimentos": ["revestimento", "cerâmico", "ceramico", "mosaico", "pedra", "mármore", "granito", "reboco", "argamassa", "acabamento"],
+      "Tubagens e Acessórios": ["tubagem", "tubo", "tubos", "ppr", "pvc", "pead", "acessório", "válvula", "ligação"],
+      "Equipamentos AVAC": ["avac", "climatização", "ventilação", "ar condicionado", "conduta", "chiller", "vrf", "split"],
+      "Equipamentos Eléctricos": ["eléctrico", "eletrico", "quadro", "cabo", "disjuntor", "tomada", "iluminação"],
+      "Caixilharia": ["caixilharia", "alumínio", "pvc", "janela", "porta", "vidro", "vidros", "correr", "batente"],
+      "Tintas e Acabamentos": ["tinta", "tintas", "verniz", "primário", "acabamento", "pintura", "latex", "esmalte"],
+    };
+
+    const keywords = categoryKeywords[materialCategory] || materialCategory.toLowerCase().split(/[\s(),]+/).filter(Boolean);
+
+    // 3. Score and rank documents by relevance
+    const scored = allDocs.map((doc: any) => {
+      let score = 0;
+      const summaryLower = (doc.summary || "").toLowerCase();
+      const elementsStr = JSON.stringify(doc.key_elements || []).toLowerCase();
+      const docNameLower = (doc.document_name || "").toLowerCase();
+      const combined = summaryLower + " " + elementsStr + " " + docNameLower;
+
+      // High priority: contract-related docs (Caderno de Encargos, Contrato, MQT, Condições Técnicas)
+      const highPriorityTypes = ["Caderno de Encargos", "Condições Técnicas", "Contrato", "Mapa de Quantidades (MQT)"];
+      if (highPriorityTypes.includes(doc.document_type)) {
+        score += 10;
+      }
+
+      // Keyword matching
+      keywords.forEach((kw: string) => {
+        if (combined.includes(kw)) score += 3;
+        if (docNameLower.includes(kw)) score += 5; // Extra weight for filename match
+      });
+
+      // Specialty match
+      if (doc.specialty === "Estrutural" && (materialCategory.includes("Aço") || materialCategory.includes("Betão") || materialCategory.includes("Cofragem"))) {
+        score += 8;
+      }
+
+      return { ...doc, _score: score };
+    });
+
+    // Sort by score, take top documents
+    scored.sort((a: any, b: any) => b._score - a._score);
+
+    // Take all high-relevance docs (score > 0) up to 15
+    const relevant = scored.filter((d: any) => d._score > 0).slice(0, 15);
+
+    // Also include any contract-type docs even if score is 0 (always useful)
+    const contractDocs = scored.filter((d: any) => 
+      d._score === 0 && ["Caderno de Encargos", "Condições Técnicas", "Contrato", "Mapa de Quantidades (MQT)"].includes(d.document_type)
+    );
+    const finalDocs = [...relevant];
+    for (const cd of contractDocs) {
+      if (!finalDocs.find((d: any) => d.document_name === cd.document_name)) {
+        finalDocs.push(cd);
+      }
+    }
+
+    if (finalDocs.length === 0) {
+      console.log("PAM-KNOWLEDGE: No relevant docs scored for category", materialCategory);
+      return "";
+    }
+
+    console.log(`PAM-KNOWLEDGE: Using ${finalDocs.length} relevant docs: ${finalDocs.map((d: any) => `${d.document_name} (score:${d._score})`).join(", ")}`);
+
+    // 4. Build context string
+    let context = `\n\nBASE DE CONHECIMENTO DO PROJECTO (${finalDocs.length} documentos relevantes da obra):`;
+
+    const bySpecialty: Record<string, any[]> = {};
+    finalDocs.forEach((doc: any) => {
+      const key = doc.specialty || doc.document_type || "Geral";
+      if (!bySpecialty[key]) bySpecialty[key] = [];
+      bySpecialty[key].push(doc);
+    });
+
+    Object.entries(bySpecialty).forEach(([specialty, specDocs]) => {
+      context += `\n\n--- ${specialty.toUpperCase()} ---`;
+      specDocs.forEach((doc: any) => {
+        const summary = (doc.summary || "").split(" ").slice(0, 800).join(" ");
+        context += `\n\n📄 ${doc.document_name} [${doc.document_type || "—"}]:`;
+        context += `\n${summary}`;
+
+        if (doc.key_elements && doc.key_elements.length > 0) {
+          const validElements = doc.key_elements
+            .filter((e: any) => e && e.type && e.id)
+            .slice(0, 20);
+          if (validElements.length > 0) {
+            context += `\nElementos-chave: ${validElements.map((e: any) => `${e.type}:${e.id}${e.details ? ` (${e.details})` : ""}`).join("; ")}`;
+          }
+        }
+      });
+    });
+
+    // Cap at 15000 chars to leave room for PAM + prompt
+    if (context.length > 15000) {
+      context = context.substring(0, 15000) + "\n[... informação adicional disponível na Base de Conhecimento]";
+    }
+
+    context += `\n\nUSA ESTA INFORMAÇÃO para cruzar com o PAM. Quando referenciares dados de um documento, menciona o seu nome. Se precisares de informação que não está nos documentos acima, indica que falta e sugere que o fiscal carregue o documento relevante na Base de Conhecimento do Projecto.`;
+
+    return context;
+  } catch (err) {
+    console.error("PAM-KNOWLEDGE: Error fetching knowledge:", err);
+    return "";
+  }
+}
+
 function getAnalysisPrompt(material_category: string): string {
   return `Analisa este Pedido de Aprovação de Materiais (PAM) para a categoria "${material_category}".
 
@@ -60,9 +202,10 @@ serve(async (req) => {
     const manufacturer_docs_base64 = body.manufacturer_docs_base64 || [];
     const material_category = body.material_category;
     const obra_id = body.obra_id;
+    const user_id = body.user_id || null;
 
     console.log("PAM: Request received:", JSON.stringify({
-      approval_id, obra_id, material_category,
+      approval_id, obra_id, material_category, user_id,
       has_pdm: !!pdm_base64,
       has_mqt: !!mqt_base64,
       has_ce: !!ce_base64,
@@ -159,17 +302,24 @@ serve(async (req) => {
       }
     }
 
-    // 6. Build context note based on available documents
+    // 6. Fetch knowledge from Eng. Silva's project knowledge base
+    const knowledgeContext = await fetchProjectKnowledge(supabase, obra_id, material_category, user_id);
+    const hasKnowledge = knowledgeContext.length > 0;
+
+    console.log(`PAM: Knowledge context: ${hasKnowledge ? `${knowledgeContext.length} chars` : "none"}`);
+
+    // 7. Build context note based on available documents
     const docParts: string[] = [];
-    if (mqt_base64) docParts.push("o MQT/Mapa de Quantidades");
-    if (ce_base64) docParts.push("o Caderno de Encargos");
-    if (contract_base64) docParts.push("o Contrato da Obra");
+    if (mqt_base64) docParts.push("o MQT/Mapa de Quantidades (PDF em anexo)");
+    if (ce_base64) docParts.push("o Caderno de Encargos (PDF em anexo)");
+    if (contract_base64) docParts.push("o Contrato da Obra (PDF em anexo)");
+    if (hasKnowledge) docParts.push("a Base de Conhecimento do Projecto (resumos de documentos processados pelo Eng. Silva, incluídos no system prompt)");
 
     let contextNote = "";
     if (docParts.length > 0) {
-      contextNote = `Foram fornecidos ${docParts.join(", ")}. Compara o material proposto com as especificações destes documentos.`;
+      contextNote = `Fontes disponíveis para esta análise: ${docParts.join("; ")}. Cruza TODA a informação disponível com o PAM.`;
     } else {
-      contextNote = "Não foram fornecidos MQT, Caderno de Encargos nem Contrato. Analisa o PAM apenas com base nas normas aplicáveis e nos certificados/documentos do fabricante fornecidos.";
+      contextNote = "Não foram fornecidos documentos de referência nem existe conhecimento do projecto. Analisa o PAM apenas com base nas normas aplicáveis.";
     }
 
     content.push({
@@ -178,14 +328,24 @@ serve(async (req) => {
 
 Analisa este PAM considerando:
 1. O pedido de aprovação do empreiteiro (documento PDF acima)
-2. O MQT / Mapa de Quantidades (se fornecido)
-2b. O Caderno de Encargos (se fornecido)
-3. O Contrato da Obra (se fornecido)
-4. Os certificados e laudos fornecidos (se existirem)
-5. Os documentos do fabricante (se existirem)
+2. O MQT / Mapa de Quantidades (se fornecido como PDF)
+3. O Caderno de Encargos (se fornecido como PDF)
+4. O Contrato da Obra (se fornecido como PDF)
+5. Os certificados e laudos fornecidos (se existirem como PDF)
+6. Os documentos do fabricante (se existirem como PDF)
+7. A BASE DE CONHECIMENTO DO PROJECTO — resumos de certificados, fichas técnicas, relatórios de ensaio, cadernos de encargos e outros documentos já processados pelo Eng. Silva (incluídos no system prompt)
+
+IMPORTANTE: A Base de Conhecimento pode conter resumos de dezenas de certificados e relatórios de ensaio que não foram enviados como PDF nesta análise. Usa essa informação para validar o material proposto no PAM.
 
 ${getAnalysisPrompt(material_category)}`,
     });
+
+    // 8. Build system prompt with knowledge context
+    let systemPrompt = `És o Eng. Silva, engenheiro civil sénior com 30+ anos de experiência em fiscalização de obras em Portugal. Estás a analisar um Pedido de Aprovação de Materiais (PAM) submetido por um empreiteiro. A tua análise deve ser rigorosa, técnica e baseada nas normas portuguesas e europeias. Cruza a informação do PAM com TODOS os documentos e conhecimento disponíveis. Verifica se o material proposto cumpre as especificações do projecto e as normas aplicáveis. Responde em português europeu.`;
+
+    if (hasKnowledge) {
+      systemPrompt += knowledgeContext;
+    }
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -198,7 +358,7 @@ ${getAnalysisPrompt(material_category)}`,
         model: "claude-sonnet-4-5-20250929",
         max_tokens: 4000,
         messages: [{ role: "user", content }],
-        system: `És o Eng. Silva, engenheiro civil sénior com 30+ anos de experiência em fiscalização de obras em Portugal. Estás a analisar um Pedido de Aprovação de Materiais (PAM) submetido por um empreiteiro. A tua análise deve ser rigorosa, técnica e baseada nas normas portuguesas e europeias. Cruza a informação do PAM com o MQT, o Caderno de Encargos, o Contrato, os Certificados e os Documentos do Fabricante fornecidos. Verifica se o material proposto cumpre as especificações do projecto e as normas aplicáveis. Responde em português europeu.`,
+        system: systemPrompt,
       }),
     });
 
