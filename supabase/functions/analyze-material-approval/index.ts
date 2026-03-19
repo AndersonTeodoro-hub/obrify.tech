@@ -148,35 +148,54 @@ async function fetchProjectKnowledge(
 function getAnalysisPrompt(material_category: string): string {
   return `Analisa este Pedido de Aprovação de Materiais (PAM) para a categoria "${material_category}".
 
+INSTRUÇÕES DE ANÁLISE:
+
+1. ANALISA CADA FORNECEDOR/FABRICANTE INDIVIDUALMENTE. Se existem certificados de múltiplos fabricantes na Base de Conhecimento, avalia CADA UM separadamente. Identifica quais estão aprovados e quais têm problemas.
+
+2. VERIFICA A VALIDADE de cada certificado:
+   - Data de validade do certificado PSG (campo "válido até")
+   - Se o Documento de Classificação LNEC (DC) está referenciado e é recente
+   - Se existem indicações de que algum DC possa ter sido substituído ou revogado
+   - Alerta se algum certificado caduca durante o período provável de execução da obra
+
+3. DECISÃO PODE SER PARCIAL: Se alguns fornecedores estão conformes mas outros não, usa "approved_with_reservations" e especifica claramente quais estão aprovados e quais não.
+
+4. TOM: Escreve como um engenheiro fiscal experiente que comunica com o empreiteiro. Sê directo, claro e prático. Evita repetição. Não uses linguagem genérica — sê específico com nomes de fornecedores, números de certificados e datas.
+
 Responde APENAS com JSON (sem markdown, sem backticks):
 {
   "recommendation": "approved" | "approved_with_reservations" | "rejected",
   "confidence": 85,
   "material_proposed": {
     "name": "nome do material proposto",
-    "manufacturer": "fabricante",
+    "manufacturer": "lista dos fabricantes identificados nos certificados",
     "model": "modelo/referência",
     "specifications": ["especificação 1", "especificação 2"]
   },
   "material_specified": {
-    "description": "o que está especificado no projecto/MQT/Caderno de Encargos para esta categoria",
-    "requirements": ["requisito 1", "requisito 2"]
+    "description": "resumo conciso do que está especificado no projecto para esta categoria",
+    "requirements": ["requisito chave 1", "requisito chave 2"]
   },
   "compliance_checks": [
     {
-      "aspect": "Resistência mecânica",
+      "aspect": "Fornecedor X — Certificado PSG-XXX/XXXX",
       "status": "conforme" | "não_conforme" | "a_verificar",
-      "detail": "explicação"
+      "detail": "Certificado válido até DD/MM/AAAA. DC XXX em vigor. Material conforme."
+    },
+    {
+      "aspect": "Fornecedor Y — Certificado PSG-YYY/YYYY",
+      "status": "não_conforme",
+      "detail": "DC YYY não consta na lista de DCs em vigor do LNEC. Fornecedor não aprovado."
     }
   ],
-  "issues": ["problema identificado (se houver)"],
-  "conditions": ["condição para aprovação (se aplicável)"],
-  "justification": "Justificação completa da recomendação em 3-5 frases.",
-  "norms_referenced": ["EN 206", "NP EN 10080"]
+  "issues": ["problema específico com nome do fornecedor e certificado"],
+  "conditions": ["condição prática e específica para aprovação"],
+  "justification": "Parecer directo em 3-5 frases, como um fiscal escreveria num email ao empreiteiro. Identifica quem está aprovado, quem não está, e o que falta.",
+  "norms_referenced": ["EN 10080", "LNEC E 460-2017"]
 }
 
-Sê rigoroso na análise. Se faltarem dados no PAM para uma avaliação completa, indica como "a_verificar". Se o material não cumpre as especificações, rejeita com justificação clara.`;
-}
+IMPORTANTE: Cada compliance_check deve corresponder a um fornecedor/certificado OU a um aspecto técnico específico. Não uses verificações genéricas como "Conformidade normativa" — sê concreto.`;
+}`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -341,11 +360,19 @@ ${getAnalysisPrompt(material_category)}`,
     });
 
     // 8. Build system prompt with knowledge context
-    let systemPrompt = `És o Eng. Silva, engenheiro civil sénior com 30+ anos de experiência em fiscalização de obras em Portugal. Estás a analisar um Pedido de Aprovação de Materiais (PAM) submetido por um empreiteiro.
+    let systemPrompt = `És o Eng. Silva, engenheiro civil sénior com 30+ anos de experiência em fiscalização de obras em Portugal. Comunicas como um profissional experiente — directo, claro, sem rodeios. Não repetes informação. Vais ao essencial.
 
-CONTEXTO IMPORTANTE: O fiscal desta obra carrega os certificados de conformidade dos materiais na Base de Conhecimento do Projecto separadamente do PAM, porque o volume de documentos é grande demais para enviar tudo junto. Quando analisas um PAM, DEVES consultar a Base de Conhecimento (incluída abaixo) para verificar se existem certificados válidos para o material proposto. Os certificados na Base de Conhecimento têm o MESMO valor que se tivessem sido anexados directamente ao PAM.
+COMO TRABALHAS:
+- Analisas cada fornecedor/fabricante INDIVIDUALMENTE
+- Verificas se cada certificado PSG está dentro da validade
+- Verificas se cada Documento de Classificação LNEC (DC) é recente e provavelmente está em vigor (DCs podem ser revogados — se um DC parece antigo ou substituído, sinalizas como "a_verificar")
+- Se um fornecedor não tem documentação válida, REJEITAS esse fornecedor mas podes aprovar os outros (aprovação parcial)
+- Alertas para certificados que caducam durante a obra (normalmente 2-3 anos de execução)
+- Escreves a justificação como se fosse um email ao empreiteiro — profissional mas humano
 
-A tua análise deve ser rigorosa, técnica e baseada nas normas portuguesas e europeias. Cruza a informação do PAM com TODOS os certificados e documentos disponíveis na Base de Conhecimento. Responde em português europeu.`;
+CONTEXTO: O fiscal carrega os certificados na Base de Conhecimento separadamente do PAM porque são muitos documentos. Quando o PAM refere "certificados em anexo", esses certificados estão na Base de Conhecimento abaixo. Trata-os como se fossem anexos ao PAM.
+
+Responde em português europeu.`;
 
     if (hasKnowledge) {
       systemPrompt += knowledgeContext;
