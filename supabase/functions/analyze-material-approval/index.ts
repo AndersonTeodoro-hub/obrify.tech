@@ -113,30 +113,30 @@ async function fetchProjectKnowledge(
 
     console.log(`PAM-KNOWLEDGE: Using ${finalDocs.length}/${allDocs.length} docs: ${finalDocs.map((d: any) => `${d.document_name}(s:${d._score},h:${d._hits})`).join(", ")}`);
 
-    // Build context — compact summaries (max 200 words each to fit more docs)
-    let context = `\n\nBASE DE CONHECIMENTO DO PROJECTO (${finalDocs.length} documentos relevantes):`;
+    // Build context — include ALL relevant docs with full summaries
+    let context = `\n\nBASE DE CONHECIMENTO DO PROJECTO (${finalDocs.length} documentos relevantes — ANALISA TODOS):`;
 
     finalDocs.forEach((doc: any) => {
       const summary = (doc.summary || "").split(" ").slice(0, 200).join(" ");
-      context += `\n\n--- ${doc.document_name} [${doc.document_type || doc.specialty || "—"}] ---`;
+      context += `\n\n--- ${doc.document_name} ---`;
       context += `\n${summary}`;
 
       if (doc.key_elements && doc.key_elements.length > 0) {
         const validElements = doc.key_elements
           .filter((e: any) => e && e.type && e.id)
-          .slice(0, 5);
+          .slice(0, 3);
         if (validElements.length > 0) {
           context += `\nElementos: ${validElements.map((e: any) => `${e.type}:${e.id}${e.details ? ` (${e.details})` : ""}`).join("; ")}`;
         }
       }
     });
 
-    // Hard cap at 15000 chars — enough for 12-15 certificates with summaries
-    if (context.length > 15000) {
-      context = context.substring(0, 15000) + "\n[...]";
+    // Hard cap at 25000 chars — enough for 20+ certificates
+    if (context.length > 25000) {
+      context = context.substring(0, 25000) + "\n[...]";
     }
 
-    context += `\n\nCruza esta informação com o PAM. Quando referires dados de um documento, menciona o nome. Se encontrares certificados ou ensaios nos documentos acima, usa-os para validar o material proposto.`;
+    context += `\n\nANALISA CADA UM dos ${finalDocs.length} documentos acima individualmente. Não ignores nenhum certificado. Cada fornecedor deve ter uma entrada na tabela de verificações de conformidade.`;
 
     return context;
   } catch (err) {
@@ -387,6 +387,14 @@ Responde em português europeu.`;
       systemPrompt += knowledgeContext;
     }
 
+    // Add instruction to use web search for LNEC DC verification
+    if (hasKnowledge) {
+      content.push({
+        type: "text",
+        text: `\n\nVERIFICAÇÃO OBRIGATÓRIA: Para cada Documento de Classificação LNEC (DC) mencionado nos certificados acima, usa a ferramenta de web search para verificar se o DC está em vigor na lista do LNEC. Pesquisa por exemplo "LNEC DC 391 documento classificação" ou "LNEC lista documentos classificação aço em vigor". Se um DC NÃO aparece como em vigor nos resultados da pesquisa, marca esse fornecedor como "não_conforme" e indica que o DC pode ter sido revogado. Isto é CRÍTICO para a fiabilidade da análise.`,
+      });
+    }
+
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -396,9 +404,15 @@ Responde em português europeu.`;
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
-        max_tokens: 4000,
+        max_tokens: 8000,
         messages: [{ role: "user", content }],
         system: systemPrompt,
+        tools: [
+          {
+            type: "web_search_20250305",
+            name: "web_search",
+          }
+        ],
       }),
     });
 
@@ -409,7 +423,15 @@ Responde em português europeu.`;
     }
 
     const result = await response.json();
-    const replyText = result.content?.[0]?.text || "{}";
+    
+    // With web search, response may have multiple content blocks (text + tool results)
+    // Extract all text blocks and concatenate
+    const allText = (result.content || [])
+      .filter((block: any) => block.type === "text")
+      .map((block: any) => block.text || "")
+      .join("\n");
+    
+    const replyText = allText || "{}";
 
     let analysis;
     try {
