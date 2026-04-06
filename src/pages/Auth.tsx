@@ -35,25 +35,39 @@ export default function AuthPage() {
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotLoading, setForgotLoading] = useState(false);
+  const [oauthProcessing, setOauthProcessing] = useState(false);
 
   const { user, loading, signIn, signUp } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const { t } = useTranslation();
 
-  // Redirect if already authenticated
+  // Detectar tokens OAuth no hash e mostrar spinner enquanto o Supabase processa
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash && hash.includes("access_token")) {
+      setOauthProcessing(true);
+    }
+  }, []);
+
+  // Redirect if already authenticated (inclui retorno do OAuth)
   useEffect(() => {
     if (!loading && user) {
+      setOauthProcessing(false);
       navigate("/app");
     }
-  }, [user, loading, navigate]);
+    // Se o loading terminou sem user mas estávamos a processar OAuth, parar o spinner
+    if (!loading && !user && oauthProcessing) {
+      setOauthProcessing(false);
+    }
+  }, [user, loading, navigate, oauthProcessing]);
 
   const handleGoogleSignIn = async () => {
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/`,
+          redirectTo: `${window.location.origin}/auth`,
         },
       });
       if (error) throw error;
@@ -134,6 +148,18 @@ export default function AuthPage() {
     { icon: "📄", label: t("auth.landing.featureReports") },
     { icon: "🚁", label: t("auth.landing.featureDrone") },
   ];
+
+  // Mostrar spinner enquanto o Supabase processa os tokens OAuth do hash
+  if (oauthProcessing || loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <p className="text-muted-foreground">A autenticar...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row">
