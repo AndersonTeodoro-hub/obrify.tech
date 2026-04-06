@@ -10,8 +10,9 @@ export interface FileWithPreview {
   file: File;
   preview: string;
   exifData: ExifData | null;
-  status: 'pending' | 'uploading' | 'success' | 'error';
+  status: 'pending' | 'compressing' | 'uploading' | 'success' | 'error';
   progress: number;
+  statusText?: string;
   error?: string;
 }
 

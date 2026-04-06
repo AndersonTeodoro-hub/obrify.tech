@@ -30,6 +30,108 @@ import { SmartCaptureButtons } from './SmartCaptureButtons';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type { CaptureCategory, CaptureSource, FileWithPreview } from '@/types/captures';
 
+// Limites de tamanho
+const WARN_SIZE_ORIGINAL = 20 * 1024 * 1024; // 20MB - aviso antes de comprimir
+const WARN_SIZE_COMPRESSED = 5 * 1024 * 1024; // 5MB - aviso após compressão
+const MAX_IMAGE_WIDTH = 1920;
+const JPEG_QUALITY = 0.85;
+const RETRY_ATTEMPTS = 3;
+const RETRY_BASE_DELAY = 1000; // 1s, 2s, 4s
+
+// Compressão de imagem via Canvas nativo
+function compressImage(file: File): Promise<File> {
+  return new Promise((resolve, reject) => {
+    // Não comprimir vídeos ou ficheiros não-imagem
+    if (!file.type.startsWith('image/')) {
+      resolve(file);
+      return;
+    }
+
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      try {
+        let { width, height } = img;
+
+        // Só redimensionar se for maior que o máximo
+        if (width > MAX_IMAGE_WIDTH) {
+          const ratio = MAX_IMAGE_WIDTH / width;
+          width = MAX_IMAGE_WIDTH;
+          height = Math.round(height * ratio);
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(file); // fallback: enviar original
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (!blob || blob.size >= file.size) {
+              // Compressão não reduziu — usar original
+              resolve(file);
+              return;
+            }
+            const compressed = new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), {
+              type: 'image/jpeg',
+              lastModified: file.lastModified,
+            });
+            resolve(compressed);
+          },
+          'image/jpeg',
+          JPEG_QUALITY
+        );
+      } catch {
+        resolve(file); // fallback: enviar original
+      }
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file); // fallback: enviar original
+    };
+
+    img.src = url;
+  });
+}
+
+// Upload com retry e backoff exponencial
+async function uploadWithRetry(
+  bucket: string,
+  filePath: string,
+  file: File,
+  options: { cacheControl: string; upsert: boolean }
+): Promise<void> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < RETRY_ATTEMPTS; attempt++) {
+    const { error } = await supabase.storage
+      .from(bucket)
+      .upload(filePath, file, options);
+
+    if (!error) return; // sucesso
+
+    lastError = error;
+    console.warn(`Upload attempt ${attempt + 1}/${RETRY_ATTEMPTS} failed:`, error.message);
+
+    if (attempt < RETRY_ATTEMPTS - 1) {
+      const delay = RETRY_BASE_DELAY * Math.pow(2, attempt); // 1s, 2s, 4s
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+
+  throw lastError;
+}
+
 interface NewCaptureModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -232,42 +334,60 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
       let successCount = 0;
       let errorCount = 0;
 
+      // Validação de tamanho: avisar sobre ficheiros muito grandes
+      const largeFiles = files.filter((f) => f.file.size > WARN_SIZE_ORIGINAL);
+      if (largeFiles.length > 0) {
+        const names = largeFiles.map((f) => f.file.name).join(', ');
+        toast.warning(`Ficheiros grandes detectados (>20MB): ${names}. A comprimir antes de enviar...`);
+      }
+
       for (let i = 0; i < files.length; i++) {
         const fileData = files[i];
         setCurrentUploadIndex(i);
 
-        // Update file status to uploading
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.id === fileData.id ? { ...f, status: 'uploading' as const } : f
-          )
-        );
-
         try {
-          // Generate unique file path
+          // Fase 1: Compressão
+          const updateFileState = (updates: Partial<import('@/types/captures').FileWithPreview>) => {
+            setFiles((prev) =>
+              prev.map((f) => (f.id === fileData.id ? { ...f, ...updates } : f))
+            );
+          };
+
+          updateFileState({
+            status: 'compressing',
+            statusText: 'A comprimir...',
+            progress: 10,
+          });
+
+          const compressedFile = await compressImage(fileData.file);
+
+          // Avisar se após compressão ainda for grande
+          if (compressedFile.size > WARN_SIZE_COMPRESSED && compressedFile.size < fileData.file.size) {
+            console.warn(`Ficheiro ${fileData.file.name} comprimido para ${(compressedFile.size / 1024 / 1024).toFixed(1)}MB (ainda >5MB)`);
+          }
+
+          updateFileState({
+            status: 'uploading',
+            statusText: 'A enviar...',
+            progress: 30,
+          });
+
+          // Fase 2: Upload com retry
           const timestamp = Date.now();
-          const ext = fileData.file.name.split('.').pop() || 'jpg';
-          const safeName = fileData.file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+          const safeName = compressedFile.name.replace(/[^a-zA-Z0-9.-]/g, '_');
           const filePath = `${site.org_id}/${selectedSite}/${pointId}/${timestamp}_${fileData.id.slice(0, 8)}_${safeName}`;
 
-          // Upload to Storage
-          const { error: uploadError } = await supabase.storage
-            .from('captures')
-            .upload(filePath, fileData.file, {
-              cacheControl: '3600',
-              upsert: false,
-            });
+          await uploadWithRetry('captures', filePath, compressedFile, {
+            cacheControl: '3600',
+            upsert: false,
+          });
 
-          if (uploadError) throw uploadError;
+          updateFileState({
+            statusText: 'A guardar...',
+            progress: 80,
+          });
 
-          // Update progress
-          setFiles((prev) =>
-            prev.map((f) =>
-              f.id === fileData.id ? { ...f, progress: 50 } : f
-            )
-          );
-
-          // Insert capture record
+          // Fase 3: Insert na BD
           const { error: insertError } = await supabase.from('captures').insert({
             capture_point_id: pointId,
             user_id: user.id,
@@ -275,25 +395,25 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             source_type: CATEGORY_TO_SOURCE[captureType],
             processing_status: 'PENDING',
             captured_at: fileData.exifData?.dateTime?.toISOString() || new Date().toISOString(),
-            size_bytes: fileData.file.size,
-            mime_type: fileData.file.type,
+            size_bytes: compressedFile.size,
+            mime_type: compressedFile.type,
           });
 
           if (insertError) throw insertError;
 
-          // Mark as success
-          setFiles((prev) =>
-            prev.map((f) =>
-              f.id === fileData.id ? { ...f, status: 'success' as const, progress: 100 } : f
-            )
-          );
+          // Concluído
+          updateFileState({
+            status: 'success',
+            statusText: 'Concluído',
+            progress: 100,
+          });
           successCount++;
         } catch (error: any) {
           console.error('Upload error:', error);
           setFiles((prev) =>
             prev.map((f) =>
               f.id === fileData.id
-                ? { ...f, status: 'error' as const, error: error.message }
+                ? { ...f, status: 'error' as const, statusText: 'Erro', error: error.message }
                 : f
             )
           );
@@ -543,7 +663,9 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
                 <span>{t('captures.uploadProgress', { current: currentUploadIndex + 1, total: files.length })}</span>
-                <span>{overallProgress}%</span>
+                <span className="text-muted-foreground">
+                  {files[currentUploadIndex]?.statusText || ''} {overallProgress}%
+                </span>
               </div>
               <Progress value={overallProgress} className="h-2" />
             </div>

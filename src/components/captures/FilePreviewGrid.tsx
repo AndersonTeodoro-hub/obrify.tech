@@ -30,11 +30,18 @@ export function FilePreviewGrid({ files, onRemove, disabled }: FilePreviewGridPr
 
   const getStatusBadge = (file: FileWithPreview) => {
     switch (file.status) {
+      case 'compressing':
+        return (
+          <Badge variant="secondary" className="bg-amber-500/20 text-amber-500 text-xs">
+            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+            {file.statusText || 'A comprimir...'}
+          </Badge>
+        );
       case 'uploading':
         return (
           <Badge variant="secondary" className="bg-blue-500/20 text-blue-500 text-xs">
             <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-            {file.progress}%
+            {file.statusText || `${file.progress}%`}
           </Badge>
         );
       case 'success':
@@ -82,7 +89,7 @@ export function FilePreviewGrid({ files, onRemove, disabled }: FilePreviewGridPr
             )}
 
             {/* Remove button */}
-            {!disabled && file.status !== 'uploading' && file.status !== 'success' && (
+            {!disabled && file.status !== 'compressing' && file.status !== 'uploading' && file.status !== 'success' && (
               <Button
                 variant="destructive"
                 size="icon"
@@ -94,9 +101,10 @@ export function FilePreviewGrid({ files, onRemove, disabled }: FilePreviewGridPr
             )}
 
             {/* Progress overlay */}
-            {file.status === 'uploading' && (
+            {(file.status === 'compressing' || file.status === 'uploading') && (
               <div className="absolute inset-0 bg-background/80 flex flex-col items-center justify-center gap-2">
                 <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                <p className="text-xs text-muted-foreground">{file.statusText}</p>
                 <Progress value={file.progress} className="w-3/4 h-1" />
               </div>
             )}
