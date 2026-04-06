@@ -37,6 +37,7 @@ import { EditFloorModal } from './EditFloorModal';
 import { EditAreaModal } from './EditAreaModal';
 import { EditPointModal } from './EditPointModal';
 import { DeleteConfirmDialog } from './DeleteConfirmDialog';
+import { FloorPlanUpload } from './FloorPlanUpload';
 
 interface SiteStructureTabProps {
   siteId: string;
@@ -384,8 +385,14 @@ export function SiteStructureTab({ siteId }: SiteStructureTabProps) {
                   {t('siteDetail.areas')}
                 </span>
                 <div className="flex gap-2">
-                  <Button 
-                    variant="outline" 
+                  <FloorPlanUpload
+                    siteId={siteId}
+                    floorId={floor.id}
+                    floorName={floor.name}
+                    onUploadComplete={() => queryClient.invalidateQueries({ queryKey: ['floor-plan', floor.id] })}
+                  />
+                  <Button
+                    variant="outline"
                     size="sm"
                     onClick={() => handleAddArea(floor.id)}
                   >
