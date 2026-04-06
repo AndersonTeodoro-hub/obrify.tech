@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable/index";
 import { Loader2, Eye, EyeOff } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -42,10 +41,6 @@ export default function AuthPage() {
   const { toast } = useToast();
   const { t } = useTranslation();
 
-  const isCustomDomain = !window.location.hostname.includes("lovable.app")
-    && !window.location.hostname.includes("lovableproject.com")
-    && window.location.hostname !== "localhost";
-
   // Redirect if already authenticated
   useEffect(() => {
     if (!loading && user) {
@@ -55,29 +50,13 @@ export default function AuthPage() {
 
   const handleGoogleSignIn = async () => {
     try {
-      if (isCustomDomain) {
-        const { data, error } = await supabase.auth.signInWithOAuth({
-          provider: "google",
-          options: {
-            redirectTo: `${window.location.origin}/app`,
-            skipBrowserRedirect: true,
-          },
-        });
-        if (error) throw error;
-        if (data?.url) {
-          const oauthUrl = new URL(data.url);
-          const allowedHosts = ["accounts.google.com"];
-          if (!allowedHosts.some(h => oauthUrl.hostname === h)) {
-            throw new Error("Invalid OAuth redirect URL");
-          }
-          window.location.href = data.url;
-        }
-      } else {
-        const { error } = await lovable.auth.signInWithOAuth("google", {
-          redirect_uri: window.location.origin,
-        });
-        if (error) throw error;
-      }
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/`,
+        },
+      });
+      if (error) throw error;
     } catch (error: any) {
       toast({ title: t("auth.socialLoginError"), description: error.message, variant: "destructive" });
     }
