@@ -36,6 +36,8 @@ import { PanoramaViewer } from './PanoramaViewer';
 import { CaptureInfoPanel } from './CaptureInfoPanel';
 import { CreateNCModal, type NCPrefillData } from './CreateNCModal';
 import { AIAnalysisPanel } from './AIAnalysisPanel';
+import { SilvaAnalysisButton } from './SilvaAnalysisButton';
+import { SilvaAssessmentPanel } from './SilvaAssessmentPanel';
 import type { CaptureWithDetails, AIAnalysisResult, AIDetection } from '@/types/captures';
 import { SOURCE_TO_CATEGORY } from '@/types/captures';
 import { cn } from '@/lib/utils';
@@ -73,6 +75,8 @@ export function CaptureViewer({
   const [aiError, setAiError] = useState<string | null>(null);
   const [ncPrefillData, setNcPrefillData] = useState<NCPrefillData | null>(null);
   const [lastAnalysisType, setLastAnalysisType] = useState<'defects' | 'rebar' | 'general'>('defects');
+  const [showSilvaPanel, setShowSilvaPanel] = useState(false);
+  const [silvaRefreshTrigger, setSilvaRefreshTrigger] = useState(0);
 
   const currentIndex = capture ? captures.findIndex((c) => c.id === capture.id) : -1;
   const hasPrev = currentIndex > 0;
@@ -359,6 +363,29 @@ export function CaptureViewer({
                     <DropdownMenuItem onClick={() => handleAIAnalysis('general')}>
                       {t('captures.ai.generalAnalysis')}
                     </DropdownMenuItem>
+                    <SilvaAnalysisButton
+                      captureId={capture.id}
+                      filePath={capture.file_path}
+                      siteName={capture.capture_point.area.floor.site.name}
+                      floorName={capture.capture_point.area.floor.name}
+                      areaName={capture.capture_point.area.name}
+                      pointCode={capture.capture_point.code}
+                      capturedAt={capture.captured_at}
+                      disabled={isAnalyzing}
+                      onAnalysisComplete={() => {
+                        setSilvaRefreshTrigger((n) => n + 1);
+                        setShowSilvaPanel(true);
+                        setShowInfoPanel(false);
+                        setShowAIPanel(false);
+                      }}
+                    />
+                    <DropdownMenuItem onClick={() => {
+                      setShowSilvaPanel(true);
+                      setShowInfoPanel(false);
+                      setShowAIPanel(false);
+                    }}>
+                      Ver Pareceres Silva
+                    </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
@@ -370,6 +397,7 @@ export function CaptureViewer({
                 onClick={() => {
                   setShowInfoPanel((prev) => !prev);
                   setShowAIPanel(false);
+                  setShowSilvaPanel(false);
                 }}
                 title={showInfoPanel ? t('captures.viewer.hideInfo') : t('captures.viewer.showInfo')}
               >
@@ -442,7 +470,7 @@ export function CaptureViewer({
               size="icon"
               className="absolute right-4 top-1/2 -translate-y-1/2 z-40 text-white hover:bg-white/20 h-14 w-14"
               onClick={goToNext}
-              style={{ right: (showInfoPanel || showAIPanel) ? '336px' : '16px' }}
+              style={{ right: (showInfoPanel || showAIPanel || showSilvaPanel) ? '336px' : '16px' }}
             >
               <ChevronRight className="w-10 h-10" />
             </Button>
@@ -452,7 +480,7 @@ export function CaptureViewer({
           <div 
             className={cn(
               "flex h-full transition-all duration-300",
-              (showInfoPanel || showAIPanel) ? "mr-80" : ""
+              (showInfoPanel || showAIPanel || showSilvaPanel) ? "mr-80" : ""
             )}
           >
             <div className="flex-1 flex items-center justify-center p-16 pt-20 pb-8">
@@ -495,7 +523,7 @@ export function CaptureViewer({
             )}
 
             {/* AI Analysis Panel */}
-            {showAIPanel && (
+            {showAIPanel && !showSilvaPanel && (
               <AIAnalysisPanel
                 isLoading={isAnalyzing}
                 results={aiResults}
@@ -506,10 +534,20 @@ export function CaptureViewer({
                 className="absolute right-0 top-0 bottom-0"
               />
             )}
+
+            {/* Silva Assessment Panel */}
+            {showSilvaPanel && (
+              <SilvaAssessmentPanel
+                captureId={capture.id}
+                refreshTrigger={silvaRefreshTrigger}
+                onClose={() => setShowSilvaPanel(false)}
+                className="absolute right-0 top-0 bottom-0"
+              />
+            )}
           </div>
 
           {/* Bottom info bar - only when panels are hidden */}
-          {!showInfoPanel && !showAIPanel && (
+          {!showInfoPanel && !showAIPanel && !showSilvaPanel && (
             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 pt-12">
               <div className="max-w-2xl mx-auto text-center text-white">
                 <h3 className="font-semibold">{capture.capture_point.code}</h3>
