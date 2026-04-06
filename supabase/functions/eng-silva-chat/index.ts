@@ -103,7 +103,7 @@ async function searchKnowledge(
   if (specialties.length > 0) {
     const { data: bySpecialty } = await supabase
       .from("eng_silva_project_knowledge")
-      .select("document_name, specialty, summary, key_elements")
+      .select("document_name, specialty, summary, key_elements, file_path")
       .eq("obra_id", obraId)
       .eq("user_id", userId)
       .eq("processed", true)
@@ -144,7 +144,7 @@ async function searchKnowledge(
   // Second try: search across all documents by keyword matching in summary
   const { data: allDocs } = await supabase
     .from("eng_silva_project_knowledge")
-    .select("document_name, specialty, summary, key_elements")
+    .select("document_name, specialty, summary, key_elements, file_path")
     .eq("obra_id", obraId)
     .eq("user_id", userId)
     .eq("processed", true)
@@ -218,6 +218,55 @@ function buildKnowledgeContext(docs: any[]): string {
   return context;
 }
 
+// Max base64 size per file (~4.5MB base64 ≈ ~3.4MB raw)
+const MAX_BASE64_SIZE = 4_500_000;
+
+function getMimeTypeFromPath(filePath: string): string {
+  const ext = filePath.split(".").pop()?.toLowerCase();
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  if (ext === "png") return "image/png";
+  return "application/pdf";
+}
+
+function isImageMime(mime: string): boolean {
+  return mime.startsWith("image/");
+}
+
+async function downloadFileAsBase64(
+  supabase: any,
+  filePath: string
+): Promise<{ base64: string; mimeType: string } | null> {
+  try {
+    const { data, error } = await supabase.storage
+      .from("project-knowledge")
+      .download(filePath);
+    if (error || !data) {
+      console.error("ENG-SILVA-CHAT: Download failed for", filePath, error);
+      return null;
+    }
+    const buffer = await data.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    // Processar em blocos para evitar stack overflow em ficheiros grandes
+    const chunkSize = 8192;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+      for (let j = 0; j < chunk.length; j++) {
+        binary += String.fromCharCode(chunk[j]);
+      }
+    }
+    const base64 = btoa(binary);
+    if (base64.length > MAX_BASE64_SIZE) {
+      console.log(`ENG-SILVA-CHAT: File ${filePath} too large (${base64.length} chars), skipping`);
+      return null;
+    }
+    return { base64, mimeType: getMimeTypeFromPath(filePath) };
+  } catch (err) {
+    console.error("ENG-SILVA-CHAT: Error downloading", filePath, err);
+    return null;
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -230,6 +279,7 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
     let systemPrompt = system || "";
+    let downloadedFiles: { document_name: string; base64: string; mimeType: string }[] = [];
 
     // Smart knowledge search if we have obra_id and a user message
     if (obra_id && user_id && message && supabaseUrl && supabaseKey) {
@@ -244,16 +294,53 @@ serve(async (req) => {
 
         console.log(`ENG-SILVA-CHAT: Found ${relevantDocs.length} relevant docs: ${relevantDocs.map((d: any) => d.document_name).join(", ")}`);
 
+        // Separar top 3 com file_path para download de originais, resto usa resumos
+        const docsWithFile = relevantDocs.filter((d: any) => d.file_path);
+        const top3ForPdf = docsWithFile.slice(0, 3);
+        const restDocs = relevantDocs.filter((d: any) => !top3ForPdf.includes(d));
+
+        // Descarregar os top 3 PDFs/imagens originais em paralelo
+        if (top3ForPdf.length > 0) {
+          const downloads = await Promise.all(
+            top3ForPdf.map(async (doc: any) => {
+              const result = await downloadFileAsBase64(supabase, doc.file_path);
+              if (result) {
+                return { document_name: doc.document_name, ...result };
+              }
+              return null;
+            })
+          );
+          downloadedFiles = downloads.filter((d: any): d is NonNullable<typeof d> => d !== null);
+          console.log(`ENG-SILVA-CHAT: Downloaded ${downloadedFiles.length}/${top3ForPdf.length} original files`);
+        }
+
+        // Documentos cujo download falhou voltam para o grupo de resumos
+        const downloadedNames = new Set(downloadedFiles.map(d => d.document_name));
+        const failedDownloads = top3ForPdf.filter((d: any) => !downloadedNames.has(d.document_name));
+        const summaryDocs = [...restDocs, ...failedDownloads];
+
         if (relevantDocs.length > 0) {
-          const knowledgeContext = buildKnowledgeContext(relevantDocs);
-          // Remove old knowledge section if present and add new one
-          systemPrompt = systemPrompt.replace(/\n\nCONHECIMENTO DO PROJECTO[\s\S]*?(?=\n\nEXTRAÇÃO DE PERFIL:|$)/, "");
-          // Insert before EXTRAÇÃO DE PERFIL if it exists
-          const profileIdx = systemPrompt.indexOf("\n\nEXTRAÇÃO DE PERFIL:");
-          if (profileIdx > -1) {
-            systemPrompt = systemPrompt.substring(0, profileIdx) + knowledgeContext + systemPrompt.substring(profileIdx);
-          } else {
-            systemPrompt += knowledgeContext;
+          // Contexto de resumos para os documentos sem PDF original
+          const knowledgeContext = summaryDocs.length > 0
+            ? buildKnowledgeContext(summaryDocs)
+            : "";
+
+          if (knowledgeContext) {
+            // Remove old knowledge section if present and add new one
+            systemPrompt = systemPrompt.replace(/\n\nCONHECIMENTO DO PROJECTO[\s\S]*?(?=\n\nEXTRAÇÃO DE PERFIL:|$)/, "");
+            // Insert before EXTRAÇÃO DE PERFIL if it exists
+            const profileIdx = systemPrompt.indexOf("\n\nEXTRAÇÃO DE PERFIL:");
+            if (profileIdx > -1) {
+              systemPrompt = systemPrompt.substring(0, profileIdx) + knowledgeContext + systemPrompt.substring(profileIdx);
+            } else {
+              systemPrompt += knowledgeContext;
+            }
+          }
+
+          // Guardar ficheiros descarregados para incluir como content blocks na mensagem
+          if (downloadedFiles.length > 0) {
+            const docListNote = `\n\nDOCUMENTOS ORIGINAIS ANEXADOS: ${downloadedFiles.map(d => d.document_name).join(", ")}. Estes documentos foram enviados na íntegra — usa-os para responder com o máximo de detalhe e precisão. Cita o nome do documento quando referires informação.`;
+            systemPrompt += docListNote;
           }
         } else if (keywords.length > 2) {
           // We searched but found nothing specific — tell Silva
@@ -272,27 +359,46 @@ serve(async (req) => {
     }
 
     const messages = [...(conversation_history || [])];
-    if (image) {
-      messages.push({
-        role: "user",
-        content: [
-          {
+
+    // Construir content blocks para a mensagem do utilizador
+    const userContent: any[] = [];
+
+    // Adicionar documentos originais descarregados (top 3)
+    if (downloadedFiles && downloadedFiles.length > 0) {
+      for (const file of downloadedFiles) {
+        if (isImageMime(file.mimeType)) {
+          userContent.push({
             type: "image",
-            source: {
-              type: "base64",
-              media_type: "image/jpeg",
-              data: image,
-            },
-          },
-          {
-            type: "text",
-            text: message || "Analisa esta imagem e diz-me o que vês do ponto de vista de fiscalização de obra.",
-          },
-        ],
-      });
-    } else {
-      messages.push({ role: "user", content: message });
+            source: { type: "base64", media_type: file.mimeType, data: file.base64 },
+          });
+        } else {
+          userContent.push({
+            type: "document",
+            source: { type: "base64", media_type: "application/pdf", data: file.base64 },
+          });
+        }
+        userContent.push({
+          type: "text",
+          text: `[Documento original: ${file.document_name}]`,
+        });
+      }
     }
+
+    // Adicionar imagem do utilizador se enviada
+    if (image) {
+      userContent.push({
+        type: "image",
+        source: { type: "base64", media_type: "image/jpeg", data: image },
+      });
+    }
+
+    // Adicionar mensagem de texto do utilizador
+    userContent.push({
+      type: "text",
+      text: message || "Analisa esta imagem e diz-me o que vês do ponto de vista de fiscalização de obra.",
+    });
+
+    messages.push({ role: "user", content: userContent });
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
