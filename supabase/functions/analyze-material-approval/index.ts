@@ -417,6 +417,10 @@ Responde em português europeu.`;
             max_uses: 5,
           }
         ],
+        // Quando há base de conhecimento com DCs LNEC, FORÇAMOS o uso de pelo menos
+        // uma tool — com só web_search definida, isto obriga Claude a fazer search
+        // antes de produzir o JSON. Sem isto, o modelo escolhia saltar a verificação.
+        ...(hasKnowledge ? { tool_choice: { type: "any" } } : {}),
       }),
     });
 
@@ -428,13 +432,23 @@ Responde em português europeu.`;
 
     const result = await response.json();
 
-    // Diagnóstico: stop_reason e tipos de blocks (para detectar se web search foi usado)
+    // Diagnóstico: stop_reason, tipos de blocks e nº de web searches efectivamente feitas
     const blockTypes = (result.content || []).map((b: any) => b.type);
-    console.log(`PAM: stop_reason=${result.stop_reason} block_types=${JSON.stringify(blockTypes)}`);
+    const webSearchCount = result.usage?.server_tool_use?.web_search_requests ?? 0;
+    console.log(`PAM: stop_reason=${result.stop_reason} block_types=${JSON.stringify(blockTypes)} web_searches=${webSearchCount}`);
+
+    if (webSearchCount === 0 && hasKnowledge) {
+      console.warn("PAM: WARNING — web_search NÃO foi invocada apesar de haver base de conhecimento. Verificar se está habilitada na Anthropic Console (Settings → Privacy).");
+    }
 
     // Aviso explícito se ficou pendurado em tool_use (server tool não devia, mas garantir)
     if (result.stop_reason === "tool_use") {
       console.warn("PAM: WARNING — response stopped at tool_use. Server tool web_search may not have completed correctly.");
+    }
+
+    // pause_turn: server tools podem pausar a meio. Avisar — sem loop de continuação por agora.
+    if (result.stop_reason === "pause_turn") {
+      console.warn("PAM: WARNING — stop_reason=pause_turn. Resposta incompleta; análise pode estar truncada.");
     }
 
     // With web search, response may have multiple content blocks (text + tool results)
