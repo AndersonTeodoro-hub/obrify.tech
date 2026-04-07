@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ZoomIn, ZoomOut, RotateCcw, Pencil, Eye, Plus, X, Loader2, MapPin,
+  ZoomIn, ZoomOut, RotateCcw, Pencil, Eye, Plus, X, Loader2, MapPin, Sparkles,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -67,6 +67,38 @@ export function FloorPlanViewer({ siteId, floorId, floorName }: FloorPlanViewerP
 
   // Drag de ponto
   const [draggingPointId, setDraggingPointId] = useState<string | null>(null);
+
+  // Análise IA
+  const [analyzing, setAnalyzing] = useState(false);
+
+  const handleAnalyzeWithAI = async () => {
+    if (!floorPlan?.id) {
+      toast.error('Sem planta carregada para analisar');
+      return;
+    }
+    setAnalyzing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('eng-silva-analyze-floorplan', {
+        body: {
+          floor_plan_file_id: floorPlan.id,
+          floor_id: floorId,
+          site_id: siteId,
+        },
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Falha na análise');
+      toast.success(`Eng. Silva detectou ${data.inserted} elementos`, {
+        description: data.summary,
+      });
+      queryClient.invalidateQueries({ queryKey: ['floor-capture-points', floorId] });
+      queryClient.invalidateQueries({ queryKey: ['floor-areas-plan', floorId] });
+      queryClient.invalidateQueries({ queryKey: ['site-structure'] });
+    } catch (err: any) {
+      toast.error('Erro na análise: ' + (err.message || 'Erro desconhecido'));
+    } finally {
+      setAnalyzing(false);
+    }
+  };
 
   // Ponto seleccionado
   const [selectedPoint, setSelectedPoint] = useState<CapturePoint | null>(null);
@@ -347,6 +379,19 @@ export function FloorPlanViewer({ siteId, floorId, floorName }: FloorPlanViewerP
           <Badge variant="outline" className="text-xs">
             {visiblePoints.length} pontos
           </Badge>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleAnalyzeWithAI}
+            disabled={analyzing || !floorPlan?.id}
+          >
+            {analyzing ? (
+              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="mr-1 h-3.5 w-3.5" />
+            )}
+            Eng. Silva: Detectar Elementos
+          </Button>
           <Button
             variant={editMode ? 'default' : 'outline'}
             size="sm"
