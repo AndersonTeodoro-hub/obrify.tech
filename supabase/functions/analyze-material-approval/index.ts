@@ -99,8 +99,8 @@ async function fetchProjectKnowledge(
       return { ...doc, _score: score, _hits: keywordHits };
     });
 
-    // Filter: keep only docs with score > 0 (at least some relevance)
-    const relevant = scored.filter((d: any) => d._score > 0);
+    // Filter: keep certificates ALWAYS (bypass score filter), plus other docs with score > 0
+    const relevant = scored.filter((d: any) => d._score > 0 || certTypes.has(d.document_type));
     relevant.sort((a: any, b: any) => b._score - a._score);
 
     // Take top 20 documents — must include ALL certificates
@@ -111,13 +111,20 @@ async function fetchProjectKnowledge(
       return "";
     }
 
+    // Diagnóstico: contagem de certificados incluídos vs existentes na obra
+    const totalCertsInObra = allDocs.filter((d: any) => certTypes.has(d.document_type)).length;
+    const certsIncluded = finalDocs.filter((d: any) => certTypes.has(d.document_type)).length;
+    console.log(`PAM-KNOWLEDGE: Certificates included: ${certsIncluded}/${totalCertsInObra} (certTypes only)`);
     console.log(`PAM-KNOWLEDGE: Using ${finalDocs.length}/${allDocs.length} docs: ${finalDocs.map((d: any) => `${d.document_name}(s:${d._score},h:${d._hits})`).join(", ")}`);
+
+    // Quando há muitos docs, reduz o summary para caber tudo
+    const summaryWordLimit = finalDocs.length > 10 ? 100 : 200;
 
     // Build context — include ALL relevant docs with full summaries
     let context = `\n\nBASE DE CONHECIMENTO DO PROJECTO (${finalDocs.length} documentos relevantes — ANALISA TODOS):`;
 
     finalDocs.forEach((doc: any) => {
-      const summary = (doc.summary || "").split(" ").slice(0, 200).join(" ");
+      const summary = (doc.summary || "").split(" ").slice(0, summaryWordLimit).join(" ");
       context += `\n\n--- ${doc.document_name} ---`;
       context += `\n${summary}`;
 
@@ -131,9 +138,9 @@ async function fetchProjectKnowledge(
       }
     });
 
-    // Hard cap at 25000 chars — enough for 20+ certificates
-    if (context.length > 25000) {
-      context = context.substring(0, 25000) + "\n[...]";
+    // Hard cap at 80000 chars — Claude Sonnet 4.5 aguenta facilmente
+    if (context.length > 80000) {
+      context = context.substring(0, 80000) + "\n[...]";
     }
 
     context += `\n\nANALISA CADA UM dos ${finalDocs.length} documentos acima individualmente. Não ignores nenhum certificado. Cada fornecedor deve ter uma entrada na tabela de verificações de conformidade.`;
@@ -162,7 +169,7 @@ INSTRUÇÕES DE ANÁLISE:
 
 4. TOM: Escreve como um engenheiro fiscal experiente que comunica com o empreiteiro. Sê directo, claro e prático. Evita repetição. Não uses linguagem genérica — sê específico com nomes de fornecedores, números de certificados e datas.
 
-Responde APENAS com JSON (sem markdown, sem backticks):
+PROCESSO: Primeiro, usa a ferramenta web_search para verificar os Documentos de Classificação LNEC (DCs) referenciados nos certificados — pesquisa cada DC para confirmar se está em vigor. Depois de completares as pesquisas necessárias, responde com o JSON estruturado abaixo (sem markdown, sem backticks):
 {
   "recommendation": "approved" | "approved_with_reservations" | "rejected",
   "confidence": 85,
@@ -381,19 +388,15 @@ CONTEXTO: O fiscal carrega os certificados na Base de Conhecimento separadamente
 
 FIABILIDADE: Os nomes dos ficheiros na Base de Conhecimento são a tua referência principal. Exemplo: "PSG 001-2022 e DC 380 SN Maia.pdf" significa que o fornecedor é SN Maia, o certificado PSG é 001/2022 e o DC LNEC é 380. USA estes dados exactos — nunca inventes números ou nomes. Quando citas um certificado, indica o nome do ficheiro como fonte.
 
+VERIFICAÇÃO LNEC OBRIGATÓRIA: Para cada Documento de Classificação LNEC (DC) mencionado nos certificados da Base de Conhecimento, DEVES usar a ferramenta web_search para confirmar se o DC continua em vigor. Pesquisa por exemplo "LNEC DC 391 documento classificação aço em vigor" ou "LNEC lista documentos classificação". Se um DC não aparece como em vigor nos resultados, marca o fornecedor correspondente como "não_conforme" e indica que o DC pode ter sido revogado. Esta verificação é CRÍTICA — não a saltes.
+
 Responde em português europeu.`;
 
     if (hasKnowledge) {
       systemPrompt += knowledgeContext;
     }
 
-    // Add instruction to use web search for LNEC DC verification
-    if (hasKnowledge) {
-      content.push({
-        type: "text",
-        text: `\n\nVERIFICAÇÃO OBRIGATÓRIA: Para cada Documento de Classificação LNEC (DC) mencionado nos certificados acima, usa a ferramenta de web search para verificar se o DC está em vigor na lista do LNEC. Pesquisa por exemplo "LNEC DC 391 documento classificação" ou "LNEC lista documentos classificação aço em vigor". Se um DC NÃO aparece como em vigor nos resultados da pesquisa, marca esse fornecedor como "não_conforme" e indica que o DC pode ter sido revogado. Isto é CRÍTICO para a fiabilidade da análise.`,
-      });
-    }
+    // (Instrução LNEC já está agora no system prompt, com mais peso)
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -411,6 +414,7 @@ Responde em português europeu.`;
           {
             type: "web_search_20250305",
             name: "web_search",
+            max_uses: 5,
           }
         ],
       }),
@@ -423,7 +427,16 @@ Responde em português europeu.`;
     }
 
     const result = await response.json();
-    
+
+    // Diagnóstico: stop_reason e tipos de blocks (para detectar se web search foi usado)
+    const blockTypes = (result.content || []).map((b: any) => b.type);
+    console.log(`PAM: stop_reason=${result.stop_reason} block_types=${JSON.stringify(blockTypes)}`);
+
+    // Aviso explícito se ficou pendurado em tool_use (server tool não devia, mas garantir)
+    if (result.stop_reason === "tool_use") {
+      console.warn("PAM: WARNING — response stopped at tool_use. Server tool web_search may not have completed correctly.");
+    }
+
     // With web search, response may have multiple content blocks (text + tool results)
     // Extract all text blocks and concatenate
     const allText = (result.content || [])
