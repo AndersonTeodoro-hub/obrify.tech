@@ -41,8 +41,10 @@ async function executeAction(
         const p = action.params as { filter?: string; status?: string; limit?: number };
         let q = supabase.from("sites").select("id, name, address, status, created_at, org_id");
         if (p.status) q = q.eq("status", p.status);
-        if (p.filter) q = q.ilike("name", `%${p.filter}%`);
-        q = q.limit(p.limit || 20);
+        if (p.filter && typeof p.filter === "string") {
+          q = q.ilike("name", `%${p.filter.slice(0, 200)}%`);
+        }
+        q = q.limit(Math.min(p.limit || 20, 100));
         const { data, error } = await q;
         if (error) return { error: error.message };
         return data;
@@ -110,8 +112,10 @@ async function executeAction(
         let q = supabase.from("file_organization").select("*");
         if (p.siteId) q = q.eq("site_id", p.siteId);
         if (p.type) q = q.eq("file_type", p.type);
-        if (p.folder) q = q.ilike("file_path", `%${p.folder}%`);
-        q = q.order("created_at", { ascending: false }).limit(p.limit || 50);
+        if (p.folder && typeof p.folder === "string") {
+          q = q.ilike("file_path", `%${p.folder.slice(0, 200)}%`);
+        }
+        q = q.order("created_at", { ascending: false }).limit(Math.min(p.limit || 50, 200));
         const { data, error } = await q;
         if (error) return { error: error.message };
         return data;
@@ -243,6 +247,12 @@ serve(async (req) => {
     }
 
     const { message, context, conversationId, userId, expertMode, language } = await req.json();
+    if (!message || typeof message !== "string" || message.trim().length === 0) {
+      return new Response(JSON.stringify({ error: "message is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (message.length > 4000) {
+      return new Response(JSON.stringify({ error: "message exceeds max length 4000" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 

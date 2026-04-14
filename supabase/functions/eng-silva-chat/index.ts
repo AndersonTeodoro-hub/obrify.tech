@@ -284,6 +284,17 @@ serve(async (req) => {
     }
 
     const { message, conversation_history, system, image, obra_id, user_id } = await req.json();
+    if (!message || typeof message !== "string" || message.trim().length === 0) {
+      if (!image) {
+        return new Response(JSON.stringify({ error: "message or image is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+    if (message && message.length > 4000) {
+      return new Response(JSON.stringify({ error: "message exceeds max length 4000" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (Array.isArray(conversation_history) && conversation_history.length > 50) {
+      return new Response(JSON.stringify({ error: "conversation_history exceeds max 50" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");

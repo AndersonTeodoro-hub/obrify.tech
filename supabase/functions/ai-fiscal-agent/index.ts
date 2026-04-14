@@ -45,6 +45,12 @@
  
    try {
      const { messages, siteId, conversationId } = await req.json();
+     if (!Array.isArray(messages) || messages.length === 0) {
+       return new Response(JSON.stringify({ error: "messages must be a non-empty array" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+     }
+     if (messages.length > 50) {
+       return new Response(JSON.stringify({ error: "messages exceeds max count 50" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+     }
      
      const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
      if (!LOVABLE_API_KEY) {

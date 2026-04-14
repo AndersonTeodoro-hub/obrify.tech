@@ -37,7 +37,12 @@ serve(async (req) => {
     }
 
     const { project1Id, project2Id } = await req.json();
-    if (!project1Id || !project2Id) throw new Error("project1Id e project2Id são obrigatórios");
+    if (!project1Id || typeof project1Id !== "string" || !project2Id || typeof project2Id !== "string") {
+      throw new Error("project1Id e project2Id são obrigatórios");
+    }
+    if (project1Id === project2Id) {
+      throw new Error("project1Id e project2Id não podem ser iguais");
+    }
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
@@ -48,6 +53,11 @@ serve(async (req) => {
       supabase.from("projects").select("*").eq("id", project2Id).single(),
     ]);
     if (!p1 || !p2) throw new Error("Um ou ambos os projectos não encontrados");
+
+    const MAX_FILE_SIZE = 15 * 1024 * 1024;
+    if ((p1.file_size && p1.file_size > MAX_FILE_SIZE) || (p2.file_size && p2.file_size > MAX_FILE_SIZE)) {
+      throw new Error("Um ou ambos os ficheiros excedem 15MB.");
+    }
 
     // Build image URLs
     const getUrl = async (project: any) => {

@@ -230,6 +230,15 @@ serve(async (req) => {
     }
 
     const body = await req.json();
+    if (!body.approval_id || typeof body.approval_id !== "string") {
+      return new Response(JSON.stringify({ error: "approval_id is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (!body.material_category || typeof body.material_category !== "string") {
+      return new Response(JSON.stringify({ error: "material_category is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (!body.obra_id || typeof body.obra_id !== "string") {
+      return new Response(JSON.stringify({ error: "obra_id is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     const approval_id = body.approval_id;
     const pdm_base64 = body.pdm_base64;
     const mqt_base64 = body.mqt_base64 || null;

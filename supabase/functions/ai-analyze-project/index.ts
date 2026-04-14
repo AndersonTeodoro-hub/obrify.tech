@@ -37,7 +37,10 @@ serve(async (req) => {
     }
 
     const { projectId, analysisType = "full" } = await req.json();
-    if (!projectId) throw new Error("projectId é obrigatório");
+    if (!projectId || typeof projectId !== "string") throw new Error("projectId é obrigatório");
+    if (analysisType && !["full", "quick"].includes(analysisType)) {
+      throw new Error("analysisType inválido");
+    }
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
@@ -49,6 +52,11 @@ serve(async (req) => {
       .eq("id", projectId)
       .single();
     if (projErr || !project) throw new Error("Projecto não encontrado");
+
+    const MAX_FILE_SIZE = 15 * 1024 * 1024;
+    if (project.file_size && project.file_size > MAX_FILE_SIZE) {
+      throw new Error(`Ficheiro demasiado grande (${(project.file_size / 1024 / 1024).toFixed(1)}MB). Máximo 15MB.`);
+    }
 
     // Update status to analyzing
     await supabase
