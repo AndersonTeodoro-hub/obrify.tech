@@ -1,10 +1,6 @@
  import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
  import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
- 
- const corsHeaders = {
-   "Access-Control-Allow-Origin": "*",
-   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
- };
+ import { getCorsHeaders } from "../_shared/cors.ts";
  
  const SYSTEM_PROMPT = `Tu és o Agente Fiscal IA, um assistente especializado em fiscalização de obras de construção civil em Portugal.
  
@@ -42,6 +38,7 @@
  }
  
  serve(async (req) => {
+   const corsHeaders = getCorsHeaders(req);
    if (req.method === "OPTIONS") {
      return new Response(null, { headers: corsHeaders });
    }
@@ -58,15 +55,17 @@
      const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
      const supabase = createClient(supabaseUrl, supabaseServiceKey);
  
-     // Get auth header for user context
+     // Require valid auth
      const authHeader = req.headers.get("Authorization");
-     let userId: string | null = null;
-     
-     if (authHeader) {
-       const token = authHeader.replace("Bearer ", "");
-       const { data: { user } } = await supabase.auth.getUser(token);
-       userId = user?.id || null;
+     if (!authHeader) {
+       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
      }
+     const token = authHeader.replace("Bearer ", "");
+     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+     if (authError || !user) {
+       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+     }
+     const userId: string = user.id;
  
      // Build context with site info if provided
      let contextInfo = "";

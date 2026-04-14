@@ -1,11 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { getCorsHeaders } from "../_shared/cors.ts";
 
 const SYSTEM_PROMPT = `És o Obrify, um agente inteligente de fiscalização de obras.
 
@@ -37,7 +32,8 @@ interface ToolAction {
 
 async function executeAction(
   supabase: ReturnType<typeof createClient>,
-  action: ToolAction
+  action: ToolAction,
+  authHeader: string
 ): Promise<unknown> {
   try {
     switch (action.tool) {
@@ -172,7 +168,7 @@ async function executeAction(
         const resp = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-analyze-project`, {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+            Authorization: authHeader,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ projectId: p.projectId, analysisType: "full" }),
@@ -186,7 +182,7 @@ async function executeAction(
         const resp = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-compare-projects`, {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+            Authorization: authHeader,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ project1Id: p.project1Id, project2Id: p.project2Id }),
@@ -226,18 +222,35 @@ async function executeAction(
 }
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const authToken = authHeader.replace("Bearer ", "");
+    const adminSupabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+    const { data: { user: authUser }, error: authError } = await adminSupabase.auth.getUser(authToken);
+    if (authError || !authUser) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     const { message, context, conversationId, userId, expertMode, language } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
+    // Use user-scoped client so RLS filters queries to the caller's org
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+      Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+      { global: { headers: { Authorization: authHeader } } }
     );
 
     // Persist user message if conversationId provided
@@ -349,7 +362,7 @@ serve(async (req) => {
     const actionResults: unknown[] = [];
     if (actions && actions.length > 0) {
       for (const action of actions) {
-        const result = await executeAction(supabase as any, action);
+        const result = await executeAction(supabase as any, action, authHeader);
         actionResults.push({ tool: action.tool, result });
 
         // Log action
