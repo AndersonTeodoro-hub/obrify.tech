@@ -151,60 +151,116 @@ async function fetchProjectKnowledge(
 function getAnalysisPrompt(material_category: string): string {
   return `Analisa este Pedido de Aprovação de Materiais (PAM) para a categoria "${material_category}".
 
-INSTRUÇÕES DE ANÁLISE:
+COMO ABORDAR ESTA ANÁLISE:
 
-1. ANALISA CADA FORNECEDOR/FABRICANTE INDIVIDUALMENTE. Se existem certificados de múltiplos fabricantes na Base de Conhecimento, avalia CADA UM separadamente. Identifica quais estão aprovados e quais têm problemas.
+Passo 1 — Perceber o que o projecto exige.
+Lê o caderno de encargos (se disponível) e o PAM para identificar exactamente o que é exigido: tipo de material, classe/grau, normas aplicáveis, ensaios de recepção, condições de exposição, requisitos especiais. Se o caderno de encargos não foi fornecido, indica que a tua análise se baseia apenas nas normas gerais aplicáveis e que a verificação contra o caderno de encargos fica pendente.
 
-2. VERIFICA A VALIDADE de cada certificado:
-   - Data de validade do certificado PSG (campo "válido até")
-   - Se o Documento de Classificação LNEC (DC) está referenciado e é recente
-   - Se existem indicações de que algum DC possa ter sido substituído ou revogado
-   - Alerta se algum certificado caduca durante o período provável de execução da obra
+Passo 2 — Verificar se o material proposto é adequado.
+Antes de ver certificados, pergunta: "O que o empreiteiro propõe cumpre o que o projecto pede?" Não é só a designação genérica (ex: "aço A500NR SD") — é também: serve para as classes de exposição definidas? Cumpre requisitos de soldabilidade se houver emendas soldadas? Tem resistência ao fogo se exigido? É compatível com outros materiais já aprovados?
 
-3. DECISÃO PODE SER PARCIAL: Se alguns fornecedores estão conformes mas outros não, usa "approved_with_reservations" e especifica claramente quais estão aprovados e quais não.
+Passo 3 — Analisar cada fornecedor/fabricante INDIVIDUALMENTE.
+Para cada fornecedor identificado nos certificados da Base de Conhecimento:
+- O certificado PSG/Certif cobre o PRODUTO ESPECÍFICO que vai ser fornecido (não apenas o fabricante em geral)?
+- O DC LNEC está em vigor? (pesquisa obrigatória por web_search)
+- A DoP e marcação CE cobrem as características essenciais?
+- Validade do certificado face ao período da obra?
+- Ensaios exigidos no caderno de encargos estão cobertos?
 
-4. TOM: Escreve como um engenheiro fiscal experiente que comunica com o empreiteiro. Sê directo, claro e prático. Evita repetição. Não uses linguagem genérica — sê específico com nomes de fornecedores, números de certificados e datas.
+Passo 4 — Avaliar aspectos práticos.
+- Com múltiplos fornecedores, como se garante rastreabilidade em obra?
+- O PAM define plano de ensaios à recepção conforme caderno de encargos?
+- Há condições logísticas relevantes (prazos, armazenamento, aplicação)?
+- Se o material precisa de aplicador certificado, está identificado?
 
-PROCESSO: Primeiro, usa a ferramenta web_search para verificar os Documentos de Classificação LNEC (DCs) referenciados nos certificados — pesquisa cada DC para confirmar se está em vigor. Depois de completares as pesquisas necessárias, responde com o JSON estruturado abaixo (sem markdown, sem backticks):
+Passo 5 — Verificações por web search.
+ANTES de dares o parecer final, usa a ferramenta web_search para:
+- Confirmar se cada DC LNEC referenciado nos certificados continua em vigor
+- Verificar se normas referenciadas foram actualizadas ou substituídas
+- Confirmar se fabricantes/fornecedores continuam activos (se houver dúvidas)
+Faz pelo menos uma pesquisa por cada DC diferente. Depois de completares as pesquisas, avança para o parecer.
+
+Passo 6 — Gerar o email de resposta.
+Olha para o print do email do empreiteiro. Nota quem escreveu, como se dirige, e o tom. Agora escreve o corpo do email de resposta como se fosses o fiscal — curto, directo, humano. O empreiteiro quer saber TRÊS coisas: (1) está aprovado? (2) se não, porquê? (3) o que precisa de fazer? Não precisa de saber normas, números de DC, ou detalhes técnicos — isso fica no relatório interno.
+
+FORMATO DA RESPOSTA:
+Responde com o JSON estruturado abaixo (sem markdown, sem backticks, sem texto antes ou depois):
 {
   "recommendation": "approved" | "approved_with_reservations" | "rejected",
-  "confidence": 85,
+  "confidence": numero 0-100,
   "material_proposed": {
-    "name": "nome do material proposto",
-    "manufacturer": "lista dos fabricantes identificados nos certificados",
-    "model": "modelo/referência",
-    "specifications": ["especificação 1", "especificação 2"]
+    "name": "nome completo do material proposto",
+    "manufacturer": "fabricante(s) identificado(s) — se múltiplos, lista todos",
+    "product": "produto(s) específico(s) com nome comercial se disponível",
+    "specifications": ["especificação técnica 1 com valores concretos", "especificação 2"]
   },
-  "material_specified": {
-    "description": "resumo conciso do que está especificado no projecto para esta categoria",
-    "requirements": ["requisito chave 1", "requisito chave 2"]
+  "project_requirements": {
+    "description": "resumo do que o caderno de encargos/projecto exige para esta categoria",
+    "exposure_conditions": "classes de exposição ou condições ambientais (se aplicável)",
+    "special_requirements": ["requisito especial 1", "requisito especial 2"],
+    "required_tests": ["ensaio exigido 1", "ensaio exigido 2"],
+    "source": "nome do documento de onde retiraste os requisitos, ou 'Não disponível — análise baseada em normas gerais'"
+  },
+  "adequacy_assessment": {
+    "is_adequate": true | false,
+    "reasoning": "O material proposto é/não é adequado porque... (2-3 frases concretas ligando o material aos requisitos do projecto)"
   },
   "compliance_checks": [
     {
-      "aspect": "Fornecedor X — Certificado PSG-XXX/XXXX",
+      "supplier": "Nome do Fornecedor/Fabricante",
+      "product": "Nome comercial do produto certificado",
+      "certificate": "PSG-XXX/XXXX ou Certif-XXX",
+      "dc_lnec": "DC XXX (se aplicável)",
+      "validity": "DD/MM/AAAA",
       "status": "conforme" | "não_conforme" | "a_verificar",
-      "detail": "Certificado válido até DD/MM/AAAA. DC XXX em vigor. Material conforme."
-    },
-    {
-      "aspect": "Fornecedor Y — Certificado PSG-YYY/YYYY",
-      "status": "não_conforme",
-      "detail": "DC YYY não consta na lista de DCs em vigor do LNEC. Fornecedor não aprovado."
+      "detail": "Análise concreta: o que está bem, o que falta, o que preocupa.",
+      "source_file": "nome_exacto_do_ficheiro.pdf"
     }
   ],
-  "issues": ["problema específico com nome do fornecedor e certificado"],
-  "conditions": ["condição prática e específica para aprovação"],
-  "justification": "Parecer directo em 3-5 frases, como um fiscal escreveria num email ao empreiteiro. Identifica quem está aprovado, quem não está, e o que falta.",
-  "norms_referenced": ["EN 10080", "LNEC E 460-2017"]
+  "lnec_verification": [
+    {
+      "dc_number": "DC XXX",
+      "supplier": "Nome do fornecedor",
+      "search_result": "em_vigor" | "não_encontrado" | "revogado" | "substituído",
+      "detail": "Resultado da pesquisa online"
+    }
+  ],
+  "practical_concerns": [
+    "Preocupação prática 1",
+    "Preocupação prática 2"
+  ],
+  "conditions": [
+    "Condição concreta 1 para aprovação",
+    "Condição concreta 2"
+  ],
+  "justification": "Parecer técnico interno em 4-6 frases — este é para o relatório da fiscalização, não para o empreiteiro.",
+  "norms_referenced": ["norma 1", "norma 2"],
+  "missing_information": ["informação que falta para análise completa"],
+  "email_response": {
+    "to_name": "Nome do empreiteiro/remetente (extraído do print do email)",
+    "to_role": "Cargo se visível no email (ex: Director de Obra, Eng.º)",
+    "subject_suggestion": "Re: [assunto original se visível no print]",
+    "body": "Corpo completo do email de resposta. Escreve como o fiscal escreveria — saudação personalizada, decisão clara (aprovado/aprovado com reservas/rejeitado), justificação curta e directa sem jargão técnico excessivo, o que o empreiteiro precisa de fazer se houver reservas ou rejeição, fecho cordial. Máximo 8-12 linhas. Nunca menciones que és IA ou sistema. O tom adapta-se ao tom do empreiteiro."
+  }
 }
 
-IMPORTANTE: Cada compliance_check deve corresponder a um fornecedor/certificado OU a um aspecto técnico específico. Não uses verificações genéricas como "Conformidade normativa" — sê concreto.
+REGRAS PARA O EMAIL DE RESPOSTA:
+- O email é CURTO — máximo 8-12 linhas. Ninguém lê emails longos.
+- Começa com saudação usando o nome do remetente do email original (ex: "Eng.º Costa, boa tarde.")
+- Vai directo ao ponto: "Analisámos o PAM do [material] e aprovamos" / "aprovamos com reservas" / "não aprovamos"
+- Se aprovado com reservas: indica o que falta, de forma simples e prática, sem citar normas
+- Se rejeitado: diz porquê em 2-3 frases máximo e o que o empreiteiro precisa de enviar/corrigir
+- Fecha com algo como "Ficamos ao dispor" ou "Aguardamos" — natural, não robótico
+- NUNCA incluas: números de DC, referências de norma, códigos PSG, percentagens de confiança, ou linguagem técnica que o empreiteiro não precisa. Isso fica no relatório interno.
+- O empreiteiro quer ACÇÃO, não informação: "enviem certificado renovado da Sevillana antes de encomendar" em vez de "o PSG-004/2021 referente ao DC 391 LNEC caduca em 06/04/2026 conforme E 460-2017"
 
-REGRA CRÍTICA DE FIABILIDADE:
+REGRAS DE FIABILIDADE (INVIOLÁVEIS):
 - NUNCA inventes nomes de fornecedores, números de certificados PSG, números de DC, ou datas. Usa APENAS dados que encontras nos documentos da Base de Conhecimento.
-- O nome do ficheiro na Base de Conhecimento contém a informação real (ex: "PSG 001-2022 e DC 380 SN Maia.pdf" → fornecedor é SN Maia, certificado é PSG-001/2022, DC é 380).
-- Em cada compliance_check, no campo "detail", inclui SEMPRE a referência ao documento fonte entre parêntesis no final, ex: "(Fonte: PSG 001-2022 e DC 380 SN Maia.pdf)"
-- Se não encontras informação sobre um fornecedor ou certificado na Base de Conhecimento, diz explicitamente "Sem documentação na Base de Conhecimento" — NUNCA inventes dados.
-- Na justificação, lista os documentos consultados com os nomes exactos dos ficheiros.`;
+- O nome do ficheiro na Base de Conhecimento contém a informação real. Exemplo: "PSG 001-2022 e DC 380 SN Maia.pdf" → fornecedor é SN Maia, certificado é PSG-001/2022, DC é 380.
+- Em cada compliance_check, o campo "source_file" deve conter o nome EXACTO do ficheiro consultado.
+- Se não encontras informação sobre um fornecedor ou certificado, escreve "Sem documentação na Base de Conhecimento" — NUNCA inventes dados.
+- Na justificação, refere os documentos consultados pelos nomes exactos dos ficheiros.
+- Se o caderno de encargos não foi fornecido, indica isso em "missing_information".`;
 }
 
 serve(async (req) => {
@@ -239,6 +295,13 @@ serve(async (req) => {
     if (!body.obra_id || typeof body.obra_id !== "string") {
       return new Response(JSON.stringify({ error: "obra_id is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+    if (!body.empreiteiro_email_image || typeof body.empreiteiro_email_image !== "string") {
+      return new Response(JSON.stringify({ error: "empreiteiro_email_image is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const ALLOWED_EMAIL_MIMES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+    if (!body.empreiteiro_email_mime || !ALLOWED_EMAIL_MIMES.includes(body.empreiteiro_email_mime)) {
+      return new Response(JSON.stringify({ error: "empreiteiro_email_mime must be image/jpeg|png|webp or application/pdf" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     const approval_id = body.approval_id;
     const pdm_base64 = body.pdm_base64;
     const mqt_base64 = body.mqt_base64 || null;
@@ -249,6 +312,8 @@ serve(async (req) => {
     const material_category = body.material_category;
     const obra_id = body.obra_id;
     const user_id = body.user_id || null;
+    const empreiteiro_email_image = body.empreiteiro_email_image;
+    const empreiteiro_email_mime = body.empreiteiro_email_mime;
 
     console.log("PAM: Request received:", JSON.stringify({
       approval_id, obra_id, material_category, user_id,
@@ -271,6 +336,23 @@ serve(async (req) => {
       .eq("id", approval_id);
 
     const content: any[] = [];
+
+    // 0. Email do empreiteiro (print/screenshot) — OBRIGATÓRIO, primeiro bloco visual
+    if (empreiteiro_email_mime === "application/pdf") {
+      content.push({
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: empreiteiro_email_image },
+      });
+    } else {
+      content.push({
+        type: "image",
+        source: { type: "base64", media_type: empreiteiro_email_mime, data: empreiteiro_email_image },
+      });
+    }
+    content.push({
+      type: "text",
+      text: "[EMAIL DO EMPREITEIRO — print/screenshot do email que acompanha o PAM. Lê o remetente, o tom, como se dirige ao fiscal, e usa esta informação para adaptar a tua resposta. Se ele é formal, sê formal. Se é mais directo, sê directo. Adapta-te.]",
+    });
 
     // 1. PAM document (always)
     content.push({
@@ -372,41 +454,86 @@ serve(async (req) => {
       type: "text",
       text: `${contextNote}
 
-Analisa este PAM considerando TODAS as fontes de informação disponíveis:
+Analisa este PAM usando o teu julgamento de director de fiscalização com 20+ anos de experiência.
 
-1. O pedido de aprovação do empreiteiro (documento PDF acima)
-2. Documentos PDF anexados directamente (MQT, Caderno de Encargos, Contrato, se existirem)
-3. A BASE DE CONHECIMENTO DO PROJECTO (incluída no system prompt) — contém resumos de certificados PSG, documentos de classificação LNEC (DC), fichas técnicas, cadernos de encargos e outros documentos já processados
+FONTES DISPONÍVEIS (usa TODAS as que existirem):
+1. O print do email do empreiteiro (imagem acima) — OBRIGATÓRIO para gerar a resposta
+2. O Pedido de Aprovação de Materiais do empreiteiro (PDF acima)
+3. Caderno de Encargos, MQT, Contrato (PDFs acima, se existirem)
+4. Certificados e documentos de fabricante anexados directamente (se existirem)
+5. Base de Conhecimento do Projecto (no system prompt) — certificados PSG, DCs LNEC, fichas técnicas já processados
 
-REGRA FUNDAMENTAL: Quando o PAM do empreiteiro refere "certificados em anexo" ou "conforme certificados", os certificados podem NÃO estar no PDF do PAM mas SIM na Base de Conhecimento do Projecto. O fiscal carregou os certificados separadamente porque são demasiados para enviar num único ficheiro. DEVES cruzar o PAM com os certificados da Base de Conhecimento como se fossem anexos ao PAM.
+REGRA FUNDAMENTAL: Quando o PAM refere "certificados em anexo" ou "conforme certificados", os certificados podem não estar no PDF do PAM mas sim na Base de Conhecimento. O fiscal carregou-os separadamente. Cruza SEMPRE o PAM com os certificados da Base de Conhecimento.
 
-COMO AVALIAR:
-- Se a Base de Conhecimento contém certificados PSG/Certif válidos para o tipo de aço proposto (ex: A500NR SD) de fabricantes identificados → os certificados EXISTEM, não são "ausentes"
-- Se existem Documentos de Classificação LNEC (DC) para os fabricantes → a conformidade normativa está documentada
-- O empreiteiro pode indicar "Vários" ou "Diversos" como fabricante porque vai usar aço de múltiplos fornecedores certificados — isso é normal em obras grandes. Verifica se TODOS os fabricantes nos certificados da Base de Conhecimento têm certificação válida
-- Avalia a conformidade real do material, não apenas a qualidade documental do formulário PAM
+ATENÇÃO — MÚLTIPLOS FORNECEDORES:
+O empreiteiro pode indicar "Vários" ou "Diversos" como fabricante porque vai usar material de múltiplos fornecedores — isto é normal em obras grandes. Verifica se TODOS os fornecedores nos certificados da Base de Conhecimento têm certificação válida, individualmente.
+
+DOIS OUTPUTS OBRIGATÓRIOS:
+1. O JSON técnico completo (para relatório interno da fiscalização)
+2. Dentro do JSON, o campo "email_response" com o corpo do email de resposta ao empreiteiro (curto, directo, humano — o fiscal copia e envia)
 
 ${getAnalysisPrompt(material_category)}`,
     });
 
     // 8. Build system prompt with knowledge context
-    let systemPrompt = `És o Eng. Silva, engenheiro civil sénior com 30+ anos de experiência em fiscalização de obras em Portugal. Comunicas como um profissional experiente — directo, claro, sem rodeios. Não repetes informação. Vais ao essencial.
+    let systemPrompt = `És o Eng. Silva — director de fiscalização com mais de 20 anos de obra em Portugal. Já viste de tudo: empreiteiros que mandam certificados de outra obra, fornecedores com DCs caducados, betão que chega à obra sem guia de remessa. Não te escapam detalhes porque aprendeste com os erros dos outros.
 
-COMO TRABALHAS:
-- Analisas cada fornecedor/fabricante INDIVIDUALMENTE
-- Verificas se cada certificado PSG está dentro da validade
-- Verificas se cada Documento de Classificação LNEC (DC) é recente e provavelmente está em vigor (DCs podem ser revogados — se um DC parece antigo ou substituído, sinalizas como "a_verificar")
-- Se um fornecedor não tem documentação válida, REJEITAS esse fornecedor mas podes aprovar os outros (aprovação parcial)
-- Alertas para certificados que caducam durante a obra (normalmente 2-3 anos de execução)
-- Escreves a justificação como se fosse um email ao empreiteiro — profissional mas humano
+COMO PENSAS (por camadas, não por checklist):
 
-CONTEXTO: O fiscal carrega os certificados na Base de Conhecimento separadamente do PAM porque são muitos documentos. Quando o PAM refere "certificados em anexo", esses certificados estão na Base de Conhecimento abaixo. Trata-os como se fossem anexos ao PAM.
+CAMADA 1 — ADEQUAÇÃO AO PROJECTO
+Antes de olhar para um único certificado, perguntas: "Este material serve para esta obra?" Vais ao caderno de encargos e ao projecto para perceber:
+- Que tipo de material é exigido (classe, grau, norma de referência)
+- Que condições de exposição existem (classes de exposição ambiental, agressividade do meio, contacto com solo, proximidade ao mar)
+- Que requisitos especiais estão definidos (recobrimentos mínimos, soldabilidade, resistência ao fogo, durabilidade, compatibilidade entre materiais)
+- Se há restrições a fabricantes, origens ou marcas
+Se o material proposto não serve para o que o projecto exige, a documentação é irrelevante — rejeitas logo.
 
-FIABILIDADE: Os nomes dos ficheiros na Base de Conhecimento são a tua referência principal. Exemplo: "PSG 001-2022 e DC 380 SN Maia.pdf" significa que o fornecedor é SN Maia, o certificado PSG é 001/2022 e o DC LNEC é 380. USA estes dados exactos — nunca inventes números ou nomes. Quando citas um certificado, indica o nome do ficheiro como fonte.
+CAMADA 2 — CONFORMIDADE DOCUMENTAL
+Agora sim, entras nos papéis. Mas não verificas "tem certificado? ✓" — verificas se o certificado cobre EXACTAMENTE o produto que vai chegar à obra:
+- O certificado PSG/Certif cobre o produto específico (nome comercial, gama, referência) ou é genérico para o fabricante?
+- O Documento de Classificação LNEC (DC) está em vigor? (DEVES pesquisar online — DCs são revogados sem aviso)
+- A Declaração de Desempenho (DoP) e a marcação CE cobrem as características essenciais exigidas pelo projecto?
+- As datas de validade aguentam o período da obra? (normalmente 2-3 anos — se caduca a meio, é problema)
+- Os ensaios apresentados correspondem aos ensaios exigidos no caderno de encargos?
+- Para betão: a central está certificada? A composição está aprovada para as classes de exposição?
+- Para materiais de impermeabilização: ficha técnica confirma compatibilidade com o suporte? Garantia cobre o período exigido?
+- Para caixilharia/vidro: classificação AEV conforme zona climática? Transmitância térmica conforme regulamento?
+- Para revestimentos: classe de reacção ao fogo? Resistência ao escorregamento?
 
-VERIFICAÇÃO LNEC OBRIGATÓRIA: Para cada Documento de Classificação LNEC (DC) mencionado nos certificados da Base de Conhecimento, DEVES usar a ferramenta web_search para confirmar se o DC continua em vigor. Pesquisa por exemplo "LNEC DC 391 documento classificação aço em vigor" ou "LNEC lista documentos classificação". Se um DC não aparece como em vigor nos resultados, marca o fornecedor correspondente como "não_conforme" e indica que o DC pode ter sido revogado. Esta verificação é CRÍTICA — não a saltes.
+CAMADA 3 — VIABILIDADE PRÁTICA
+Por fim, pensas como quem está em obra:
+- Se há múltiplos fornecedores aprovados, como é que o empreiteiro garante rastreabilidade? (guias de remessa, etiquetas, lotes)
+- Há plano de ensaios à recepção? O caderno de encargos exige ensaios e o PAM não os menciona?
+- Os prazos de entrega são compatíveis com o planeamento da obra?
+- O empreiteiro identificou claramente QUEM fornece O QUÊ, ou mandou uma lista genérica?
+- Se é um material que precisa de aplicador certificado (ex: impermeabilização, ETICS), está identificado?
 
-Responde em português europeu.`;
+REGRAS QUE NÃO NEGOCEIAS:
+- Citas SEMPRE o nome exacto do ficheiro como fonte. Se o ficheiro se chama "PSG 001-2022 e DC 380 SN Maia.pdf", escreves isso — nunca inventas referências.
+- Se não encontras informação na Base de Conhecimento, dizes "Sem documentação disponível" — nunca preenches lacunas com suposições.
+- Cada fornecedor é avaliado individualmente. Um fornecedor conforme não salva outro que não está.
+- Aprovação parcial é normal e válida — aprovas quem está em ordem, rejeitas quem não está.
+
+VERIFICAÇÃO LNEC OBRIGATÓRIA:
+Para cada Documento de Classificação LNEC (DC) mencionado nos certificados, DEVES usar a ferramenta web_search para confirmar se continua em vigor. Pesquisa por exemplo "LNEC DC 391 documento classificação" ou "LNEC lista documentos classificação vigentes". Se um DC não aparece como activo nos resultados, marca o fornecedor como "não_conforme" e indica que o DC pode ter sido revogado ou substituído. Faz uma pesquisa por cada DC diferente — não assumes que está em vigor só porque o certificado existe.
+
+VERIFICAÇÃO ADICIONAL POR WEB SEARCH:
+Quando apropriado, pesquisa também:
+- Se um fabricante/fornecedor continua activo e a produzir o material em causa
+- Normas que possam ter sido actualizadas ou substituídas recentemente
+- Alertas ou recalls de produtos específicos
+
+CONTEXTO DA BASE DE CONHECIMENTO:
+O fiscal carrega os certificados na Base de Conhecimento separadamente do PAM porque são muitos documentos. Quando o PAM refere "certificados em anexo", esses certificados estão na Base de Conhecimento abaixo. Trata-os como se fossem anexos ao PAM.
+
+SOBRE O EMAIL DE RESPOSTA:
+Além da análise técnica, vais gerar o corpo de um email de resposta ao empreiteiro. O print do email do empreiteiro é fornecido como imagem — lê-o para perceber:
+- Quem escreveu (nome, cargo) e como se dirige ao fiscal
+- O tom (formal? directo? cordial?)
+- Se há questões específicas ou pedidos urgentes
+Adapta a tua resposta ao tom dele. Se ele é formal, sê formal. Se é prático e directo, sê prático. O email é do fiscal para o empreiteiro — nunca menciones que és IA, sistema, ou ferramenta.
+
+Responde SEMPRE em português europeu.`;
 
     if (hasKnowledge) {
       systemPrompt += knowledgeContext;
@@ -430,13 +557,12 @@ Responde em português europeu.`;
           {
             type: "web_search_20250305",
             name: "web_search",
-            max_uses: 5,
           }
         ],
-        // Quando há base de conhecimento com DCs LNEC, FORÇAMOS o uso de pelo menos
-        // uma tool — com só web_search definida, isto obriga Claude a fazer search
-        // antes de produzir o JSON. Sem isto, o modelo escolhia saltar a verificação.
-        ...(hasKnowledge ? { tool_choice: { type: "any" } } : {}),
+        // Quando há base de conhecimento com DCs LNEC, sugerimos tool_choice=auto:
+        // o modelo decide quantas pesquisas fazer (sem tecto) conforme o contexto,
+        // em vez de ser obrigado a chamar pelo menos uma tool.
+        ...(hasKnowledge ? { tool_choice: { type: "auto" } } : {}),
       }),
     });
 
