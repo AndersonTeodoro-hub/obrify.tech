@@ -365,16 +365,22 @@ export function useEngSilvaVoice() {
       // Play audio
       setVoiceState('speaking');
       console.log("ENG-SILVA: Playing audio");
-      const audioUrl = `data:audio/mpeg;base64,${ttsData.audio}`;
+      const binary = atob(ttsData.audio);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const audioBlob = new Blob([bytes], { type: 'audio/mpeg' });
+      const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
       audioRef.current = audio;
 
       audio.onended = () => {
         console.log("ENG-SILVA: Audio ended, restarting");
+        URL.revokeObjectURL(audioUrl);
         audioRef.current = null;
         if (activeRef.current) startListeningRef.current?.();
       };
       audio.onerror = () => {
+        URL.revokeObjectURL(audioUrl);
         audioRef.current = null;
         setError('Erro ao reproduzir áudio.');
         if (activeRef.current) startListeningRef.current?.();
