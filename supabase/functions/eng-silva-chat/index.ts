@@ -77,8 +77,8 @@ function extractKeywords(message: string): string[] {
 // Map keywords to likely specialties
 function inferSpecialties(keywords: string[]): string[] {
   const specialtyMap: Record<string, string[]> = {
-    "Estrutural": ["betão", "betao", "armadura", "ferro", "ferros", "pilar", "pilares", "viga", "vigas", "laje", "lajes", "sapata", "sapatas", "fundação", "fundacao", "fundações", "estaca", "estacas", "muro", "muros", "berlim", "coroamento", "estrutura", "estrutural", "estruturas", "aço", "aco", "cofragem", "betonar", "betonagem", "resistência", "resistencia", "c25", "c30", "c35", "c40", "a500"],
-    "Arquitectura": ["arquitectura", "arquitetura", "planta", "plantas", "fachada", "fachadas", "alçado", "alcado", "corte", "cortes", "piso", "pisos", "cave", "cobertura", "porta", "portas", "janela", "janelas", "caixilharia", "revestimento", "revestimentos", "acabamento", "acabamentos", "pavimento", "tecto", "teto", "parede", "paredes", "compartimento", "area", "área"],
+    "Estrutural": ["betão", "betao", "armadura", "ferro", "ferros", "pilar", "pilares", "viga", "vigas", "laje", "lajes", "sapata", "sapatas", "fundação", "fundacao", "fundações", "estaca", "estacas", "muro", "muros", "berlim", "coroamento", "estrutura", "estrutural", "estruturas", "aço", "aco", "cofragem", "betonar", "betonagem", "resistência", "resistencia", "c25", "c30", "c35", "c40", "a500", "cota", "cotas", "nivel", "nível", "niveis", "níveis", "fase", "piso", "pisos", "cave", "caves"],
+    "Arquitectura": ["arquitectura", "arquitetura", "planta", "plantas", "fachada", "fachadas", "alçado", "alcado", "corte", "cortes", "piso", "pisos", "cave", "cobertura", "porta", "portas", "janela", "janelas", "caixilharia", "revestimento", "revestimentos", "acabamento", "acabamentos", "pavimento", "tecto", "teto", "parede", "paredes", "compartimento", "area", "área", "cota", "cotas", "nivel", "nível", "niveis", "níveis", "fase"],
     "Águas e Esgotos": ["água", "agua", "aguas", "esgoto", "esgotos", "residuais", "pluviais", "tubagem", "tubo", "tubos", "caixa", "visita", "saneamento", "drenagem", "ramal", "colector", "coletor", "fossa"],
     "AVAC": ["avac", "climatização", "climatizacao", "ventilação", "ventilacao", "ar condicionado", "aquecimento", "arrefecimento", "conduta", "condutas", "chiller", "vrf", "split", "insuflação", "extração", "extracao"],
     "Electricidade": ["eléctrico", "eletrico", "electricidade", "eletricidade", "quadro", "circuito", "tomada", "iluminação", "iluminacao", "cabo", "cabos", "potência", "potencia", "disjuntor", "transformador"],
@@ -114,8 +114,11 @@ async function searchKnowledge(
   keywords: string[],
   specialties: string[]
 ): Promise<any[]> {
-  // First try: filter by specialty if we identified any
-  if (specialties.length > 0) {
+  // If only Topografia matched (likely from ambiguous "cota"), fall through to global search
+  const isAmbiguousSingle = specialties.length === 1 && specialties[0] === "Topografia";
+
+  // First try: filter by specialty if we identified any (and not ambiguous single)
+  if (specialties.length > 0 && !isAmbiguousSingle) {
     const { data: bySpecialty } = await supabase
       .from("eng_silva_project_knowledge")
       .select("document_name, specialty, summary, key_elements, file_path")
