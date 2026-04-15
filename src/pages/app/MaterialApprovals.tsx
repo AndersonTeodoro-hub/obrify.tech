@@ -12,7 +12,7 @@ import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import {
-  FileCheck, Plus, Upload, ChevronDown, ChevronUp, Trash2, CheckCircle2, AlertTriangle, XCircle, Clock, Loader2, Building2, ArrowLeft, FileText, Award, Factory, X, Download, ScrollText, FileSignature, ImageIcon, BookOpen, Brain,
+  FileCheck, Plus, Upload, ChevronDown, ChevronUp, Trash2, CheckCircle2, AlertTriangle, XCircle, Clock, Loader2, Building2, ArrowLeft, FileText, Award, Factory, X, Download, ScrollText, FileSignature, ImageIcon, BookOpen, Brain, Mail, Copy, RotateCcw,
 } from 'lucide-react';
 import { generateMaterialApprovalPDF, generateMaterialApprovalExecutive } from '@/utils/material-approval-pdf';
 
@@ -33,6 +33,8 @@ type Approval = {
   material_category: string; status: string; ai_analysis: any; ai_recommendation: string | null;
   reviewer_notes: string | null; final_decision: string | null; decided_by: string | null;
   decided_at: string | null; created_at: string; updated_at: string;
+  email_file_path?: string | null;
+  email_file_mime?: string | null;
   certificates?: Array<{ name: string; path: string; size: number }>;
   manufacturer_docs?: Array<{ name: string; path: string; size: number }>;
   fiscal_notes?: FiscalNote[] | null;
@@ -56,6 +58,7 @@ export default function MaterialApprovals() {
   const [ceFile, setCeFile] = useState<File | null>(null);
   const [certFiles, setCertFiles] = useState<File[]>([]);
   const [mfgFiles, setMfgFiles] = useState<File[]>([]);
+  const [emailFile, setEmailFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // Expanded card
@@ -72,6 +75,10 @@ export default function MaterialApprovals() {
   // Fiscal notes — isolated per card
   const [fiscalNote, setFiscalNote] = useState<Record<string, string>>({});
   const [savingNote, setSavingNote] = useState(false);
+
+  // Email de resposta editável (por approval id)
+  const [emailDraft, setEmailDraft] = useState<Record<string, { subject: string; body: string }>>({});
+  const [techDetailsOpen, setTechDetailsOpen] = useState<Record<string, boolean>>({});
 
   // PDF export modal
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
@@ -132,6 +139,10 @@ export default function MaterialApprovals() {
   // Submit new approval
   const handleSubmit = async () => {
     if (!user || !selectedObra || !pdmFile || !category) return;
+    if (!emailFile) {
+      toast.error('Carregue o print do email do empreiteiro');
+      return;
+    }
     setSubmitting(true);
     try {
       const ts = Date.now();
@@ -140,6 +151,11 @@ export default function MaterialApprovals() {
       const pdmPath = `${basePath}_pam_${sanitizeFilename(pdmFile.name)}`;
       const { error: upErr } = await supabase.storage.from('material-approvals').upload(pdmPath, pdmFile);
       if (upErr) throw upErr;
+
+      const emailPath = `${basePath}_email_${sanitizeFilename(emailFile.name)}`;
+      const { error: emailErr } = await supabase.storage.from('material-approvals').upload(emailPath, emailFile);
+      if (emailErr) throw emailErr;
+      const emailMime = emailFile.type || (emailFile.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
 
       let mqtPath: string | null = null;
       if (mqtFile) {
@@ -195,6 +211,8 @@ export default function MaterialApprovals() {
         status: 'pending',
         certificates: certificatesJson as any,
         manufacturer_docs: mfgDocsJson as any,
+        email_file_path: emailPath,
+        email_file_mime: emailMime,
       } as any).select().single();
       if (insErr) throw insErr;
 
@@ -205,6 +223,7 @@ export default function MaterialApprovals() {
       setContractFile(null);
       setCertFiles([]);
       setMfgFiles([]);
+      setEmailFile(null);
       setCategory('');
       toast.success('Pedido criado. A iniciar análise...');
       await loadApprovals();
@@ -218,10 +237,21 @@ export default function MaterialApprovals() {
   };
 
   const processApproval = async (approval: Approval) => {
+    if (!approval.email_file_path) {
+      toast.error('Esta aprovação não tem print do email do empreiteiro. Re-submeta o pedido com o email.');
+      return;
+    }
     try {
       const { data: pdmData } = await supabase.storage.from('material-approvals').download(approval.pdm_file_path);
       if (!pdmData) throw new Error('Failed to download PAM');
       const pdmBase64 = await blobToBase64(pdmData);
+
+      const { data: emailData, error: emailDlErr } = await supabase.storage
+        .from('material-approvals')
+        .download(approval.email_file_path);
+      if (emailDlErr || !emailData) throw new Error('Erro ao descarregar print do email: ' + (emailDlErr?.message || ''));
+      const emailBase64 = await blobToBase64(emailData);
+      const empreiteiroEmailMime = approval.email_file_mime || emailData.type || 'image/jpeg';
 
       let mqtBase64: string | null = null;
       if (approval.mqt_file_path) {
@@ -273,6 +303,8 @@ export default function MaterialApprovals() {
 
       console.log("PAM: Sending to edge function:", JSON.stringify({
         has_pdm: !!pdmBase64,
+        has_email: !!emailBase64,
+        email_mime: empreiteiroEmailMime,
         has_mqt: !!mqtBase64,
         has_ce: !!ceBase64,
         has_contract: !!contractBase64,
@@ -292,6 +324,8 @@ export default function MaterialApprovals() {
           material_category: approval.material_category,
           obra_id: approval.obra_id,
           user_id: user?.id,
+          empreiteiro_email_image: emailBase64,
+          empreiteiro_email_mime: empreiteiroEmailMime,
         },
       });
 
@@ -314,6 +348,35 @@ export default function MaterialApprovals() {
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
+
+  const getEmailDraft = (a: Approval) => {
+    const er = a.ai_analysis?.email_response;
+    return emailDraft[a.id] || {
+      subject: er?.subject_suggestion || `Re: PAM ${a.material_category}`,
+      body: er?.body || '',
+    };
+  };
+
+  const updateEmailDraft = (id: string, patch: Partial<{ subject: string; body: string }>) => {
+    setEmailDraft(prev => {
+      const current = prev[id] || { subject: '', body: '' };
+      return { ...prev, [id]: { ...current, ...patch } };
+    });
+  };
+
+  const resetEmailDraft = (a: Approval) => {
+    setEmailDraft(prev => { const { [a.id]: _, ...rest } = prev; return rest; });
+  };
+
+  const copyEmail = async (a: Approval) => {
+    const draft = getEmailDraft(a);
+    try {
+      await navigator.clipboard.writeText(`${draft.subject}\n\n${draft.body}`);
+      toast.success('Email copiado');
+    } catch {
+      toast.error('Não foi possível copiar');
+    }
+  };
 
   // Decision actions
   const handleDecision = async (id: string, decision: string, notes: string) => {
@@ -639,12 +702,86 @@ export default function MaterialApprovals() {
                         ) : (
                           <div className="space-y-2">
                             <p>Análise pendente</p>
-                            <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); processApproval(a); }}>Analisar agora</Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={!a.email_file_path}
+                              title={!a.email_file_path ? 'Falta print do email — re-submeta o pedido com o email do empreiteiro' : undefined}
+                              onClick={(e) => { e.stopPropagation(); processApproval(a); }}
+                            >
+                              Analisar agora
+                            </Button>
+                            {!a.email_file_path && (
+                              <p className="text-xs text-amber-600 dark:text-amber-400">
+                                Falta print do email — re-submeta o pedido com o email do empreiteiro
+                              </p>
+                            )}
                           </div>
                         )}
                       </div>
                     ) : (
                       <>
+                        {/* === EMAIL DE RESPOSTA AO EMPREITEIRO (em destaque) === */}
+                        {analysis.email_response && (() => {
+                          const draft = getEmailDraft(a);
+                          const er = analysis.email_response;
+                          const decisionLabel = analysis.recommendation === 'approved' ? 'Aprovado'
+                            : analysis.recommendation === 'approved_with_reservations' ? 'Aprovado c/ Reservas'
+                            : 'Rejeitado';
+                          const decisionColor = analysis.recommendation === 'approved' ? 'bg-green-600'
+                            : analysis.recommendation === 'approved_with_reservations' ? 'bg-amber-500'
+                            : 'bg-destructive';
+                          return (
+                            <div className="border-2 border-primary/30 rounded-lg p-4 bg-primary/5 space-y-3">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <Mail className="w-4 h-4 text-primary" />
+                                <h3 className="text-sm font-semibold text-foreground">Email de Resposta</h3>
+                                <Badge className={`${decisionColor} text-white border-0`}>{decisionLabel}</Badge>
+                                {er.to_name && (
+                                  <span className="text-xs text-muted-foreground">
+                                    Para: {er.to_role ? `${er.to_role} ` : ''}{er.to_name}
+                                  </span>
+                                )}
+                              </div>
+                              <div>
+                                <label className="text-xs font-medium text-muted-foreground">Assunto</label>
+                                <Input
+                                  value={draft.subject}
+                                  onChange={e => updateEmailDraft(a.id, { subject: e.target.value })}
+                                  className="mt-1"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-xs font-medium text-muted-foreground">Corpo do Email</label>
+                                <Textarea
+                                  value={draft.body}
+                                  onChange={e => updateEmailDraft(a.id, { body: e.target.value })}
+                                  rows={Math.max(8, Math.min(20, draft.body.split('\n').length + 1))}
+                                  className="mt-1 font-mono text-sm"
+                                />
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <Button size="sm" onClick={() => copyEmail(a)} className="gap-1">
+                                  <Copy className="w-3 h-3" /> Copiar Email
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => resetEmailDraft(a)} className="gap-1">
+                                  <RotateCcw className="w-3 h-3" /> Repor sugestão
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* === RELATÓRIO TÉCNICO (colapsável) === */}
+                        <button
+                          className="flex items-center gap-2 text-sm font-medium text-foreground hover:text-primary transition w-full text-left"
+                          onClick={() => setTechDetailsOpen(prev => ({ ...prev, [a.id]: !prev[a.id] }))}
+                        >
+                          {techDetailsOpen[a.id] ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                          Relatório Técnico Interno
+                        </button>
+
+                        {techDetailsOpen[a.id] && (<>
                         {/* Material proposed */}
                         {analysis.material_proposed && (
                           <div>
@@ -652,7 +789,7 @@ export default function MaterialApprovals() {
                             <div className="text-sm text-muted-foreground space-y-0.5">
                               <p><span className="font-medium text-foreground">Nome:</span> {analysis.material_proposed.name}</p>
                               <p><span className="font-medium text-foreground">Fabricante:</span> {analysis.material_proposed.manufacturer}</p>
-                              <p><span className="font-medium text-foreground">Modelo:</span> {analysis.material_proposed.model}</p>
+                              <p><span className="font-medium text-foreground">Produto:</span> {analysis.material_proposed.product || analysis.material_proposed.model || '—'}</p>
                               {analysis.material_proposed.specifications?.length > 0 && (
                                 <p><span className="font-medium text-foreground">Especificações:</span> {analysis.material_proposed.specifications.join(', ')}</p>
                               )}
@@ -660,22 +797,49 @@ export default function MaterialApprovals() {
                           </div>
                         )}
 
-                        {/* Material specified */}
-                        {analysis.material_specified && (
+                        {/* Project requirements (v3) — fallback para material_specified (v2) */}
+                        {(analysis.project_requirements || analysis.material_specified) && (
                           <div>
-                            <h4 className="text-sm font-semibold text-foreground mb-1">Especificação do Projecto</h4>
-                            <p className="text-sm text-muted-foreground">{analysis.material_specified.description}</p>
-                            {analysis.material_specified.requirements?.length > 0 && (
-                              <ul className="text-sm text-muted-foreground list-disc list-inside mt-1">
-                                {analysis.material_specified.requirements.map((r: string, i: number) => <li key={i}>{r}</li>)}
-                              </ul>
-                            )}
+                            <h4 className="text-sm font-semibold text-foreground mb-1">Exigências do Projecto</h4>
+                            {(() => {
+                              const pr = analysis.project_requirements || analysis.material_specified;
+                              return (
+                                <div className="text-sm text-muted-foreground space-y-1">
+                                  {pr.description && <p>{pr.description}</p>}
+                                  {pr.exposure_conditions && <p><span className="font-medium text-foreground">Exposição:</span> {pr.exposure_conditions}</p>}
+                                  {pr.special_requirements?.length > 0 && (
+                                    <div><span className="font-medium text-foreground">Requisitos especiais:</span>
+                                      <ul className="list-disc list-inside ml-2">{pr.special_requirements.map((r: string, i: number) => <li key={i}>{r}</li>)}</ul>
+                                    </div>
+                                  )}
+                                  {pr.required_tests?.length > 0 && (
+                                    <div><span className="font-medium text-foreground">Ensaios exigidos:</span>
+                                      <ul className="list-disc list-inside ml-2">{pr.required_tests.map((t: string, i: number) => <li key={i}>{t}</li>)}</ul>
+                                    </div>
+                                  )}
+                                  {pr.requirements?.length > 0 && (
+                                    <ul className="list-disc list-inside">{pr.requirements.map((r: string, i: number) => <li key={i}>{r}</li>)}</ul>
+                                  )}
+                                  {pr.source && <p className="text-xs italic">Fonte: {pr.source}</p>}
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        )}
+
+                        {/* Adequacy assessment (v3) */}
+                        {analysis.adequacy_assessment && (
+                          <div className={`rounded-lg p-3 ${analysis.adequacy_assessment.is_adequate ? 'bg-green-500/10' : 'bg-destructive/10'}`}>
+                            <h4 className={`text-sm font-semibold mb-1 ${analysis.adequacy_assessment.is_adequate ? 'text-green-700 dark:text-green-400' : 'text-destructive'}`}>
+                              Adequação ao Projecto: {analysis.adequacy_assessment.is_adequate ? 'Sim' : 'Não'}
+                            </h4>
+                            <p className="text-sm text-muted-foreground">{analysis.adequacy_assessment.reasoning}</p>
                           </div>
                         )}
 
                         <Separator />
 
-                        {/* Compliance checks */}
+                        {/* Compliance checks (suporta v2 e v3) */}
                         {analysis.compliance_checks?.length > 0 && (
                           <div>
                             <h4 className="text-sm font-semibold text-foreground mb-2">Verificações de Conformidade</h4>
@@ -685,9 +849,19 @@ export default function MaterialApprovals() {
                                   {c.status === 'conforme' ? <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0 mt-0.5" /> :
                                    c.status === 'não_conforme' ? <XCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" /> :
                                    <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />}
-                                  <div>
-                                    <span className="font-medium text-foreground">{c.aspect}:</span>{' '}
-                                    <span className="text-muted-foreground">{c.detail}</span>
+                                  <div className="flex-1">
+                                    <span className="font-medium text-foreground">
+                                      {c.supplier ? `${c.supplier}${c.product ? ' — ' + c.product : ''}` : c.aspect}
+                                    </span>
+                                    {(c.certificate || c.dc_lnec || c.validity) && (
+                                      <div className="text-xs text-muted-foreground">
+                                        {c.certificate && <span className="mr-2">{c.certificate}</span>}
+                                        {c.dc_lnec && <span className="mr-2">{c.dc_lnec}</span>}
+                                        {c.validity && <span>válido até {c.validity}</span>}
+                                      </div>
+                                    )}
+                                    <p className="text-muted-foreground">{c.detail}</p>
+                                    {c.source_file && <p className="text-xs italic text-muted-foreground/70">Fonte: {c.source_file}</p>}
                                   </div>
                                 </div>
                               ))}
@@ -695,12 +869,34 @@ export default function MaterialApprovals() {
                           </div>
                         )}
 
-                        {/* Issues */}
-                        {analysis.issues?.length > 0 && analysis.issues[0] && (
+                        {/* LNEC verification (v3) */}
+                        {analysis.lnec_verification?.length > 0 && (
+                          <div>
+                            <h4 className="text-sm font-semibold text-foreground mb-2">Verificação LNEC (Web Search)</h4>
+                            <div className="space-y-1">
+                              {analysis.lnec_verification.map((v: any, i: number) => (
+                                <div key={i} className="flex items-start gap-2 text-sm">
+                                  {v.search_result === 'em_vigor' ? <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0 mt-0.5" /> :
+                                   v.search_result === 'revogado' || v.search_result === 'substituído' ? <XCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" /> :
+                                   <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />}
+                                  <div>
+                                    <span className="font-medium text-foreground">{v.dc_number}</span>
+                                    {v.supplier && <span className="text-muted-foreground"> ({v.supplier})</span>}
+                                    <span className="text-muted-foreground"> — {String(v.search_result).replace('_', ' ')}</span>
+                                    {v.detail && <p className="text-xs text-muted-foreground/80">{v.detail}</p>}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Practical concerns (v3) — fallback para issues (v2) */}
+                        {((analysis.practical_concerns?.length > 0 && analysis.practical_concerns[0]) || (analysis.issues?.length > 0 && analysis.issues[0])) && (
                           <div className="bg-destructive/10 rounded-lg p-3">
-                            <h4 className="text-sm font-semibold text-destructive mb-1">Problemas Identificados</h4>
+                            <h4 className="text-sm font-semibold text-destructive mb-1">{analysis.practical_concerns ? 'Preocupações Práticas' : 'Problemas Identificados'}</h4>
                             <ul className="text-sm text-destructive/80 list-disc list-inside">
-                              {analysis.issues.map((issue: string, i: number) => <li key={i}>{issue}</li>)}
+                              {(analysis.practical_concerns || analysis.issues).map((x: string, i: number) => <li key={i}>{x}</li>)}
                             </ul>
                           </div>
                         )}
@@ -711,6 +907,16 @@ export default function MaterialApprovals() {
                             <h4 className="text-sm font-semibold text-amber-600 dark:text-amber-400 mb-1">Condições</h4>
                             <ul className="text-sm text-amber-700 dark:text-amber-300 list-disc list-inside">
                               {analysis.conditions.map((c: string, i: number) => <li key={i}>{c}</li>)}
+                            </ul>
+                          </div>
+                        )}
+
+                        {/* Missing information (v3) */}
+                        {analysis.missing_information?.length > 0 && analysis.missing_information[0] && (
+                          <div className="bg-muted/50 rounded-lg p-3">
+                            <h4 className="text-sm font-semibold text-foreground mb-1">Informação em Falta</h4>
+                            <ul className="text-sm text-muted-foreground list-disc list-inside">
+                              {analysis.missing_information.map((m: string, i: number) => <li key={i}>{m}</li>)}
                             </ul>
                           </div>
                         )}
@@ -736,6 +942,7 @@ export default function MaterialApprovals() {
                             <span className="text-xs font-medium text-foreground">{analysis.confidence}%</span>
                           </div>
                         )}
+                        </>)}
 
                         <Separator />
 
@@ -887,6 +1094,15 @@ export default function MaterialApprovals() {
             </div>
 
             <UploadBox
+              icon={Mail}
+              title="Email do Empreiteiro *"
+              subtitle="Print/screenshot do email (obrigatório). PNG, JPG, WebP ou PDF."
+              accept=".png,.jpg,.jpeg,.webp,.pdf"
+              files={emailFile}
+              onFilesChange={(f) => setEmailFile(f as File | null)}
+            />
+
+            <UploadBox
               icon={FileText}
               title="PAM / Ficha Técnica *"
               subtitle="PDF do pedido de aprovação do empreiteiro"
@@ -944,7 +1160,7 @@ export default function MaterialApprovals() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setNewModalOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSubmit} disabled={!category || !pdmFile || submitting}>
+            <Button onClick={handleSubmit} disabled={!category || !pdmFile || !emailFile || submitting}>
               {submitting ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> A submeter...</> : 'Submeter para Análise'}
             </Button>
           </DialogFooter>
