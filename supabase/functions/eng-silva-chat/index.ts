@@ -52,7 +52,26 @@ function extractKeywords(message: string): string[] {
     }
   });
 
-  return [...new Set([...normalized, ...technicalTerms])];
+  // Regex patterns for compound technical references
+  const regexPatterns: RegExp[] = [
+    /\bpiso\s*-?\s*\d+\b/gi,
+    /\bn[íi]vel\s*-?\s*\d+(?:[.,]\d+)?\b/gi,
+    /\bcota\s*-?\s*\d+(?:[.,]\d+)?\b/gi,
+    /\bn\s*[+\-]\s*\d+(?:[.,]\d+)?\b/gi,
+    /\bcave\s*-?\s*\d+\b/gi,
+    /\b[A-Z]{2,4}-[A-Z0-9]{2,4}-\d{2,4}\b/g,
+    /\b[A-Z]{2,4}\.\d{2,4}(?:\.\d+)?\b/g,
+  ];
+
+  const compoundTerms: string[] = [];
+  regexPatterns.forEach(rx => {
+    const matches = message.match(rx);
+    if (matches) {
+      matches.forEach(m => compoundTerms.push(m.toLowerCase().replace(/\s+/g, " ").trim()));
+    }
+  });
+
+  return [...new Set([...normalized, ...technicalTerms, ...compoundTerms])];
 }
 
 // Map keywords to likely specialties
@@ -123,17 +142,17 @@ async function searchKnowledge(
         return { ...doc, _score: score };
       });
 
-      // Sort by relevance score, take top 8
+      // Sort by relevance score, take top 15
       scored.sort((a: any, b: any) => b._score - a._score);
-      const relevant = scored.filter((d: any) => d._score > 0).slice(0, 8);
+      const relevant = scored.filter((d: any) => d._score > 0).slice(0, 15);
 
       // If we have good matches, return them
       if (relevant.length > 0) {
         return relevant.map(({ _score, ...doc }: any) => doc);
       }
 
-      // Otherwise return all from matching specialties (max 8)
-      return bySpecialty.slice(0, 8);
+      // Otherwise return all from matching specialties (max 15)
+      return bySpecialty.slice(0, 15);
     }
   }
 
@@ -164,7 +183,7 @@ async function searchKnowledge(
   });
 
   scored.sort((a: any, b: any) => b._score - a._score);
-  const relevant = scored.filter((d: any) => d._score > 0).slice(0, 8);
+  const relevant = scored.filter((d: any) => d._score > 0).slice(0, 15);
 
   if (relevant.length > 0) {
     return relevant.map(({ _score, ...doc }: any) => doc);
@@ -204,9 +223,9 @@ function buildKnowledgeContext(docs: any[]): string {
     });
   });
 
-  // Limit total context to 12000 chars (much more than the old 4000)
-  if (context.length > 12000) {
-    context = context.substring(0, 12000) + "\n[... informação adicional disponível — peça para aprofundar]";
+  // Limit total context to 25000 chars
+  if (context.length > 25000) {
+    context = context.substring(0, 25000) + "\n[... informação adicional disponível — peça para aprofundar]";
   }
 
   context += `\n\nUsa este conhecimento para responder com precisão. Quando citas informação de um documento, menciona o nome do documento. Se a informação pedida não está nestes documentos, diz que não encontraste nos documentos carregados e sugere que o fiscal verifique ou carregue o documento relevante na Base de Conhecimento.`;
@@ -317,13 +336,13 @@ serve(async (req) => {
 
         // Separar top 3 com file_path para download de originais, resto usa resumos
         const docsWithFile = relevantDocs.filter((d: any) => d.file_path);
-        const top3ForPdf = docsWithFile.slice(0, 3);
-        const restDocs = relevantDocs.filter((d: any) => !top3ForPdf.includes(d));
+        const top5ForPdf = docsWithFile.slice(0, 5);
+        const restDocs = relevantDocs.filter((d: any) => !top5ForPdf.includes(d));
 
-        // Descarregar os top 3 PDFs/imagens originais em paralelo
-        if (top3ForPdf.length > 0) {
+        // Descarregar os top 5 PDFs/imagens originais em paralelo
+        if (top5ForPdf.length > 0) {
           const downloads = await Promise.all(
-            top3ForPdf.map(async (doc: any) => {
+            top5ForPdf.map(async (doc: any) => {
               const result = await downloadFileAsBase64(supabase, doc.file_path);
               if (result) {
                 return { document_name: doc.document_name, ...result };
@@ -332,12 +351,12 @@ serve(async (req) => {
             })
           );
           downloadedFiles = downloads.filter((d: any): d is NonNullable<typeof d> => d !== null);
-          console.log(`ENG-SILVA-CHAT: Downloaded ${downloadedFiles.length}/${top3ForPdf.length} original files`);
+          console.log(`ENG-SILVA-CHAT: Downloaded ${downloadedFiles.length}/${top5ForPdf.length} original files`);
         }
 
         // Documentos cujo download falhou voltam para o grupo de resumos
         const downloadedNames = new Set(downloadedFiles.map(d => d.document_name));
-        const failedDownloads = top3ForPdf.filter((d: any) => !downloadedNames.has(d.document_name));
+        const failedDownloads = top5ForPdf.filter((d: any) => !downloadedNames.has(d.document_name));
         const summaryDocs = [...restDocs, ...failedDownloads];
 
         if (relevantDocs.length > 0) {
@@ -430,7 +449,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
-        max_tokens: 1500,
+        max_tokens: 600,
         temperature: 0.3,
         system: systemPrompt,
         messages,
