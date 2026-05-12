@@ -397,6 +397,7 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             captured_at: fileData.exifData?.dateTime?.toISOString() || new Date().toISOString(),
             size_bytes: compressedFile.size,
             mime_type: compressedFile.type,
+            notes: notes.trim() || null,
           });
 
           if (insertError) throw insertError;

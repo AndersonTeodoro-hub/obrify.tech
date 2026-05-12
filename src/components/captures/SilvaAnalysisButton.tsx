@@ -194,7 +194,7 @@ export function SilvaAnalysisButton({
         .insert({
           capture_id: captureId,
           user_id: user.id,
-          obra_id: obraId || '00000000-0000-0000-0000-000000000000',
+          obra_id: obraId || null,
           assessment_text: reply,
           severity,
           prompt_used: prompt,
@@ -202,11 +202,11 @@ export function SilvaAnalysisButton({
 
       if (insertError) {
         console.error('Erro ao guardar parecer:', insertError);
-        // Não falhar — o parecer já foi gerado, mostrar ao utilizador
+        toast.error('Erro ao guardar parecer: ' + insertError.message);
+      } else {
+        toast.success('Parecer do Eng. Silva concluído');
+        onAnalysisComplete?.();
       }
-
-      toast.success('Parecer do Eng. Silva concluído');
-      onAnalysisComplete?.();
     } catch (err: any) {
       console.error('Silva analysis error:', err);
       toast.error('Erro na análise: ' + (err.message || 'Erro desconhecido'));
