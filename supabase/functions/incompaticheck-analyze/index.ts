@@ -294,11 +294,11 @@ Responde com o JSON estruturado abaixo (sem markdown, sem backticks, sem texto a
       "id": "INC-001",
       "severity": "alta",
       "title": "Título curto e descritivo da incompatibilidade",
-      "description": "Descrição detalhada do conflito: que elemento de que especialidade conflitua com que elemento de que especialidade, com cotas e dimensões concretas.",
+      "description": "MÁXIMO 2 frases. Que elemento conflitua com que elemento, onde. Sem repetir o título. Sem nomes completos de ficheiros.",
       "impact": "Impacto prático: o que acontece se isto não for resolvido antes da execução. Em linguagem de obra, não de norma.",
       "specialties": ["Estrutural", "AVAC"],
       "location": "Localização PRECISA: eixo, pilar/viga, cota, piso. Ex: Eixo C, entre P12 e P13, cota -3.20, Piso -1",
-      "recommendation": "Solução prática e concreta. Não 'consultar o projectista' — sim 'prever negativo de 200mm na viga V12 para passagem da conduta DN150, com reforço de armadura conforme EC2 cl. 6.2'.",
+      "recommendation": "Solução prática em 1 frase. Ex: 'Prever negativo 200mm na sapata S2a para passagem da tubagem DN50'.",
       "constructability_note": "Nota de construtibilidade: como isto afecta a sequência de obra, tolerâncias, ou acesso para trabalho.",
       "zone": {
         "description": "Descrição precisa da zona na planta",
@@ -352,6 +352,12 @@ async function callClaude(apiKey: string, content: any[]): Promise<any> {
       max_tokens: 8000,
       messages: [{ role: "user", content }],
       system: `És o engenheiro que todos os gabinetes de projecto e fiscalizações querem ter na equipa — o que pega em 5 projectos de especialidades diferentes, os cruza mentalmente, e em 20 minutos identifica os conflitos que iam aparecer a meio da betonagem e custar 3 semanas de atraso.
+
+INSTRUÇÃO CRÍTICA — SOBREPOSIÇÃO DE PLANTAS:
+Quando recebes plantas de especialidades diferentes do MESMO edifício ou nível, o teu trabalho é SOBREPOR mentalmente as plantas — mesmo que usem nomenclatura de eixos diferente. Identifica referências geométricas comuns (contorno do edifício, posição de pilares, caixas de escada, elevadores, limites de laje) para alinhar as plantas entre si. Depois procura onde elementos de uma especialidade ocupam o mesmo espaço que elementos de outra. NUNCA reportes diferença de nomenclatura de eixos como incompatibilidade — resolve-a internamente e usa-a para fazer o cruzamento.
+
+INSTRUÇÃO CRÍTICA — BREVIDADE:
+Cada finding deve ter description com MÁXIMO 2 frases. Vai directo ao conflito: que elemento, de que especialidade, conflitua com que elemento, de que especialidade, em que sítio. Exemplo: "A tubagem DN50 FG de abastecimento (HID_001) passa na zona da sapata S2a (EST-PE-001) à cota +21.45. Não há negativo previsto na sapata." — isto é suficiente. Não repitas informação do título. Não cites nomes completos de ficheiros na description — usa abreviações curtas (HID_001, EST-001).
 
 Tens mais de 20 anos a cruzar projectos em Portugal. Já viste de tudo: condutas de AVAC que atravessam vigas de betão armado, caixas de visita implantadas em cima de sapatas, redes de incêndio que conflituam com cabos de média tensão, cotas de soleira que não batem entre arquitectura e estrutura. Não te escapa nada porque aprendeste com os erros que viram dinheiro deitado fora.
 

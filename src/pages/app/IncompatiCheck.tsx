@@ -36,12 +36,16 @@ import {
   MapPin,
   Lightbulb,
   Layers,
+  Mail,
+  Copy,
 } from 'lucide-react';
 import { Eye, EyeOff } from 'lucide-react';
 import { format } from 'date-fns';
 import { pt } from 'date-fns/locale';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 
 // Types for the real AI analysis
 interface AIFindingZone {
@@ -70,6 +74,21 @@ interface AnalysisResult {
   projects_analyzed: { name: string; type: string; size_mb: string }[];
   skipped_files?: { name: string; reason: string }[];
   strategy: string;
+  summary?: {
+    total_findings: number;
+    critical: number;
+    medium: number;
+    low: number;
+    overall_assessment: string;
+    priority_action: string;
+  };
+  email_response?: {
+    context: string;
+    to_name: string;
+    subject_suggestion: string;
+    body: string;
+  };
+  analysis_limitations?: string[];
 }
 
 export default function IncompatiCheck() {
@@ -93,6 +112,30 @@ export default function IncompatiCheck() {
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [severityFilter, setSeverityFilter] = useState<string | null>(null);
+
+  // Email draft state — keyed by analysis (one active analysis per page)
+  const [emailDraft, setEmailDraft] = useState<{ subject: string; body: string } | null>(null);
+
+  const getEmailDraft = (er: { subject_suggestion: string; body: string }) => {
+    return emailDraft || { subject: er.subject_suggestion || '', body: er.body || '' };
+  };
+
+  const updateEmailDraft = (patch: Partial<{ subject: string; body: string }>, er: { subject_suggestion: string; body: string }) => {
+    const current = emailDraft || { subject: er.subject_suggestion || '', body: er.body || '' };
+    setEmailDraft({ ...current, ...patch });
+  };
+
+  const resetEmailDraft = () => setEmailDraft(null);
+
+  const copyEmail = async (er: { subject_suggestion: string; body: string }) => {
+    const draft = getEmailDraft(er);
+    try {
+      await navigator.clipboard.writeText(`${draft.subject}\n\n${draft.body}`);
+      toast.success('Email copiado');
+    } catch {
+      toast.error('Não foi possível copiar');
+    }
+  };
 
   // Push IncompatiCheck context to global Eng. Silva panel
   const { setContext: setSilvaContext } = useEngSilvaContext();
@@ -340,7 +383,7 @@ export default function IncompatiCheck() {
       const mediaCount = result.findings.filter(f => f.severity === 'media').length;
       const baixaCount = result.findings.filter(f => f.severity === 'baixa').length;
 
-      const { data: analysisRow } = await supabase
+      const { data: analysisRow } = await (supabase as any)
         .from('incompaticheck_analyses')
         .insert({
           user_id: user.user.id,
@@ -351,6 +394,7 @@ export default function IncompatiCheck() {
           warning_count: mediaCount,
           info_count: baixaCount,
           completed_at: result.analyzed_at,
+          ai_analysis: result,
         })
         .select()
         .single();
@@ -424,6 +468,12 @@ export default function IncompatiCheck() {
   })) : []);
 
   const hasResults = !!analysisResult || hasPersistedAnalysis;
+
+  // Extract enriched fields from fresh result or persisted DB
+  const persistedAi = (ic.analysis as any)?.ai_analysis as AnalysisResult | undefined;
+  const displaySummary = analysisResult?.summary || persistedAi?.summary || null;
+  const displayEmailResponse = analysisResult?.email_response || persistedAi?.email_response || null;
+  const displayLimitations = analysisResult?.analysis_limitations || persistedAi?.analysis_limitations || [];
 
   // Filtered findings
   const filteredFindings = displayFindings.filter(
@@ -822,6 +872,98 @@ export default function IncompatiCheck() {
                     Ficheiros não analisados: {analysisResult.skipped_files.map(f => f.name).join(', ')}
                   </span>
                 </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* === EMAIL DE RESPOSTA (em destaque) === */}
+          {!aiAnalyzing && hasResults && displayEmailResponse && (() => {
+            const er = displayEmailResponse;
+            const draft = getEmailDraft(er);
+            return (
+              <Card className="border-2 border-primary/30 bg-primary/5">
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Mail className="w-4 h-4 text-primary" />
+                    <h3 className="text-sm font-semibold text-foreground">Email de Resposta</h3>
+                    {er.to_name && (
+                      <span className="text-xs text-muted-foreground">Para: {er.to_name}</span>
+                    )}
+                    {er.context && (
+                      <Badge variant="outline" className="text-[10px]">{er.context}</Badge>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground">Assunto</label>
+                    <Input
+                      value={draft.subject}
+                      onChange={e => updateEmailDraft({ subject: e.target.value }, er)}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground">Corpo do Email</label>
+                    <Textarea
+                      value={draft.body}
+                      onChange={e => updateEmailDraft({ body: e.target.value }, er)}
+                      rows={Math.max(8, Math.min(20, draft.body.split('\n').length + 1))}
+                      className="mt-1 font-mono text-sm"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" onClick={() => copyEmail(er)} className="gap-1">
+                      <Copy className="w-3 h-3" /> Copiar Email
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={resetEmailDraft} className="gap-1">
+                      <RotateCcw className="w-3 h-3" /> Repor sugestão
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })()}
+
+          {/* === RESUMO === */}
+          {!aiAnalyzing && hasResults && displaySummary && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Resumo</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {displaySummary.overall_assessment && (
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    {displaySummary.overall_assessment}
+                  </p>
+                )}
+                {displaySummary.priority_action && (
+                  <div className="flex items-start gap-2 bg-amber-500/5 border border-amber-500/20 rounded-lg p-3">
+                    <Lightbulb className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs font-semibold text-foreground mb-1">Acção prioritária</p>
+                      <p className="text-xs text-muted-foreground leading-relaxed">{displaySummary.priority_action}</p>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* === LIMITAÇÕES === */}
+          {!aiAnalyzing && hasResults && displayLimitations.length > 0 && (
+            <Card className="border-amber-500/30 bg-amber-500/5">
+              <CardContent className="p-4 space-y-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-500" />
+                  <h3 className="text-sm font-semibold text-foreground">Limitações da análise</h3>
+                </div>
+                <ul className="space-y-1.5 text-xs text-muted-foreground pl-1">
+                  {displayLimitations.map((lim, i) => (
+                    <li key={i} className="flex gap-2">
+                      <span className="text-amber-500 mt-0.5">•</span>
+                      <span className="leading-relaxed">{lim}</span>
+                    </li>
+                  ))}
+                </ul>
               </CardContent>
             </Card>
           )}
