@@ -89,6 +89,9 @@ function inferSpecialties(keywords: string[]): string[] {
     "Acústica": ["acústica", "acustica", "isolamento acústico", "rrae", "ruído", "ruido", "som"],
     "Topografia": ["topografia", "topográfico", "topografico", "implantação", "implantacao", "cota", "cotas", "altimetria", "planimetria", "levantamento"],
     "Contrato": ["contrato", "empreitada", "prazo", "valor", "penalidade", "cláusula", "clausula", "adjudicação", "caderno encargos"],
+    "Certificados e Ensaios": ["certificado", "certificados", "ensaio", "ensaios", "psg", "dc", "lnec", "laudo", "laudos", "ficha técnica", "ficha tecnica", "dop", "declaração desempenho"],
+    "Pormenores Construtivos": ["pormenor", "pormenores", "detalhe", "detalhes", "construtivo", "construtivos", "nó", "nos", "ligação", "ligacao"],
+    "Memória Descritiva": ["memória descritiva", "memoria descritiva", "especificação", "especificacao"],
     "MQT": ["mqt", "mapa quantidades", "quantidade", "quantidades", "artigo", "artigos", "medição", "medicao"],
   };
 
@@ -137,8 +140,11 @@ async function searchKnowledge(
         const combined = summaryLower + " " + elementsStr;
 
         keywords.forEach(kw => {
-          if (combined.includes(kw)) score += 2;
-          // Partial match
+          // Triple weight for matches in key_elements (precise technical IDs)
+          if (elementsStr.includes(kw)) score += 6;
+          // Normal weight for matches in summary
+          if (summaryLower.includes(kw)) score += 2;
+          // Partial match (relaxed, smaller bonus)
           if (kw.length > 3 && combined.includes(kw.substring(0, kw.length - 1))) score += 1;
         });
 
@@ -178,7 +184,10 @@ async function searchKnowledge(
     const combined = summaryLower + " " + elementsStr;
 
     keywords.forEach(kw => {
-      if (combined.includes(kw)) score += 2;
+      // Triple weight for matches in key_elements (precise technical IDs)
+      if (elementsStr.includes(kw)) score += 6;
+      // Normal weight for matches in summary
+      if (summaryLower.includes(kw)) score += 2;
       if (kw.length > 3 && combined.includes(kw.substring(0, kw.length - 1))) score += 1;
     });
 
@@ -231,7 +240,7 @@ function buildKnowledgeContext(docs: any[]): string {
     context = context.substring(0, 25000) + "\n[... informação adicional disponível — peça para aprofundar]";
   }
 
-  context += `\n\nUsa este conhecimento para responder com precisão. Quando citas informação de um documento, menciona o nome do documento. Se a informação pedida não está nestes documentos, diz que não encontraste nos documentos carregados e sugere que o fiscal verifique ou carregue o documento relevante na Base de Conhecimento.`;
+  context += `\n\nREGRA CRÍTICA: Responde APENAS com base nos documentos acima. NUNCA inventes dados que não estejam nestes documentos. Se o fiscal pedir informação que não está aqui, diz "Não encontro isso nos documentos que tenho" e pára. NUNCA preenchas lacunas com suposições ou dados inventados.`;
 
   return context;
 }
@@ -339,7 +348,21 @@ serve(async (req) => {
 
         // Separar top 3 com file_path para download de originais, resto usa resumos
         const docsWithFile = relevantDocs.filter((d: any) => d.file_path);
-        const top5ForPdf = docsWithFile.slice(0, 5);
+
+        // Se o fiscal perguntou sobre um elemento técnico específico, priorizar PDFs que o contêm em key_elements
+        const elementTypes = ["estaca", "pilar", "viga", "sapata", "laje", "muro", "cortina", "coroamento", "fundação", "fundacao", "bloco", "armadura"];
+        const mentionedElement = elementTypes.find(et => keywords.some(k => k.includes(et)));
+
+        let prioritizedDocs = docsWithFile;
+        if (mentionedElement) {
+          const withElement = docsWithFile.filter((d: any) =>
+            JSON.stringify(d.key_elements || []).toLowerCase().includes(mentionedElement)
+          );
+          const withoutElement = docsWithFile.filter((d: any) => !withElement.includes(d));
+          prioritizedDocs = [...withElement, ...withoutElement];
+          console.log(`ENG-SILVA-CHAT: Element "${mentionedElement}" mentioned — ${withElement.length} PDFs prioritized`);
+        }
+        const top5ForPdf = prioritizedDocs.slice(0, 5);
         const restDocs = relevantDocs.filter((d: any) => !top5ForPdf.includes(d));
 
         // Descarregar os top 5 PDFs/imagens originais em paralelo
