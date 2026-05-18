@@ -30,6 +30,36 @@ const QUICK_PROMPTS_INCOMPATICHECK = [
   { label: '📊 Resumo', prompt: 'Faz um resumo completo da análise de incompatibilidades e dos pareceres PDE' },
 ];
 
+const SILVA_SYSTEM_PROMPT = `Tu és o Eng. Silva, Director Sénior de Fiscalização com 35 anos de carreira em fiscalização e direcção técnica de obra em Portugal.
+
+DOMÍNIOS TÉCNICOS
+- Estruturas de betão armado e pré-esforçado (EC2, REBAP, EN 206)
+- Fundações (EC7), construção metálica (EC3)
+- Patologia da construção e reabilitação
+- Caderno de Encargos, MQT, fiscalização contratual
+- Eurocódigos (EC0 a EC8), normas EN, NP portuguesas
+
+COMO ACTUAS
+1. Citas o documento pelo nome exacto quando respondes a partir da base de conhecimento da obra.
+2. Se não há documento que cubra a pergunta, dizes claramente que estás a responder pela experiência geral, não pela documentação da obra.
+3. Não inventas números de norma, cláusulas ou artigos. Se não tens a certeza, dizes "consultar [norma]" em vez de inventar.
+4. Não inventas conteúdo de documentos. Se um documento não está na base de conhecimento, dizes que não está disponível.
+5. Em dúvida, recomendas verificação adicional.
+
+TOM E LINGUAGEM
+- Português europeu, sempre. Vocabulário técnico de construção portuguesa.
+- Directo, denso, sem floreado. Vais ao ponto.
+- Formal mas humano. Tratamento por "você" ou terceira pessoa indirecta.
+- Honesto sobre incerteza.
+- Primeira pessoa do singular. Não usas "nós".
+
+O QUE NUNCA FAZES
+- Inventar normas, cláusulas, ou referências
+- Citar conteúdo de documento que não está na base de conhecimento
+- Usar "na minha experiência" se há documento da obra que cobre o assunto
+- Assinar pareceres, emails ou relatórios em teu nome — quem assina é o fiscal humano
+- Mencionar a tua existência em documentos exportados`;
+
 const QUICK_PROMPTS_GENERAL = [
   { label: '📐 Normas PT', prompt: 'Quais são as principais normas e eurocódigos aplicáveis em Portugal?' },
   { label: '🏗️ Fiscalização', prompt: 'Quais são os pontos críticos de uma fiscalização de obra?' },
@@ -163,20 +193,49 @@ export function EngSilvaPanel({
     setGeneralThinking(true);
 
     try {
-      const recentMessages = generalMessages.slice(-20).map(m => ({
+      const previousMessages = generalMessages.slice(-20).map(m => ({
         role: m.role === 'user' ? 'user' : 'assistant',
         content: m.content,
       }));
-      recentMessages.push({ role: 'user', content });
 
-      const { data, error } = await supabase.functions.invoke('incompaticheck-agent', {
-        body: {
-          messages: recentMessages,
-          findings: [],
-          obraName: undefined,
-          pageContext: getPageLabel(),
-        },
-      });
+      let data: any;
+      if (isIncompatiCheck) {
+        // Dentro de /incompaticheck: manter incompaticheck-agent (contexto rico
+        // de findings/PDE é montado por silvaContext via handleSend → sendUserMessage;
+        // este branch é fallback quando hasContext é falso)
+        const messagesWithCurrent = [...previousMessages, { role: 'user', content }];
+        const res = await supabase.functions.invoke('incompaticheck-agent', {
+          body: {
+            messages: messagesWithCurrent,
+            findings: [],
+            obraName: undefined,
+            pageContext: getPageLabel(),
+          },
+        });
+        data = res.data;
+      } else {
+        // Fora de /incompaticheck: usar eng-silva-chat (retrieval da base de conhecimento)
+        let obraId: string | null = null;
+        try {
+          const { data: memData } = await supabase.functions.invoke('eng-silva-memory', {
+            body: { action: 'load' },
+          });
+          obraId = memData?.profile?.current_obra_id || null;
+        } catch {
+          // Continuar sem obra_id — chat funciona mas sem documentos do projecto
+        }
+
+        const res = await supabase.functions.invoke('eng-silva-chat', {
+          body: {
+            message: content,
+            conversation_history: previousMessages,
+            system: SILVA_SYSTEM_PROMPT,
+            obra_id: obraId,
+            user_id: user?.id || null,
+          },
+        });
+        data = res.data;
+      }
 
       const reply = data?.reply || data?.error || 'Desculpe, não consegui processar. Tente novamente.';
       const agentMsg: LocalMessage = {
@@ -197,7 +256,7 @@ export function EngSilvaPanel({
     } finally {
       setGeneralThinking(false);
     }
-  }, [generalMessages]);
+  }, [generalMessages, isIncompatiCheck, user?.id, silvaContext]);
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
