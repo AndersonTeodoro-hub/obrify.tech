@@ -1,9 +1,85 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders } from "../_shared/cors.ts";
+import { voyageEmbed, voyageRerank } from "../_shared/embeddings/voyage-client.ts";
+
+/**
+ * Retrieval semântico com Voyage embeddings + reranking.
+ *
+ * Fluxo:
+ * 1. Embed a query (voyage-4)
+ * 2. RPC match_knowledge_embeddings para buscar top-30 chunks similares
+ * 3. Rerank com rerank-2.5 para top-12 chunks
+ * 4. Enriquecer com metadata do documento (file_path, etc)
+ *
+ * Devolve: array de chunks enriquecidos, formato:
+ *   { knowledge_id, document_name, specialty, document_type,
+ *     chunk_text, chunk_type, file_path, summary, key_elements,
+ *     similarity, rerank_score }
+ */
+async function searchKnowledgeSemantic(
+  supabase: any,
+  obraId: string,
+  userId: string,
+  query: string
+): Promise<any[]> {
+  // 1. Embed query
+  const queryEmbedding = await voyageEmbed({
+    input: query,
+    inputType: "query",
+  });
+
+  // 2. Retrieval inicial via RPC (top 30)
+  const { data: chunks, error: rpcErr } = await supabase.rpc(
+    "match_knowledge_embeddings",
+    {
+      query_embedding: queryEmbedding[0],
+      match_obra_id: obraId,
+      match_user_id: userId,
+      match_count: 30,
+      match_threshold: 0.3,
+    }
+  );
+
+  if (rpcErr) throw new Error(`RPC match failed: ${rpcErr.message}`);
+  if (!chunks || chunks.length === 0) return [];
+
+  // 3. Rerank top-12
+  const chunkTexts = chunks.map((c: any) => c.chunk_text);
+  const reranked = await voyageRerank({
+    query,
+    documents: chunkTexts,
+    topK: 12,
+  });
+
+  // 4. Mapear rerank scores de volta para os chunks + adicionar metadata
+  const topChunks = reranked.map((r: any) => ({
+    ...chunks[r.index],
+    rerank_score: r.relevance_score,
+  }));
+
+  // 5. Enriquecer com metadata do documento (file_path, summary, key_elements)
+  const knowledgeIds = [...new Set(topChunks.map((c: any) => c.knowledge_id))];
+  const { data: docs, error: docsErr } = await supabase
+    .from("eng_silva_project_knowledge")
+    .select("id, file_path, summary, key_elements")
+    .in("id", knowledgeIds);
+
+  if (docsErr) throw new Error(`Doc enrichment failed: ${docsErr.message}`);
+
+  const docsById: Record<string, any> = {};
+  for (const d of (docs || [])) docsById[d.id] = d;
+
+  return topChunks.map((c: any) => ({
+    ...c,
+    file_path: docsById[c.knowledge_id]?.file_path || null,
+    summary: docsById[c.knowledge_id]?.summary || null,
+    key_elements: docsById[c.knowledge_id]?.key_elements || [],
+  }));
+}
 
 // Extract search keywords from user message
-function extractKeywords(message: string): string[] {
+function extractKeywordsLegacy(message: string): string[] {
   const stopWords = new Set([
     "o", "a", "os", "as", "um", "uma", "uns", "umas", "de", "do", "da", "dos", "das",
     "em", "no", "na", "nos", "nas", "por", "para", "com", "sem", "que", "qual", "quais",
@@ -75,7 +151,7 @@ function extractKeywords(message: string): string[] {
 }
 
 // Map keywords to likely specialties
-function inferSpecialties(keywords: string[]): string[] {
+function inferSpecialtiesLegacy(keywords: string[]): string[] {
   const specialtyMap: Record<string, string[]> = {
     "Estrutural": ["betão", "betao", "armadura", "ferro", "ferros", "pilar", "pilares", "viga", "vigas", "laje", "lajes", "sapata", "sapatas", "fundação", "fundacao", "fundações", "estaca", "estacas", "muro", "muros", "berlim", "coroamento", "estrutura", "estrutural", "estruturas", "aço", "aco", "cofragem", "betonar", "betonagem", "resistência", "resistencia", "c25", "c30", "c35", "c40", "a500", "cota", "cotas", "nivel", "nível", "niveis", "níveis", "fase", "piso", "pisos", "cave", "caves"],
     "Arquitectura": ["arquitectura", "arquitetura", "planta", "plantas", "fachada", "fachadas", "alçado", "alcado", "corte", "cortes", "piso", "pisos", "cave", "cobertura", "porta", "portas", "janela", "janelas", "caixilharia", "revestimento", "revestimentos", "acabamento", "acabamentos", "pavimento", "tecto", "teto", "parede", "paredes", "compartimento", "area", "área", "cota", "cotas", "nivel", "nível", "niveis", "níveis", "fase"],
@@ -110,7 +186,7 @@ function inferSpecialties(keywords: string[]): string[] {
 }
 
 // Search knowledge base for relevant documents
-async function searchKnowledge(
+async function searchKnowledgeLegacy(
   supabase: any,
   obraId: string,
   userId: string,
@@ -205,44 +281,61 @@ async function searchKnowledge(
   return [];
 }
 
-// Build knowledge context string from documents
-function buildKnowledgeContext(docs: any[]): string {
-  if (!docs || docs.length === 0) return "";
+function buildKnowledgeContext(chunks: any[]): string {
+  if (!chunks || chunks.length === 0) return "";
 
-  let context = `\n\nCONHECIMENTO DO PROJECTO (${docs.length} documentos relevantes encontrados):`;
+  // Agrupar chunks por documento
+  const byDoc: Record<string, any[]> = {};
+  const docMeta: Record<string, { specialty: string | null; document_type: string | null }> = {};
 
-  const bySpecialty: Record<string, any[]> = {};
-  docs.forEach(doc => {
-    if (!bySpecialty[doc.specialty]) bySpecialty[doc.specialty] = [];
-    bySpecialty[doc.specialty].push(doc);
-  });
-
-  Object.entries(bySpecialty).forEach(([specialty, specDocs]) => {
-    context += `\n\n--- ${specialty.toUpperCase()} ---`;
-    specDocs.forEach(doc => {
-      // Use full summary (up to 800 words) instead of truncated 100 words
-      const summary = (doc.summary || "").split(" ").slice(0, 800).join(" ");
-      context += `\n\n${doc.document_name}:\n${summary}`;
-
-      if (doc.key_elements && doc.key_elements.length > 0) {
-        const validElements = doc.key_elements
-          .filter((e: any) => e && e.type && e.id)
-          .slice(0, 15);
-        if (validElements.length > 0) {
-          context += `\nElementos: ${validElements.map((e: any) => `${e.type}:${e.id}${e.details ? ` (${e.details})` : ""}`).join("; ")}`;
-        }
-      }
-    });
-  });
-
-  // Limit total context to 25000 chars
-  if (context.length > 25000) {
-    context = context.substring(0, 25000) + "\n[... informação adicional disponível — peça para aprofundar]";
+  for (const chunk of chunks) {
+    const docName = chunk.document_name || "Documento sem nome";
+    if (!byDoc[docName]) {
+      byDoc[docName] = [];
+      docMeta[docName] = {
+        specialty: chunk.specialty,
+        document_type: chunk.document_type,
+      };
+    }
+    byDoc[docName].push(chunk);
   }
 
-  context += `\n\nREGRA CRÍTICA: Responde APENAS com base nos documentos acima. NUNCA inventes dados que não estejam nestes documentos. Se o fiscal pedir informação que não está aqui, diz "Não encontro isso nos documentos que tenho" e pára. NUNCA preenchas lacunas com suposições ou dados inventados.`;
+  let context = "## CONHECIMENTO DO PROJECTO (retrieval semântico)\n\n";
+  let totalChars = context.length;
+  const CHAR_LIMIT = 25000;
 
-  return context;
+  for (const [docName, docChunks] of Object.entries(byDoc)) {
+    const meta = docMeta[docName];
+    const header = `### ${docName}` +
+      (meta.specialty ? ` — ${meta.specialty}` : "") +
+      (meta.document_type ? ` (${meta.document_type})` : "") +
+      "\n";
+
+    if (totalChars + header.length > CHAR_LIMIT) break;
+    context += header;
+    totalChars += header.length;
+
+    for (const chunk of docChunks) {
+      const line = `- ${chunk.chunk_text}\n`;
+      if (totalChars + line.length > CHAR_LIMIT) {
+        context += "\n[... mais informação disponível — peça para aprofundar]\n";
+        return context + "\n" + criticalRule();
+      }
+      context += line;
+      totalChars += line.length;
+    }
+    context += "\n";
+    totalChars += 1;
+  }
+
+  return context + criticalRule();
+}
+
+function criticalRule(): string {
+  return "\nREGRA CRÍTICA: Responde APENAS com base nos trechos acima. " +
+    "NUNCA inventes dados, normas, números ou referências que não estejam " +
+    "explicitamente presentes nos documentos citados. Se não souberes algo, " +
+    "diz claramente que não encontrou nos documentos do projecto.";
 }
 
 // Max base64 size per file (~4.5MB base64 ≈ ~3.4MB raw)
@@ -337,17 +430,52 @@ serve(async (req) => {
     if (obra_id && user_id && message && supabaseUrl && supabaseKey) {
       try {
         const supabase = createClient(supabaseUrl, supabaseKey);
-        const keywords = extractKeywords(message);
-        const specialties = inferSpecialties(keywords);
 
-        console.log(`ENG-SILVA-CHAT: Query="${message.substring(0, 80)}" | Keywords=[${keywords.slice(0, 10).join(",")}] | Specialties=[${specialties.join(",")}]`);
+        let relevantDocs: any[] = [];
+        let retrievalMode = "semantic";
 
-        const relevantDocs = await searchKnowledge(supabase, obra_id, user_id, keywords, specialties);
+        try {
+          relevantDocs = await searchKnowledgeSemantic(
+            supabase,
+            obra_id,
+            user_id,
+            message,
+          );
+          console.log(`[retrieval] semantic OK: ${relevantDocs.length} chunks`);
+        } catch (semanticErr) {
+          console.error(`[retrieval] semantic FAILED, falling back to legacy:`, semanticErr);
+          retrievalMode = "legacy";
+          const keywords = extractKeywordsLegacy(message);
+          const specialties = Array.from(inferSpecialtiesLegacy(keywords));
+          relevantDocs = await searchKnowledgeLegacy(
+            supabase,
+            obra_id,
+            user_id,
+            keywords,
+            specialties,
+          );
+          console.log(`[retrieval] legacy fallback: ${relevantDocs.length} docs`);
+        }
 
-        console.log(`ENG-SILVA-CHAT: Found ${relevantDocs.length} relevant docs: ${relevantDocs.map((d: any) => d.document_name).join(", ")}`);
+        // Deduplicate por knowledge_id (chunks múltiplos do mesmo doc → 1 doc)
+        const uniqueDocs: any[] = [];
+        const seenKnowledgeIds = new Set<string>();
+        for (const item of relevantDocs) {
+          const kid = item.knowledge_id || item.id;
+          if (kid && !seenKnowledgeIds.has(kid)) {
+            seenKnowledgeIds.add(kid);
+            uniqueDocs.push(item);
+          } else if (!kid) {
+            uniqueDocs.push(item); // legacy items sem knowledge_id
+          }
+        }
+
+        // Keywords necessárias para a heurística de elemento técnico abaixo
+        // (calculadas independentemente do retrieval mode para preservar prioritização de PDF)
+        const keywords = extractKeywordsLegacy(message);
 
         // Separar top 3 com file_path para download de originais, resto usa resumos
-        const docsWithFile = relevantDocs.filter((d: any) => d.file_path);
+        const docsWithFile = uniqueDocs.filter((d: any) => d.file_path);
 
         // Se o fiscal perguntou sobre um elemento técnico específico, priorizar PDFs que o contêm em key_elements
         const elementTypes = ["estaca", "pilar", "viga", "sapata", "laje", "muro", "cortina", "coroamento", "fundação", "fundacao", "bloco", "armadura"];

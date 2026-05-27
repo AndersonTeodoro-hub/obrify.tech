@@ -32,3 +32,6 @@ SPEC_*.md
 
 # Supabase CLI cache
 supabase/.temp/
+
+# Backups de migração (manter em disco, não commitar)
+*.backup-pre-semantic
