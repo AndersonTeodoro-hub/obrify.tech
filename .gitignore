@@ -34,4 +34,4 @@ SPEC_*.md
 supabase/.temp/
 
 # Backups de migração (manter em disco, não commitar)
-*.backup-pre-semantic
+*.backup-*

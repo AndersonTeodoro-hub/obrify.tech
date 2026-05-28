@@ -739,66 +739,96 @@ Responde SEMPRE em português europeu.`;
 
     // (Instrução LNEC já está agora no system prompt, com mais peso)
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": anthropicKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-5-20250929",
-        max_tokens: 8000,
-        messages: [{ role: "user", content }],
-        system: systemPrompt,
-        tools: [
-          {
-            type: "web_search_20250305",
-            name: "web_search",
-          }
-        ],
-        // Quando há base de conhecimento com DCs LNEC, sugerimos tool_choice=auto:
-        // o modelo decide quantas pesquisas fazer (sem tecto) conforme o contexto,
-        // em vez de ser obrigado a chamar pelo menos uma tool.
-        ...(hasKnowledge ? { tool_choice: { type: "auto" } } : {}),
-      }),
-    });
+    // Loop de continuação para server tools: web_search pode pausar o turno
+    // (stop_reason="pause_turn"). Padrão oficial Anthropic: re-enviar messages com a
+    // resposta pausada anexada como assistant message, até stop_reason !== "pause_turn".
+    // Os resultados da pesquisa são preenchidos server-side; NÃO executamos a tool.
+    const MAX_LOOP_ITERATIONS = 5;
+    const loopMessages: any[] = [{ role: "user", content }];
+    let accumulatedText = "";
+    let totalWebSearches = 0;
+    let finalStopReason = "";
+    let iteration = 0;
 
-    if (!response.ok) {
-      const errBody = await response.text();
-      console.error("PAM: Claude API error body:", errBody);
-      throw new Error(`Claude API error: ${response.status} - ${errBody.substring(0, 300)}`);
+    while (iteration < MAX_LOOP_ITERATIONS) {
+      iteration++;
+
+      let result: any;
+      try {
+        const response = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": anthropicKey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-5-20250929",
+            max_tokens: 8000,
+            messages: loopMessages,
+            system: systemPrompt,
+            tools: [
+              {
+                type: "web_search_20250305",
+                name: "web_search",
+              }
+            ],
+            // tool_choice=auto quando há base de conhecimento: o modelo decide
+            // quantas pesquisas faz. Sem conhecimento, omitido (auto por defeito).
+            ...(hasKnowledge ? { tool_choice: { type: "auto" } } : {}),
+          }),
+        });
+
+        if (!response.ok) {
+          const errBody = await response.text();
+          console.error(`[PAM loop] iteração ${iteration} — Claude API error ${response.status}:`, errBody.substring(0, 300));
+          if (iteration === 1 && !accumulatedText) {
+            // Fail-loud: outage na 1ª chamada não pode ser mascarado como "aprovado com reservas"
+            throw new Error(`PAM API error: ${response.status} - ${errBody.substring(0, 300)}`);
+          }
+          break; // continuações: degradação graciosa, usa o acumulado
+        }
+
+        result = await response.json();
+      } catch (loopErr) {
+        console.error(`[PAM loop] iteração ${iteration} FALHOU na chamada API:`, loopErr);
+        if (iteration === 1 && !accumulatedText) {
+          // Fail-loud: outage na 1ª chamada não pode ser mascarado como "aprovado com reservas"
+          throw loopErr;
+        }
+        break; // continuações: degradação graciosa, usa o acumulado
+      }
+
+      // Acumular texto desta iteração (apenas blocos type==="text")
+      const iterText = (result.content || [])
+        .filter((b: any) => b.type === "text")
+        .map((b: any) => b.text || "")
+        .join("\n");
+      accumulatedText += (accumulatedText && iterText ? "\n" : "") + iterText;
+
+      totalWebSearches += result.usage?.server_tool_use?.web_search_requests ?? 0;
+      finalStopReason = result.stop_reason;
+
+      console.log(`[PAM loop] iteração ${iteration}/${MAX_LOOP_ITERATIONS}, stop_reason=${result.stop_reason}, web_searches_acumuladas=${totalWebSearches}`);
+
+      // Se NÃO pausou, o turno terminou — saímos do loop.
+      if (result.stop_reason !== "pause_turn") {
+        break;
+      }
+
+      // Pausou (server tool a meio): anexar a resposta as-is e continuar (padrão oficial).
+      loopMessages.push({ role: "assistant", content: result.content });
     }
 
-    const result = await response.json();
+    if (iteration >= MAX_LOOP_ITERATIONS && finalStopReason === "pause_turn") {
+      console.warn(`[PAM loop] atingiu o cap de ${MAX_LOOP_ITERATIONS} iterações ainda em pause_turn — análise pode estar incompleta`);
+    }
 
-    // Diagnóstico: stop_reason, tipos de blocks e nº de web searches efectivamente feitas
-    const blockTypes = (result.content || []).map((b: any) => b.type);
-    const webSearchCount = result.usage?.server_tool_use?.web_search_requests ?? 0;
-    console.log(`PAM: stop_reason=${result.stop_reason} block_types=${JSON.stringify(blockTypes)} web_searches=${webSearchCount}`);
-
-    if (webSearchCount === 0 && hasKnowledge) {
+    if (totalWebSearches === 0 && hasKnowledge) {
       console.warn("PAM: WARNING — web_search NÃO foi invocada apesar de haver base de conhecimento. Verificar se está habilitada na Anthropic Console (Settings → Privacy).");
     }
 
-    // Aviso explícito se ficou pendurado em tool_use (server tool não devia, mas garantir)
-    if (result.stop_reason === "tool_use") {
-      console.warn("PAM: WARNING — response stopped at tool_use. Server tool web_search may not have completed correctly.");
-    }
-
-    // pause_turn: server tools podem pausar a meio. Avisar — sem loop de continuação por agora.
-    if (result.stop_reason === "pause_turn") {
-      console.warn("PAM: WARNING — stop_reason=pause_turn. Resposta incompleta; análise pode estar truncada.");
-    }
-
-    // With web search, response may have multiple content blocks (text + tool results)
-    // Extract all text blocks and concatenate
-    const allText = (result.content || [])
-      .filter((block: any) => block.type === "text")
-      .map((block: any) => block.text || "")
-      .join("\n");
-    
-    const replyText = allText || "{}";
+    const replyText = accumulatedText || "{}";
 
     let analysis;
     try {
