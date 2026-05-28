@@ -1,9 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders } from "../_shared/cors.ts";
+import { voyageEmbed, voyageRerank } from "../_shared/embeddings/voyage-client.ts";
 
-// ── Fetch knowledge from eng_silva_project_knowledge ──
-async function fetchProjectKnowledge(
+// ── [LEGACY] Fetch knowledge from eng_silva_project_knowledge (keyword scoring) ──
+// Preservada como fallback de emergência + rollback. NÃO modificar.
+async function fetchProjectKnowledgeLegacy(
   supabase: any,
   obraId: string,
   materialCategory: string,
@@ -146,6 +148,186 @@ async function fetchProjectKnowledge(
     console.error("PAM-KNOWLEDGE: Error fetching knowledge:", err);
     return "";
   }
+}
+
+// ── Keyword map por categoria (14 categorias do dropdown do frontend) ──
+// Usado SÓ pela via determinística do retrieval híbrido como gate de relevância.
+// Mantido separado do mapa da legacy para não alterar o comportamento desta.
+const HYBRID_CATEGORY_KEYWORDS: Record<string, string[]> = {
+  "Aço (armaduras)": ["aço", "aco", "armadura", "armaduras", "ferro", "varão", "malha", "a500", "nervurado", "certificado", "ensaio", "tracção", "tracao", "dobragem", "soldabilidade", "en 10080", "lote", "siderurgia", "conformidade", "dop", "declaração de desempenho", "ficha técnica", "resistência à tracção", "megasteel", "chaveriat"],
+  "Betão (classes)": ["betão", "betao", "cimento", "c25", "c30", "c35", "c40", "resistência", "en 206", "ensaio", "compressão", "conformidade", "central", "abrams", "slump"],
+  "Cofragem": ["cofragem", "cofragens", "molde", "descofragem", "escoramento", "contraplacado"],
+  "Impermeabilização": ["impermeabilização", "membrana", "tela", "betuminosa", "geotêxtil", "dreno"],
+  "Isolamento Térmico": ["térmico", "etics", "xps", "eps", "poliuretano", "lã mineral", "reh"],
+  "Isolamento Acústico": ["acústico", "rrae", "ruído", "lã", "resiliente"],
+  "Revestimentos": ["revestimento", "cerâmico", "mosaico", "pedra", "reboco", "argamassa"],
+  "Tubagens e Acessórios": ["tubagem", "tubo", "ppr", "pvc", "pead", "válvula"],
+  "Equipamentos AVAC": ["avac", "climatização", "ventilação", "conduta", "chiller", "vrf"],
+  "Equipamentos Eléctricos": ["eléctrico", "quadro", "cabo", "disjuntor", "iluminação"],
+  "Caixilharia": ["caixilharia", "alumínio", "janela", "porta", "vidro"],
+  "Tintas e Acabamentos": ["tinta", "verniz", "primário", "pintura", "esmalte"],
+  "Elementos Pré-fabricados": ["pré-fabricado", "prefabricado", "préfabricado", "pré-esforçado", "preesforcado", "viga", "laje alveolar", "painel", "elemento estrutural prefabricado"],
+  "Outros": [], // sem keywords → via determinística inclui TODOS os certificados (fallback seguro)
+};
+
+const HYBRID_CERT_SPECIALTY = "Certificados e Ensaios";
+const HYBRID_CONTRACT_SPECIALTIES = ["Caderno de Encargos", "Mapa de Quantidades (MQT)", "Contrato", "Condições Técnicas"];
+
+// Normaliza texto para matching robusto: minúsculas + remove acentos.
+function normalizeForMatch(s: string): string {
+  return (s || "").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+}
+
+// Formata um documento para o contexto: nome + especialidade + summary limitado + key_elements.
+function formatDocBlock(doc: any, summaryWordLimit: number): string {
+  let block = `\n\n--- ${doc.document_name}${doc.specialty ? ` [${doc.specialty}]` : ""} ---`;
+  const summary = (doc.summary || "").split(" ").slice(0, summaryWordLimit).join(" ");
+  block += `\n${summary}`;
+  if (doc.key_elements && doc.key_elements.length > 0) {
+    const validElements = doc.key_elements
+      .filter((e: any) => e && e.type && e.id)
+      .slice(0, 3);
+    if (validElements.length > 0) {
+      block += `\nElementos: ${validElements.map((e: any) => `${e.type}:${e.id}${e.details ? ` (${e.details})` : ""}`).join("; ")}`;
+    }
+  }
+  return block;
+}
+
+// ── Retrieval híbrido: Via A determinística (certificados + contratuais) + Via B semântica ──
+async function fetchProjectKnowledgeHybrid(
+  supabase: any,
+  obraId: string,
+  materialCategory: string,
+  userId: string | null,
+  materialQuery: string,
+): Promise<string> {
+  // ═══ VIA A — DETERMINÍSTICA (sem threshold, sem score) ═══
+
+  // A1. Certificados: specialty = "Certificados e Ensaios", com gate de categoria por keywords.
+  let certQuery = supabase
+    .from("eng_silva_project_knowledge")
+    .select("id, document_name, document_type, specialty, summary, key_elements")
+    .eq("obra_id", obraId)
+    .eq("processed", true)
+    .eq("specialty", HYBRID_CERT_SPECIALTY);
+  if (userId) certQuery = certQuery.eq("user_id", userId);
+  const { data: allCerts, error: certErr } = await certQuery;
+  if (certErr) throw new Error(`Via A certs failed: ${certErr.message}`);
+
+  const keywords = (HYBRID_CATEGORY_KEYWORDS[materialCategory] || []).map(normalizeForMatch);
+  const certs = (allCerts || []).filter((doc: any) => {
+    if (keywords.length === 0) return true; // categoria sem keywords → incluir todos (fallback seguro)
+    const haystack = normalizeForMatch(
+      (doc.summary || "") + " " + (doc.document_name || "") + " " + JSON.stringify(doc.key_elements || []),
+    );
+    return keywords.some((kw) => haystack.includes(kw));
+  });
+
+  // A2. Contratuais e normativos: sempre incluídos, sem gate.
+  let contractQuery = supabase
+    .from("eng_silva_project_knowledge")
+    .select("id, document_name, document_type, specialty, summary, key_elements")
+    .eq("obra_id", obraId)
+    .eq("processed", true)
+    .in("specialty", HYBRID_CONTRACT_SPECIALTIES);
+  if (userId) contractQuery = contractQuery.eq("user_id", userId);
+  const { data: contractDocs, error: contractErr } = await contractQuery;
+  if (contractErr) throw new Error(`Via A contracts failed: ${contractErr.message}`);
+  const contracts = contractDocs || [];
+
+  // knowledge_ids já garantidos pela Via A — excluídos da Via B para evitar duplicação.
+  const viaAIds = new Set<string>([
+    ...certs.map((d: any) => d.id),
+    ...contracts.map((d: any) => d.id),
+  ]);
+
+  // ═══ VIA B — SEMÂNTICA (sobre os restantes docs do projecto) ═══
+  let semanticDocs: any[] = [];
+  const query = `${materialCategory}. ${materialQuery || ""}`.trim();
+  const queryEmbedding = await voyageEmbed({ input: query, inputType: "query" });
+
+  const { data: chunks, error: rpcErr } = await supabase.rpc("match_knowledge_embeddings", {
+    query_embedding: queryEmbedding[0],
+    match_obra_id: obraId,
+    match_user_id: userId,
+    match_count: 30,
+    match_threshold: 0.3,
+  });
+  if (rpcErr) throw new Error(`Via B RPC failed: ${rpcErr.message}`);
+
+  if (chunks && chunks.length > 0) {
+    // Rerank top-12
+    const reranked = await voyageRerank({
+      query,
+      documents: chunks.map((c: any) => c.chunk_text),
+      topK: 12,
+    });
+    const topChunks = reranked.map((r: any) => chunks[r.index]);
+
+    // Dedupe por knowledge_id + excluir os já garantidos pela Via A (preserva ordem do rerank).
+    const seen = new Set<string>();
+    const semanticIds: string[] = [];
+    for (const c of topChunks) {
+      const kid = c.knowledge_id;
+      if (kid && !viaAIds.has(kid) && !seen.has(kid)) {
+        seen.add(kid);
+        semanticIds.push(kid);
+      }
+    }
+
+    // Enriquecer com metadata (summary, key_elements) — a RPC não os devolve.
+    if (semanticIds.length > 0) {
+      const { data: enriched, error: enrichErr } = await supabase
+        .from("eng_silva_project_knowledge")
+        .select("id, document_name, specialty, summary, key_elements")
+        .in("id", semanticIds);
+      if (enrichErr) throw new Error(`Via B enrichment failed: ${enrichErr.message}`);
+      const byId: Record<string, any> = {};
+      for (const d of (enriched || [])) byId[d.id] = d;
+      semanticDocs = semanticIds.map((id) => byId[id]).filter(Boolean);
+    }
+  }
+
+  // ═══ COMBINAÇÃO ═══
+  if (certs.length === 0 && contracts.length === 0 && semanticDocs.length === 0) {
+    console.log("PAM-HYBRID: No relevant docs found for", materialCategory);
+    return "";
+  }
+
+  console.log(`PAM-HYBRID: certs=${certs.length} contracts=${contracts.length} semantic=${semanticDocs.length} (cat="${materialCategory}", gate_keywords=${keywords.length})`);
+
+  // Com muitos docs, reduz o summary para caber tudo (mesma heurística da legacy).
+  const totalDocs = certs.length + contracts.length + semanticDocs.length;
+  const summaryWordLimit = totalDocs > 10 ? 100 : 200;
+
+  let context = `\n\nBASE DE CONHECIMENTO DO PROJECTO (retrieval híbrido — ${totalDocs} documentos):`;
+
+  if (certs.length > 0) {
+    context += `\n\n## CERTIFICADOS DO MATERIAL (${certs.length} — analisa CADA UM individualmente)`;
+    certs.forEach((doc: any) => { context += formatDocBlock(doc, summaryWordLimit); });
+  }
+
+  if (contracts.length > 0) {
+    context += `\n\n## DOCUMENTOS CONTRATUAIS E NORMATIVOS DO PROJECTO (${contracts.length})`;
+    contracts.forEach((doc: any) => { context += formatDocBlock(doc, summaryWordLimit); });
+  }
+
+  if (semanticDocs.length > 0) {
+    context += `\n\n## ESPECIFICAÇÕES RELEVANTES DO PROJECTO (retrieval semântico — ${semanticDocs.length})`;
+    semanticDocs.forEach((doc: any) => { context += formatDocBlock(doc, summaryWordLimit); });
+  }
+
+  // Hard-cap 80000 chars — preserva o limite da versão actual.
+  if (context.length > 80000) {
+    context = context.substring(0, 80000) + "\n[...]";
+  }
+
+  if (certs.length > 0) {
+    context += `\n\nANALISA CADA UM dos ${certs.length} certificados acima individualmente. Não ignores nenhum. Cada fornecedor deve ter uma entrada na tabela de verificações de conformidade.`;
+  }
+
+  return context;
 }
 
 function getAnalysisPrompt(material_category: string): string {
@@ -430,11 +612,27 @@ serve(async (req) => {
       }
     }
 
-    // 6. Fetch knowledge from Eng. Silva's project knowledge base
-    const knowledgeContext = await fetchProjectKnowledge(supabase, obra_id, material_category, user_id);
+    // 6. Fetch knowledge from Eng. Silva's project knowledge base (retrieval híbrido + fallback legacy)
+    let knowledgeContext = "";
+    let retrievalMode = "hybrid";
+    try {
+      // materialQuery: sem dados de material extraídos antes da análise, usamos a categoria.
+      const materialQuery = material_category;
+      knowledgeContext = await fetchProjectKnowledgeHybrid(
+        supabase, obra_id, material_category, user_id, materialQuery,
+      );
+      console.log(`[PAM retrieval] hybrid OK, context length: ${knowledgeContext.length}`);
+    } catch (hybridErr) {
+      console.error(`[PAM retrieval] hybrid FAILED, fallback to legacy:`, hybridErr);
+      retrievalMode = "legacy";
+      knowledgeContext = await fetchProjectKnowledgeLegacy(
+        supabase, obra_id, material_category, user_id,
+      );
+      console.log(`[PAM retrieval] legacy fallback, context length: ${knowledgeContext.length}`);
+    }
     const hasKnowledge = knowledgeContext.length > 0;
 
-    console.log(`PAM: Knowledge context: ${hasKnowledge ? `${knowledgeContext.length} chars` : "none"}`);
+    console.log(`PAM: Knowledge context (${retrievalMode}): ${hasKnowledge ? `${knowledgeContext.length} chars` : "none"}`);
 
     // 7. Build context note based on available documents
     const docParts: string[] = [];
