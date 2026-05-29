@@ -312,7 +312,7 @@ export default function MaterialApprovals() {
         mfg_docs: mfgDocsBase64.length,
       }));
 
-      await supabase.functions.invoke('analyze-material-approval', {
+      const { error: invokeError } = await supabase.functions.invoke('analyze-material-approval', {
         body: {
           approval_id: approval.id,
           pdm_base64: pdmBase64,
@@ -328,6 +328,21 @@ export default function MaterialApprovals() {
           empreiteiro_email_mime: empreiteiroEmailMime,
         },
       });
+
+      if (invokeError) {
+        // Fail-loud do backend (HTTP 500, outage, erro): o invoke do supabase-js v2
+        // resolve com { error } em vez de rejeitar, por isso tratamos aqui — senão
+        // mostrávamos "Análise concluída!" e o registo ficava preso em "analyzing".
+        console.error('PAM analyse error:', invokeError);
+        toast.error('Erro na análise. Tenta novamente em alguns minutos.');
+        // A edge function pôs "analyzing" antes do throw — reverter para pending.
+        await supabase
+          .from('material_approvals')
+          .update({ status: 'pending', updated_at: new Date().toISOString() })
+          .eq('id', approval.id);
+        await loadApprovals();
+        return;
+      }
 
       toast.success('Análise concluída!');
       await loadApprovals();
