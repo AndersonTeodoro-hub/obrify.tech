@@ -107,9 +107,12 @@ function addFooter(doc: jsPDF, pageNum: number, totalPages: number): void {
  */
 async function loadImageFromStorage(filePath: string): Promise<string | null> {
   try {
-    const { data } = supabase.storage.from('captures').getPublicUrl(filePath);
-    
-    const response = await fetch(data.publicUrl);
+    const { data, error } = await supabase.storage
+      .from('captures')
+      .createSignedUrl(filePath, 3600);
+    if (error || !data) return null;
+
+    const response = await fetch(data.signedUrl);
     if (!response.ok) return null;
     
     const blob = await response.blob();
