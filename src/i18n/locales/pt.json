@@ -729,6 +729,7 @@
     "invalidToken": "Este convite não é válido ou não existe.",
     "alreadyUsed": "Este convite já foi utilizado.",
     "expired": "Este convite expirou.",
+    "emailMismatch": "Este convite foi enviado para outro email. Inicia sessão com o email convidado.",
     "alreadyMember": "Já é membro",
     "alreadyMemberDesc": "Já faz parte desta organização."
   },

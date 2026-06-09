@@ -154,55 +154,44 @@ export default function AcceptInvite() {
   };
 
   const acceptInvitation = async () => {
-    if (!user || !invitation) return;
+    if (!user || !invitation || !token) return;
 
     setAccepting(true);
     try {
-      // Check if user is already a member
-      const { data: existingMembership } = await supabase
-        .from('memberships')
-        .select('id')
-        .eq('org_id', invitation.org_id)
-        .eq('user_id', user.id)
-        .single();
+      // Redenção server-side (redeem_invitation): valida email/expiração/estado,
+      // insere site_members (ou membership org se site_ids vazio), marca accepted.
+      // Substitui o insert org-wide client-side, que ignorava site_ids.
+      const { data, error: redeemError } = await supabase.rpc('redeem_invitation', {
+        _token: token,
+      });
 
-      if (existingMembership) {
-        toast({
-          title: t('invite.alreadyMember'),
-          description: t('invite.alreadyMemberDesc'),
-        });
-        navigate('/app');
+      if (redeemError) {
+        // Erro ruidoso para diagnóstico
+        console.error('redeem_invitation failed:', redeemError);
+        const raw = redeemError.message || '';
+        let description = t('common.tryAgain');
+        if (raw.includes('não encontrado')) description = t('invite.invalidToken');
+        else if (raw.includes('expirado')) description = t('invite.expired');
+        else if (raw.includes('já usado') || raw.includes('cancelado')) description = t('invite.alreadyUsed');
+        else if (raw.includes('não corresponde')) description = t('invite.emailMismatch');
+        toast({ title: t('common.error'), description, variant: 'destructive' });
         return;
       }
 
-      // Create membership
-      const { error: membershipError } = await supabase
-        .from('memberships')
-        .insert({
-          org_id: invitation.org_id,
-          user_id: user.id,
-          role: invitation.role as any,
-        });
-
-      if (membershipError) {
-        throw membershipError;
-      }
-
-      // Mark invitation as accepted
-      await supabase
-        .from('invitations')
-        .update({ 
-          status: 'accepted', 
-          accepted_at: new Date().toISOString() 
-        })
-        .eq('id', invitation.id);
+      const result = data as { org_id: string; site_ids: string[] } | null;
+      const siteIds = result?.site_ids ?? [];
 
       toast({
         title: t('invite.accepted'),
         description: t('invite.welcomeToOrg', { org: invitation.organization?.name }),
       });
 
-      navigate('/app');
+      // Convite por obra → vai para a obra; convite org-wide → dashboard.
+      if (siteIds.length > 0) {
+        navigate(`/app/sites/${siteIds[0]}`);
+      } else {
+        navigate('/app');
+      }
     } catch (err) {
       console.error('Error accepting invitation:', err);
       toast({

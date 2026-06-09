@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.1"
+    PostgrestVersion: "14.4"
   }
   public: {
     Tables: {
@@ -587,11 +587,14 @@ export type Database = {
         Row: {
           area_id: string
           code: string
+          color: string | null
           created_at: string
           description: string | null
+          element_type: string | null
           floor_plan_file_id: string | null
           id: string
           marker_code: string | null
+          point_source: string | null
           pos_x: number | null
           pos_y: number | null
           updated_at: string
@@ -599,11 +602,14 @@ export type Database = {
         Insert: {
           area_id: string
           code: string
+          color?: string | null
           created_at?: string
           description?: string | null
+          element_type?: string | null
           floor_plan_file_id?: string | null
           id?: string
           marker_code?: string | null
+          point_source?: string | null
           pos_x?: number | null
           pos_y?: number | null
           updated_at?: string
@@ -611,11 +617,14 @@ export type Database = {
         Update: {
           area_id?: string
           code?: string
+          color?: string | null
           created_at?: string
           description?: string | null
+          element_type?: string | null
           floor_plan_file_id?: string | null
           id?: string
           marker_code?: string | null
+          point_source?: string | null
           pos_x?: number | null
           pos_y?: number | null
           updated_at?: string
@@ -703,6 +712,62 @@ export type Database = {
             columns: ["site_id"]
             isOneToOne: false
             referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      capture_silva_assessments: {
+        Row: {
+          ai_model: string | null
+          assessment_text: string
+          capture_id: string
+          created_at: string | null
+          documents_consulted: Json | null
+          findings: Json | null
+          id: string
+          nc_id: string | null
+          obra_id: string
+          prompt_used: string | null
+          recommendations: Json | null
+          severity: string | null
+          user_id: string
+        }
+        Insert: {
+          ai_model?: string | null
+          assessment_text: string
+          capture_id: string
+          created_at?: string | null
+          documents_consulted?: Json | null
+          findings?: Json | null
+          id?: string
+          nc_id?: string | null
+          obra_id: string
+          prompt_used?: string | null
+          recommendations?: Json | null
+          severity?: string | null
+          user_id: string
+        }
+        Update: {
+          ai_model?: string | null
+          assessment_text?: string
+          capture_id?: string
+          created_at?: string | null
+          documents_consulted?: Json | null
+          findings?: Json | null
+          id?: string
+          nc_id?: string | null
+          obra_id?: string
+          prompt_used?: string | null
+          recommendations?: Json | null
+          severity?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "capture_silva_assessments_capture_id_fkey"
+            columns: ["capture_id"]
+            isOneToOne: false
+            referencedRelation: "captures"
             referencedColumns: ["id"]
           },
         ]
@@ -975,6 +1040,53 @@ export type Database = {
           },
         ]
       }
+      eng_silva_knowledge_embeddings: {
+        Row: {
+          chunk_index: number
+          chunk_text: string
+          chunk_type: string
+          created_at: string
+          embedding: string
+          id: string
+          knowledge_id: string
+          metadata: Json | null
+          obra_id: string
+          user_id: string
+        }
+        Insert: {
+          chunk_index: number
+          chunk_text: string
+          chunk_type: string
+          created_at?: string
+          embedding: string
+          id?: string
+          knowledge_id: string
+          metadata?: Json | null
+          obra_id: string
+          user_id: string
+        }
+        Update: {
+          chunk_index?: number
+          chunk_text?: string
+          chunk_type?: string
+          created_at?: string
+          embedding?: string
+          id?: string
+          knowledge_id?: string
+          metadata?: Json | null
+          obra_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "eng_silva_knowledge_embeddings_knowledge_id_fkey"
+            columns: ["knowledge_id"]
+            isOneToOne: false
+            referencedRelation: "eng_silva_project_knowledge"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       eng_silva_memory: {
         Row: {
           conversation_summaries: Json | null
@@ -999,15 +1111,53 @@ export type Database = {
         }
         Relationships: []
       }
+      eng_silva_niveis: {
+        Row: {
+          cota: number | null
+          created_at: string
+          fase: string | null
+          id: string
+          obra_id: string
+          piso: string | null
+          specialty: string
+          tipo: string | null
+          user_id: string
+        }
+        Insert: {
+          cota?: number | null
+          created_at?: string
+          fase?: string | null
+          id?: string
+          obra_id: string
+          piso?: string | null
+          specialty: string
+          tipo?: string | null
+          user_id: string
+        }
+        Update: {
+          cota?: number | null
+          created_at?: string
+          fase?: string | null
+          id?: string
+          obra_id?: string
+          piso?: string | null
+          specialty?: string
+          tipo?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       eng_silva_project_knowledge: {
         Row: {
           created_at: string | null
           document_name: string
           document_type: string | null
+          fase: string | null
           file_path: string | null
           file_size: number | null
           id: string
           key_elements: Json | null
+          nivel_id: string | null
           obra_id: string
           processed: boolean | null
           specialty: string
@@ -1019,10 +1169,12 @@ export type Database = {
           created_at?: string | null
           document_name: string
           document_type?: string | null
+          fase?: string | null
           file_path?: string | null
           file_size?: number | null
           id?: string
           key_elements?: Json | null
+          nivel_id?: string | null
           obra_id: string
           processed?: boolean | null
           specialty: string
@@ -1034,10 +1186,12 @@ export type Database = {
           created_at?: string | null
           document_name?: string
           document_type?: string | null
+          fase?: string | null
           file_path?: string | null
           file_size?: number | null
           id?: string
           key_elements?: Json | null
+          nivel_id?: string | null
           obra_id?: string
           processed?: boolean | null
           specialty?: string
@@ -1045,7 +1199,15 @@ export type Database = {
           updated_at?: string | null
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "eng_silva_project_knowledge_nivel_id_fkey"
+            columns: ["nivel_id"]
+            isOneToOne: false
+            referencedRelation: "eng_silva_niveis"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       evidence_links: {
         Row: {
@@ -1190,6 +1352,7 @@ export type Database = {
       }
       incompaticheck_analyses: {
         Row: {
+          ai_analysis: Json | null
           completed_at: string | null
           created_at: string | null
           critical_count: number | null
@@ -1202,6 +1365,7 @@ export type Database = {
           warning_count: number | null
         }
         Insert: {
+          ai_analysis?: Json | null
           completed_at?: string | null
           created_at?: string | null
           critical_count?: number | null
@@ -1214,6 +1378,7 @@ export type Database = {
           warning_count?: number | null
         }
         Update: {
+          ai_analysis?: Json | null
           completed_at?: string | null
           created_at?: string | null
           critical_count?: number | null
@@ -1851,6 +2016,8 @@ export type Database = {
           created_at: string | null
           decided_at: string | null
           decided_by: string | null
+          email_file_mime: string | null
+          email_file_path: string | null
           final_decision: string | null
           fiscal_name: string | null
           fiscal_notes: Json | null
@@ -1880,6 +2047,8 @@ export type Database = {
           created_at?: string | null
           decided_at?: string | null
           decided_by?: string | null
+          email_file_mime?: string | null
+          email_file_path?: string | null
           final_decision?: string | null
           fiscal_name?: string | null
           fiscal_notes?: Json | null
@@ -1909,6 +2078,8 @@ export type Database = {
           created_at?: string | null
           decided_at?: string | null
           decided_by?: string | null
+          email_file_mime?: string | null
+          email_file_path?: string | null
           final_decision?: string | null
           fiscal_name?: string | null
           fiscal_notes?: Json | null
@@ -2616,6 +2787,38 @@ export type Database = {
           },
         ]
       }
+      site_members: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["membership_role"]
+          site_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["membership_role"]
+          site_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["membership_role"]
+          site_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "site_members_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sites: {
         Row: {
           address: string | null
@@ -2770,10 +2973,42 @@ export type Database = {
         }
         Returns: boolean
       }
+      has_site_access: {
+        Args: { _site_id: string; _user_id: string }
+        Returns: boolean
+      }
+      has_site_role: {
+        Args: {
+          _roles: Database["public"]["Enums"]["membership_role"][]
+          _site_id: string
+          _user_id: string
+        }
+        Returns: boolean
+      }
       is_org_member: {
         Args: { _org_id: string; _user_id: string }
         Returns: boolean
       }
+      match_knowledge_embeddings: {
+        Args: {
+          match_count?: number
+          match_obra_id: string
+          match_threshold?: number
+          match_user_id: string
+          query_embedding: string
+        }
+        Returns: {
+          chunk_text: string
+          chunk_type: string
+          document_name: string
+          document_type: string
+          id: string
+          knowledge_id: string
+          similarity: number
+          specialty: string
+        }[]
+      }
+      redeem_invitation: { Args: { _token: string }; Returns: Json }
     }
     Enums: {
       ai_detection_type:

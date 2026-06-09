@@ -729,6 +729,7 @@
     "invalidToken": "This invitation is invalid or does not exist.",
     "alreadyUsed": "This invitation has already been used.",
     "expired": "This invitation has expired.",
+    "emailMismatch": "This invitation was sent to a different email. Sign in with the invited email.",
     "alreadyMember": "Already a member",
     "alreadyMemberDesc": "You are already a member of this organization."
   },

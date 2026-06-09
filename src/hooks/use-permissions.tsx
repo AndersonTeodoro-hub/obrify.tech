@@ -31,6 +31,16 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   viewer: []
 };
 
+// Capacidades do fiscal convidado (acesso por obra via site_members, sem membership de org).
+// Set EXPLÍCITO — NÃO derivado de ROLE_PERMISSIONS: as flags de gestão (site CRUD,
+// convidar, gerir roles) ficam sempre OFF, mesmo que site_members.role seja alto.
+const SITE_FISCAL_PERMISSIONS: string[] = [
+  'canCreateInspection', 'canApproveInspection',
+  'canCreateNC', 'canCloseNC',
+  'canGenerateReports', 'canExportData',
+  'canUploadCaptures', 'canComment',
+];
+
 export interface Permissions {
   // State
   loading: boolean;
@@ -70,26 +80,56 @@ export interface Permissions {
 export function usePermissions(): Permissions {
   const { user } = useAuth();
 
-  const { data: membership, isLoading } = useQuery({
+  const { data: access, isLoading } = useQuery({
     queryKey: ['user-permissions', user?.id],
     queryFn: async () => {
       if (!user?.id) return null;
-      const { data, error } = await supabase
+
+      // 1. Membership de organização (caminho atual — inalterado para membros de org).
+      const { data: membership, error: mErr } = await supabase
         .from('memberships')
         .select('org_id, role')
         .eq('user_id', user.id)
         .limit(1)
         .maybeSingle();
-      
-      if (error) throw error;
-      return data;
+      if (mErr) throw mErr;
+      if (membership) {
+        return { source: 'org' as const, orgId: membership.org_id, role: membership.role as string };
+      }
+
+      // 2. Fallback: SEM membership → acesso por obra (fiscal convidado via site_members).
+      const { data: siteMember, error: sErr } = await supabase
+        .from('site_members')
+        .select('site_id, role')
+        .eq('user_id', user.id)
+        .limit(1)
+        .maybeSingle();
+      if (sErr) throw sErr;
+      if (!siteMember) return null;
+
+      // orgId resolvido a partir da obra do fiscal (primeira, se houver várias).
+      const { data: site, error: siteErr } = await supabase
+        .from('sites')
+        .select('org_id')
+        .eq('id', siteMember.site_id)
+        .maybeSingle();
+      if (siteErr) throw siteErr;
+
+      // role: null (NÃO o site_members.role) — evita que hasRole/hasAnyRole dê true
+      // por engano num check de role de org. As flags explícitas (SITE_FISCAL) mandam.
+      return { source: 'site' as const, orgId: site?.org_id ?? null, role: null };
     },
     enabled: !!user?.id,
     staleTime: 5 * 60 * 1000, // Cache 5 minutes
   });
 
-  const role = membership?.role || null;
-  const allowedPermissions = role ? ROLE_PERMISSIONS[role] || [] : [];
+  const role = access?.role ?? null;
+  // Membro de org → presets atuais. Fiscal de obra → set explícito (gestão sempre OFF).
+  const allowedPermissions = !access
+    ? []
+    : access.source === 'site'
+      ? SITE_FISCAL_PERMISSIONS
+      : (ROLE_PERMISSIONS[access.role] || []);
 
   const hasPermission = (permission: string) => 
     allowedPermissions.includes(permission);
@@ -97,7 +137,7 @@ export function usePermissions(): Permissions {
   return {
     loading: isLoading,
     role,
-    orgId: membership?.org_id || null,
+    orgId: access?.orgId ?? null,
     
     // Sites
     canCreateSite: hasPermission('canCreateSite'),
