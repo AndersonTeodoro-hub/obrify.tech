@@ -16,6 +16,8 @@ import { SiteDocumentsTab } from '@/components/sites/SiteDocumentsTab';
 import { SiteProjectsTab } from '@/components/sites/SiteProjectsTab';
 import { EditSiteModal } from '@/components/sites/EditSiteModal';
 import { SiteFloorPlanTab } from '@/components/sites/SiteFloorPlanTab';
+import { InviteMemberModal } from '@/components/settings/InviteMemberModal';
+import { usePermissions } from '@/hooks/use-permissions';
 
 export default function SiteDetail() {
   const { siteId } = useParams<{ siteId: string }>();
@@ -23,6 +25,8 @@ export default function SiteDetail() {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('overview');
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isInviteOpen, setIsInviteOpen] = useState(false);
+  const { canInviteMembers } = usePermissions();
 
   const { data: site, isLoading, error, refetch } = useQuery({
     queryKey: ['site', siteId],
@@ -70,10 +74,12 @@ export default function SiteDetail() {
 
   return (
     <div className="space-y-6">
-      <SiteHeader 
-        site={site} 
-        onEdit={() => setIsEditOpen(true)} 
+      <SiteHeader
+        site={site}
+        onEdit={() => setIsEditOpen(true)}
         onBack={() => navigate('/app/sites')}
+        canShare={canInviteMembers}
+        onShare={() => setIsInviteOpen(true)}
       />
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
@@ -124,6 +130,14 @@ export default function SiteDetail() {
           refetch();
           setIsEditOpen(false);
         }}
+      />
+
+      <InviteMemberModal
+        open={isInviteOpen}
+        onOpenChange={setIsInviteOpen}
+        orgId={site.org_id}
+        lockedSite={{ id: site.id, name: site.name }}
+        onInviteSent={() => setIsInviteOpen(false)}
       />
     </div>
   );

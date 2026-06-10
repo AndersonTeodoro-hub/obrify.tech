@@ -35,11 +35,13 @@ interface InviteMemberModalProps {
   onOpenChange: (open: boolean) => void;
   orgId: string | null;
   onInviteSent: () => void;
+  /** Quando definido, o convite fica pré-scoped a esta obra (site_ids bloqueado). */
+  lockedSite?: { id: string; name: string } | null;
 }
 
 const roles = ['admin', 'manager', 'inspector', 'contributor', 'viewer'] as const;
 
-export function InviteMemberModal({ open, onOpenChange, orgId, onInviteSent }: InviteMemberModalProps) {
+export function InviteMemberModal({ open, onOpenChange, orgId, onInviteSent, lockedSite }: InviteMemberModalProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
   const { toast } = useToast();
@@ -52,17 +54,21 @@ export function InviteMemberModal({ open, onOpenChange, orgId, onInviteSent }: I
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Pré-scoped a uma obra → 'admin' é incoerente (admin = org inteira, site_ids: []).
+  // Removê-lo evita que o branch admin no submit apague o scope silenciosamente.
+  const availableRoles = lockedSite ? roles.filter((r) => r !== 'admin') : roles;
+
   useEffect(() => {
     if (open && orgId) {
-      fetchSites();
+      if (!lockedSite) fetchSites();
       // Reset form
       setEmail('');
       setSelectedRole('viewer');
-      setSelectedSites([]);
+      setSelectedSites(lockedSite ? [lockedSite.id] : []);
       setInviteLink(null);
       setCopied(false);
     }
-  }, [open, orgId]);
+  }, [open, orgId, lockedSite?.id]);
 
   const fetchSites = async () => {
     if (!orgId) return;
@@ -209,7 +215,7 @@ export function InviteMemberModal({ open, onOpenChange, orgId, onInviteSent }: I
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {roles.map((role) => (
+                  {availableRoles.map((role) => (
                     <SelectItem key={role} value={role}>
                       <div className="flex flex-col">
                         <span>{t(`team.roles.${role}`)}</span>
@@ -223,13 +229,21 @@ export function InviteMemberModal({ open, onOpenChange, orgId, onInviteSent }: I
               </Select>
             </div>
 
-            {/* Sites (only for non-admin roles) */}
-            {selectedRole !== 'admin' && sites.length > 0 && (
+            {/* Obra bloqueada (pré-scoped) vs. seletor multi-obra (TeamTab) */}
+            {lockedSite ? (
+              <div className="space-y-2">
+                <Label>{t('team.sites')}</Label>
+                <div className="flex items-center gap-2 rounded-md border bg-muted/50 p-3">
+                  <Building2 className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">{lockedSite.name}</span>
+                </div>
+              </div>
+            ) : selectedRole !== 'admin' && sites.length > 0 ? (
               <div className="space-y-2">
                 <Label>{t('team.sites')}</Label>
                 <p className="text-xs text-muted-foreground mb-2">
-                  {selectedSites.length === 0 
-                    ? t('team.allSites') 
+                  {selectedSites.length === 0
+                    ? t('team.allSites')
                     : `${selectedSites.length} ${t('team.selectSites')}`}
                 </p>
                 <ScrollArea className="h-[150px] rounded-md border p-2">
@@ -251,7 +265,7 @@ export function InviteMemberModal({ open, onOpenChange, orgId, onInviteSent }: I
                   </div>
                 </ScrollArea>
               </div>
-            )}
+            ) : null}
           </div>
         )}
 

@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { MapPin, Building2, ArrowLeft, Pencil } from 'lucide-react';
+import { MapPin, Building2, ArrowLeft, Pencil, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
@@ -13,6 +13,8 @@ interface SiteHeaderProps {
   };
   onEdit: () => void;
   onBack: () => void;
+  onShare?: () => void;
+  canShare?: boolean;
 }
 
 const statusStyles: Record<string, string> = {
@@ -21,7 +23,7 @@ const statusStyles: Record<string, string> = {
   completed: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
 };
 
-export function SiteHeader({ site, onEdit, onBack }: SiteHeaderProps) {
+export function SiteHeader({ site, onEdit, onBack, onShare, canShare }: SiteHeaderProps) {
   const { t } = useTranslation();
 
   const getStatusLabel = (status: string) => {
@@ -78,10 +80,18 @@ export function SiteHeader({ site, onEdit, onBack }: SiteHeaderProps) {
         </div>
       </div>
 
-      <Button onClick={onEdit} className="shrink-0">
-        <Pencil className="mr-2 h-4 w-4" />
-        {t('siteDetail.editSite')}
-      </Button>
+      <div className="flex shrink-0 gap-2">
+        {canShare && onShare && (
+          <Button variant="outline" onClick={onShare}>
+            <UserPlus className="mr-2 h-4 w-4" />
+            {t('siteDetail.invite')}
+          </Button>
+        )}
+        <Button onClick={onEdit}>
+          <Pencil className="mr-2 h-4 w-4" />
+          {t('siteDetail.editSite')}
+        </Button>
+      </div>
     </div>
   );
 }
