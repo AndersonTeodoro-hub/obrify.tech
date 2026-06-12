@@ -35,11 +35,13 @@ export default function AcceptInvite() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const { user, signIn, signUp } = useAuth();
+  const { user, loading: sessionLoading, signIn, signUp } = useAuth();
   const { toast } = useToast();
 
   const [invitation, setInvitation] = useState<Invitation | null>(null);
-  const [loading, setLoading] = useState(true);
+  // loading APENAS do fetch do convite (não da sessão). Arranca false: só passa a
+  // true quando há user e o fetch corre. Sem user, nunca bloqueia em spinner.
+  const [loading, setLoading] = useState(false);
   const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -51,10 +53,12 @@ export default function AcceptInvite() {
   const [authLoading, setAuthLoading] = useState(false);
 
   useEffect(() => {
-    if (token) {
+    // Login-first: a policy SELECT viva exige email do convite == email autenticado.
+    // Ler como anónimo dá 0 linhas → "Convite Inválido". Só lê com user.
+    if (token && user) {
       fetchInvitation();
     }
-  }, [token]);
+  }, [token, user?.id]);
 
   useEffect(() => {
     // Pre-fill email from invitation
@@ -204,7 +208,10 @@ export default function AcceptInvite() {
     }
   };
 
-  if (loading) {
+  // Spinner enquanto: (1) sessão por resolver — evita decidir/flicker antes de saber
+  // se há user; (2) fetch do convite a correr; (3) já há user mas o convite ainda
+  // não chegou (evita o flash do card de aceitar vazio antes do fetch arrancar).
+  if (sessionLoading || loading || (user && !invitation && !error)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -241,29 +248,34 @@ export default function AcceptInvite() {
             <Building2 className="h-6 w-6 text-primary" />
           </div>
           <CardTitle>{t('invite.title')}</CardTitle>
-          <CardDescription>
-            {t('invite.joinOrg', { org: invitation?.organization?.name })}
-          </CardDescription>
+          {/* Pré-login (sem convite lido por RLS) não mostra "juntar-se a ..." vazio */}
+          {invitation && (
+            <CardDescription>
+              {t('invite.joinOrg', { org: invitation.organization?.name })}
+            </CardDescription>
+          )}
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {/* Invitation Details */}
-          <div className="p-4 bg-muted/50 rounded-lg space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">{t('invite.organization')}</span>
-              <span className="font-medium">{invitation?.organization?.name}</span>
+          {/* Detalhes do convite — só com convite carregado (pós-login); oculto pré-login */}
+          {invitation && (
+            <div className="p-4 bg-muted/50 rounded-lg space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">{t('invite.organization')}</span>
+                <span className="font-medium">{invitation.organization?.name}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">{t('team.role')}</span>
+                <Badge variant="outline" className={roleColors[invitation.role || 'viewer']}>
+                  {t(`team.roles.${invitation.role}`)}
+                </Badge>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">{t('team.email')}</span>
+                <span className="text-sm">{invitation.email}</span>
+              </div>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">{t('team.role')}</span>
-              <Badge variant="outline" className={roleColors[invitation?.role || 'viewer']}>
-                {t(`team.roles.${invitation?.role}`)}
-              </Badge>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">{t('team.email')}</span>
-              <span className="text-sm">{invitation?.email}</span>
-            </div>
-          </div>
+          )}
 
           {user ? (
             // User is logged in - show accept button
