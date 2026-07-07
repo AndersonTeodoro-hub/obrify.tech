@@ -22,7 +22,7 @@ export function compressBlobToBase64(
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(blob);
-    const img = new Image();
+    const img = new window.Image();
 
     img.onload = () => {
       URL.revokeObjectURL(url);

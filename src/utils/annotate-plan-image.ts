@@ -76,9 +76,9 @@ export async function overlayPlans(
   const overlayImg = await pdfPageToImage(overlayPdfBase64, overlayPage, scale);
 
   return new Promise((resolve) => {
-    const imgBase = new Image();
+    const imgBase = new window.Image();
     imgBase.onload = () => {
-      const imgOverlay = new Image();
+      const imgOverlay = new window.Image();
       imgOverlay.onload = () => {
         // Use the larger dimensions
         const w = Math.max(imgBase.width, imgOverlay.width);
@@ -237,7 +237,7 @@ export function annotateImage(
   annotations: ZoneAnnotation[]
 ): Promise<string> {
   return new Promise((resolve) => {
-    const img = new Image();
+    const img = new window.Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
       canvas.width = img.width;

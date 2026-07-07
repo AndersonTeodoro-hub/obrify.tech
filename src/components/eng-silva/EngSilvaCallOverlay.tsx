@@ -27,7 +27,7 @@ function visualizerColor(state: VoiceState): string {
 
 async function compressImage(file: File, maxWidth = 800): Promise<string> {
   return new Promise((resolve, reject) => {
-    const img = new Image();
+    const img = new window.Image();
     const canvas = document.createElement('canvas');
     const reader = new FileReader();
 
