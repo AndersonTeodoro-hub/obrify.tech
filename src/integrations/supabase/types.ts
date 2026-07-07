@@ -772,12 +772,84 @@ export type Database = {
           },
         ]
       }
+      capture_contexts: {
+        Row: {
+          ambiente: string | null
+          archived_at: string | null
+          atividade: string | null
+          cota: number | null
+          created_at: string
+          created_by: string
+          especialidade: string | null
+          fase: string | null
+          id: string
+          label: string
+          last_used_at: string | null
+          nivel_id: string | null
+          piso: string | null
+          site_id: string
+          updated_at: string
+        }
+        Insert: {
+          ambiente?: string | null
+          archived_at?: string | null
+          atividade?: string | null
+          cota?: number | null
+          created_at?: string
+          created_by: string
+          especialidade?: string | null
+          fase?: string | null
+          id?: string
+          label: string
+          last_used_at?: string | null
+          nivel_id?: string | null
+          piso?: string | null
+          site_id: string
+          updated_at?: string
+        }
+        Update: {
+          ambiente?: string | null
+          archived_at?: string | null
+          atividade?: string | null
+          cota?: number | null
+          created_at?: string
+          created_by?: string
+          especialidade?: string | null
+          fase?: string | null
+          id?: string
+          label?: string
+          last_used_at?: string | null
+          nivel_id?: string | null
+          piso?: string | null
+          site_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "capture_contexts_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "capture_contexts_nivel_id_fkey"
+            columns: ["nivel_id"]
+            isOneToOne: false
+            referencedRelation: "eng_silva_niveis"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       captures: {
         Row: {
           ai_analyzed: boolean | null
           ai_analyzed_at: string | null
+          ambiente: string | null
+          atividade: string | null
           capture_point_id: string | null
           captured_at: string | null
+          context_id: string | null
           created_at: string
           duration_seconds: number | null
           especialidade: string | null
@@ -797,8 +869,11 @@ export type Database = {
         Insert: {
           ai_analyzed?: boolean | null
           ai_analyzed_at?: string | null
+          ambiente?: string | null
+          atividade?: string | null
           capture_point_id?: string | null
           captured_at?: string | null
+          context_id?: string | null
           created_at?: string
           duration_seconds?: number | null
           especialidade?: string | null
@@ -818,8 +893,11 @@ export type Database = {
         Update: {
           ai_analyzed?: boolean | null
           ai_analyzed_at?: string | null
+          ambiente?: string | null
+          atividade?: string | null
           capture_point_id?: string | null
           captured_at?: string | null
+          context_id?: string | null
           created_at?: string
           duration_seconds?: number | null
           especialidade?: string | null
@@ -842,6 +920,13 @@ export type Database = {
             columns: ["capture_point_id"]
             isOneToOne: false
             referencedRelation: "capture_points"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "captures_context_id_fkey"
+            columns: ["context_id"]
+            isOneToOne: false
+            referencedRelation: "capture_contexts"
             referencedColumns: ["id"]
           },
           {

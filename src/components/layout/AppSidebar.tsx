@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  LayoutDashboard, Building2, HardHat, Camera, ClipboardCheck, BarChart3, Plane, Settings, LogOut, AlertTriangle, Search, BookOpen, FileCheck,
+  LayoutDashboard, Building2, HardHat, Camera, ClipboardCheck, BarChart3, Plane, Settings, LogOut, AlertTriangle, Search, BookOpen, FileCheck, Layers,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { supabase } from '@/integrations/supabase/client';
@@ -40,6 +40,7 @@ export function AppSidebar() {
     { title: t('nav.organizations'), url: '/app/organizations', icon: Building2 },
     { title: t('nav.sites'), url: '/app/sites', icon: HardHat },
     { title: t('nav.captures'), url: '/app/captures', icon: Camera },
+    { title: 'Estrutura da Obra', url: '/app/estrutura-obra', icon: Layers },
     { title: t('nav.inspections'), url: '/app/inspections', icon: ClipboardCheck },
     { title: t('nav.nonconformities'), url: '/app/nonconformities', icon: AlertTriangle },
     { title: t('nav.reports'), url: '/app/reports', icon: BarChart3 },

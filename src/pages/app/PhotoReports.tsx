@@ -31,6 +31,8 @@ type CaptureMeta = {
   fase?: string | null;
   piso?: string | null;
   cota?: number | null;
+  ambiente?: string | null;
+  atividade?: string | null;
   notes?: string | null;
   captured_at?: string | null;
 };
@@ -424,7 +426,7 @@ export default function PhotoReports() {
       const day = format(reportDate, 'yyyy-MM-dd');
       const { data: caps, error: capErr } = await supabase
         .from('captures')
-        .select('id, file_path, captured_at, fase, especialidade, notes, eng_silva_niveis!captures_nivel_id_fkey ( piso, cota )')
+        .select('id, file_path, captured_at, fase, especialidade, ambiente, atividade, notes, eng_silva_niveis!captures_nivel_id_fkey ( piso, cota )')
         .eq('site_id', siteRow.id)
         .gte('captured_at', `${day}T00:00:00`)
         .lte('captured_at', `${day}T23:59:59`)
@@ -449,7 +451,7 @@ export default function PhotoReports() {
           file: new File([blob], `${c.id}.jpg`, { type: blob.type || 'image/jpeg' }),
           preview: URL.createObjectURL(blob),
           description: '',
-          location: [c.especialidade, piso ? `${piso}${cota != null ? ` (${cota})` : ''}` : '']
+          location: [c.especialidade, piso ? `${piso}${cota != null ? ` (${cota})` : ''}` : '', c.ambiente, c.atividade]
             .filter(Boolean)
             .join(' — '),
           sort_order: photos.length + imported.length,
@@ -459,6 +461,8 @@ export default function PhotoReports() {
             fase: c.fase,
             piso,
             cota,
+            ambiente: c.ambiente,
+            atividade: c.atividade,
             notes: c.notes,
             captured_at: c.captured_at,
           },
@@ -490,6 +494,8 @@ export default function PhotoReports() {
       fase: photo.capture?.fase,
       piso: photo.capture?.piso,
       cota: photo.capture?.cota,
+      ambiente: photo.capture?.ambiente,
+      atividade: photo.capture?.atividade,
       notas: photo.capture?.notes,
       data: photo.capture?.captured_at
         ? new Date(photo.capture.captured_at).toLocaleDateString('pt-PT')

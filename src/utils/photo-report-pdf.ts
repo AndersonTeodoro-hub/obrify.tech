@@ -164,9 +164,22 @@ export function generatePhotoReportPDF(
     const gap = CW - colW * 2; // gap between columns
     const photoH = 56; // photo height
 
+    const LH = 3; // altura de linha da legenda (mm)
+
+    // Mede a altura da legenda de uma foto (sem cortes) — usa o mesmo fontSize do render
+    const measureCaption = (photo?: PhotoForExport): number => {
+      if (!photo) return 0;
+      doc.setFontSize(7.5);
+      let h = 3.5; // "Foto N"
+      if (photo.description) h += doc.splitTextToSize(`Descrição: ${photo.description}`, colW).length * LH;
+      if (photo.location) h += doc.splitTextToSize(`Local: ${photo.location}`, colW).length * LH;
+      return h;
+    };
+
     for (let i = 0; i < photoImages.length; i += 2) {
-      // Each row: photo + description takes ~photoH + 20mm
-      const rowHeight = photoH + 22;
+      // Altura da linha = foto + a legenda MAIS ALTA das duas colunas (texto completo, sem cortes)
+      const captionH = Math.max(measureCaption(photoImages[i]), measureCaption(photoImages[i + 1]));
+      const rowHeight = photoH + 4 + captionH + 6;
       ensureSpace(rowHeight);
 
       for (let col = 0; col < 2; col++) {
@@ -185,7 +198,7 @@ export function generatePhotoReportPDF(
           doc.text('Imagem indisponível', xBase + colW / 2, y + photoH / 2, { align: 'center' });
         }
 
-        // Caption below photo
+        // Caption below photo (texto completo — a altura da linha já o acomoda)
         let captionY = y + photoH + 4;
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(8);
@@ -193,25 +206,19 @@ export function generatePhotoReportPDF(
         doc.text(`Foto ${idx + 1}`, xBase, captionY);
         captionY += 3.5;
 
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(60, 60, 60);
         if (photo.description) {
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(7.5);
-          doc.setTextColor(60, 60, 60);
-          const descLines = doc.splitTextToSize(`Descrição: ${photo.description}`, colW);
-          for (const dl of descLines.slice(0, 3)) {
+          for (const dl of doc.splitTextToSize(`Descrição: ${photo.description}`, colW)) {
             doc.text(dl, xBase, captionY);
-            captionY += 3;
+            captionY += LH;
           }
         }
-
         if (photo.location) {
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(7.5);
-          doc.setTextColor(60, 60, 60);
-          const locLines = doc.splitTextToSize(`Local: ${photo.location}`, colW);
-          for (const ll of locLines.slice(0, 2)) {
+          for (const ll of doc.splitTextToSize(`Local: ${photo.location}`, colW)) {
             doc.text(ll, xBase, captionY);
-            captionY += 3;
+            captionY += LH;
           }
         }
       }

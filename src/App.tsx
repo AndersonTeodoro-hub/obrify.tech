@@ -31,6 +31,7 @@ import IncompatiCheck from "./pages/app/IncompatiCheck";
 import ProjectKnowledge from "./pages/app/ProjectKnowledge";
 import MaterialApprovals from "./pages/app/MaterialApprovals";
 import PhotoReports from "./pages/app/PhotoReports";
+import EstruturaObra from "./pages/app/EstruturaObra";
 import AcceptInvite from "./pages/AcceptInvite";
 
 const queryClient = new QueryClient();
@@ -61,6 +62,7 @@ const App = () => (
                 <Route path="sites" element={<Sites />} />
                 <Route path="sites/:siteId" element={<SiteDetail />} />
                 <Route path="captures" element={<Captures />} />
+                <Route path="estrutura-obra" element={<EstruturaObra />} />
                 <Route path="inspections" element={<Inspections />} />
                 <Route path="inspections/:inspectionId" element={<InspectionDetail />} />
                 <Route path="nonconformities" element={<NonConformities />} />

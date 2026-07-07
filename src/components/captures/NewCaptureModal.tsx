@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Image, Video, View } from 'lucide-react';
@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
 import {
@@ -38,9 +39,9 @@ const JPEG_QUALITY = 0.85;
 const RETRY_ATTEMPTS = 3;
 const RETRY_BASE_DELAY = 1000; // 1s, 2s, 4s
 
-// Compressão de imagem via Canvas nativo
-function compressImage(file: File): Promise<File> {
-  return new Promise((resolve, reject) => {
+// Compressão de imagem via Canvas nativo, com carimbo opcional (rótulo do contexto + data/hora)
+function compressImage(file: File, overlayLines?: string[]): Promise<File> {
+  return new Promise((resolve) => {
     // Não comprimir vídeos ou ficheiros não-imagem
     if (!file.type.startsWith('image/')) {
       resolve(file);
@@ -74,10 +75,30 @@ function compressImage(file: File): Promise<File> {
 
         ctx.drawImage(img, 0, 0, width, height);
 
+        // Carimbo visível: faixa semitransparente no rodapé com contexto + data/hora
+        const lines = (overlayLines || []).filter(Boolean);
+        if (lines.length > 0) {
+          const fontSize = Math.max(14, Math.round(width * 0.028));
+          const pad = Math.round(fontSize * 0.5);
+          const lineH = Math.round(fontSize * 1.35);
+          const bandH = lineH * lines.length + pad * 2;
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+          ctx.fillRect(0, height - bandH, width, bandH);
+          ctx.fillStyle = '#FFFFFF';
+          ctx.font = `${fontSize}px Arial, sans-serif`;
+          ctx.textBaseline = 'top';
+          lines.forEach((ln, i) => ctx.fillText(ln, pad, height - bandH + pad + i * lineH));
+        }
+
         canvas.toBlob(
           (blob) => {
-            if (!blob || blob.size >= file.size) {
-              // Compressão não reduziu — usar original
+            if (!blob) {
+              resolve(file); // fallback: enviar original
+              return;
+            }
+            // Com carimbo, usar sempre o canvas (senão perdia-se o carimbo).
+            // Sem carimbo, manter o atalho "não reduziu -> original".
+            if (lines.length === 0 && blob.size >= file.size) {
               resolve(file);
               return;
             }
@@ -147,7 +168,7 @@ const MAX_FILES = 10;
 
 // Contexto pegajoso: última obra/especialidade/fase/nível escolhidos pelo fiscal.
 const STICKY_KEY = 'obrify_capture_context';
-type StickyCtx = { siteId?: string; especialidade?: string; fase?: string; nivelId?: string };
+type StickyCtx = { siteId?: string; especialidade?: string; fase?: string; nivelId?: string; contextId?: string };
 function loadSticky(): StickyCtx {
   try {
     return JSON.parse(localStorage.getItem(STICKY_KEY) || '{}') as StickyCtx;
@@ -168,8 +189,13 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
   const [especialidade, setEspecialidade] = useState<string>(sticky.especialidade || '');
   const [fase, setFase] = useState<string>(sticky.fase || '');
   const [nivelId, setNivelId] = useState<string>(sticky.nivelId || '');
+  const [contextId, setContextId] = useState<string>(sticky.contextId || '');
+  const [contextSearch, setContextSearch] = useState('');
   const [captureType, setCaptureType] = useState<CaptureCategory>('photo');
   const [notes, setNotes] = useState('');
+
+  // Input escondido para abrir a câmara imediatamente ao escolher um contexto
+  const quickInputRef = useRef<HTMLInputElement>(null);
 
   // File upload state
   const [files, setFiles] = useState<FileWithPreview[]>([]);
@@ -245,6 +271,34 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
     (n) => (!especialidade || n.specialty === especialidade) && (!fase || n.fase === fase),
   );
 
+  // Contextos de captura da obra (não arquivados), ordenados por uso recente
+  const { data: contexts = [] } = useQuery({
+    queryKey: ['capture-contexts', selectedSite],
+    queryFn: async () => {
+      if (!selectedSite) return [];
+      const { data, error } = await supabase
+        .from('capture_contexts')
+        .select('id, especialidade, fase, piso, cota, ambiente, atividade, nivel_id, label')
+        .eq('site_id', selectedSite)
+        .is('archived_at', null)
+        .order('last_used_at', { ascending: false, nullsFirst: false });
+      if (error) {
+        console.error('Erro a carregar contextos:', error);
+        toast.error('Erro ao carregar contextos: ' + error.message);
+        return [];
+      }
+      return data || [];
+    },
+    enabled: !!selectedSite,
+  });
+
+  // Escolher contexto -> abrir a câmara IMEDIATAMENTE (síncrono; Safari/iOS exige
+  // que a abertura da câmara seja resposta directa ao gesto, sem setTimeout).
+  const pickContext = (id: string) => {
+    setContextId(id);
+    quickInputRef.current?.click();
+  };
+
   // Handle file selection
   const handleFilesSelected = useCallback(async (newFiles: File[]) => {
     const processedFiles: FileWithPreview[] = [];
@@ -296,6 +350,19 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
       const site = sites.find((s) => s.id === selectedSite);
       if (!site) throw new Error('Selecione a obra');
 
+      // Metadados: do contexto escolhido, com fallback aos seletores manuais
+      const ctxSel = contexts.find((c: any) => c.id === contextId) || null;
+      const nivelSel = niveisFiltrados.find((n) => n.id === nivelId) || null;
+      const espValue = ctxSel ? ctxSel.especialidade : (especialidade || null);
+      const faseValue = ctxSel ? ctxSel.fase : (fase || null);
+      const nivelValue = ctxSel ? ctxSel.nivel_id : (nivelId || null);
+      const ambValue = ctxSel ? ctxSel.ambiente : null;
+      const atvValue = ctxSel ? ctxSel.atividade : null;
+      // Rótulo para o carimbo (do contexto, ou construído dos seletores)
+      const ctxLabel = ctxSel?.label
+        || [espValue, nivelSel?.piso ? `${nivelSel.piso}${nivelSel.cota != null ? ` (${nivelSel.cota})` : ''}` : '']
+          .filter(Boolean).join(' · ');
+
       let successCount = 0;
       let errorCount = 0;
 
@@ -324,7 +391,13 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             progress: 10,
           });
 
-          const compressedFile = await compressImage(fileData.file);
+          // Data/hora da captura (consistente entre carimbo e captured_at)
+          const capturedAt = fileData.exifData?.dateTime || new Date();
+          const stampDate = capturedAt.toLocaleString('pt-PT', {
+            day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+          });
+          const overlay = ctxLabel ? [ctxLabel, stampDate] : [stampDate];
+          const compressedFile = await compressImage(fileData.file, overlay);
 
           // Avisar se após compressão ainda for grande
           if (compressedFile.size > WARN_SIZE_COMPRESSED && compressedFile.size < fileData.file.size) {
@@ -359,14 +432,17 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             user_id: user.id,
             file_path: filePath,
             source_type: CATEGORY_TO_SOURCE[captureType],
-            processing_status: 'PENDING',
-            captured_at: fileData.exifData?.dateTime?.toISOString() || new Date().toISOString(),
+            processing_status: 'DONE', // estado neutro: não há processamento automático
+            captured_at: capturedAt.toISOString(),
             size_bytes: compressedFile.size,
             mime_type: compressedFile.type,
             notes: notes.trim() || null,
-            especialidade: especialidade || null,
-            fase: fase || null,
-            nivel_id: nivelId || null,
+            especialidade: espValue,
+            fase: faseValue,
+            nivel_id: nivelValue,
+            ambiente: ambValue,
+            atividade: atvValue,
+            context_id: ctxSel?.id || null,
           });
 
           if (insertError) throw insertError;
@@ -401,8 +477,16 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
       // Persistir contexto pegajoso para a próxima captura
       localStorage.setItem(
         STICKY_KEY,
-        JSON.stringify({ siteId: selectedSite, especialidade, fase, nivelId }),
+        JSON.stringify({ siteId: selectedSite, especialidade, fase, nivelId, contextId }),
       );
+      // Marcar uso recente do contexto (ordenação na lista de captura rápida)
+      if (contextId && successCount > 0) {
+        supabase
+          .from('capture_contexts')
+          .update({ last_used_at: new Date().toISOString() })
+          .eq('id', contextId)
+          .then(({ error }) => { if (error) console.error('touch context:', error); });
+      }
       if (successCount > 0) {
         toast.success(t('captures.uploadComplete'), {
           description: t('captures.uploadSuccessMultiple', { count: successCount }),
@@ -474,6 +558,8 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
                 setEspecialidade('');
                 setFase('');
                 setNivelId('');
+                setContextId('');
+                setContextSearch('');
               }}
               disabled={isUploading}
             >
@@ -490,8 +576,55 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             </Select>
           </div>
 
-          {/* Especialidade (opcional — do catálogo de níveis da obra) */}
-          {selectedSite && especialidades.length > 0 && (
+          {/* Input escondido: câmara imediata ao escolher contexto (mobile) */}
+          <input
+            ref={quickInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files) handleFilesSelected(Array.from(e.target.files));
+              e.target.value = '';
+            }}
+          />
+
+          {/* Captura rápida: lista de contextos da obra (1 toque -> câmara) */}
+          {selectedSite && contexts.length > 0 && (
+            <div className="space-y-2">
+              <Label>Contexto</Label>
+              <Input
+                placeholder="Pesquisar contexto..."
+                value={contextSearch}
+                onChange={(e) => setContextSearch(e.target.value)}
+                disabled={isUploading}
+              />
+              <div className="max-h-48 overflow-y-auto space-y-1">
+                {contexts
+                  .filter((c: any) => c.label.toLowerCase().includes(contextSearch.toLowerCase()))
+                  .map((c: any) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => pickContext(c.id)}
+                      disabled={isUploading}
+                      className={`w-full text-left px-3 py-2 rounded-md border text-sm transition ${
+                        contextId === c.id ? 'border-primary bg-primary/10' : 'border-border hover:bg-muted/50'
+                      }`}
+                    >
+                      {c.label}
+                    </button>
+                  ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Escolher um contexto abre a câmara e as fotos herdam os metadados.
+              </p>
+            </div>
+          )}
+
+          {/* Especialidade (opcional — fallback quando a obra não tem contextos) */}
+          {selectedSite && contexts.length === 0 && especialidades.length > 0 && (
             <div className="space-y-2">
               <Label>Especialidade (opcional)</Label>
               <Select
@@ -518,7 +651,7 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
           )}
 
           {/* Fase (opcional) */}
-          {selectedSite && fases.length > 0 && (
+          {selectedSite && contexts.length === 0 && fases.length > 0 && (
             <div className="space-y-2">
               <Label>Fase (opcional)</Label>
               <Select
@@ -544,7 +677,7 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
           )}
 
           {/* Piso / Cota (opcional) */}
-          {selectedSite && niveisFiltrados.length > 0 && (
+          {selectedSite && contexts.length === 0 && niveisFiltrados.length > 0 && (
             <div className="space-y-2">
               <Label>Piso / Cota (opcional)</Label>
               <Select value={nivelId} onValueChange={setNivelId} disabled={isUploading}>
@@ -563,10 +696,10 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             </div>
           )}
 
-          {/* Sem catálogo de níveis para esta obra — captura na mesma */}
-          {selectedSite && obraId && niveis.length === 0 && (
+          {/* Sem contextos nem catálogo de níveis para esta obra — captura na mesma */}
+          {selectedSite && contexts.length === 0 && obraId && niveis.length === 0 && (
             <p className="text-sm text-muted-foreground">
-              Sem catálogo de níveis para esta obra — pode criar a captura na mesma.
+              Sem contextos definidos para esta obra — pode criar a captura na mesma ou definir a Estrutura da Obra.
             </p>
           )}
 

@@ -1,8 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { format } from 'date-fns';
-import { Image, Video, View, Loader2 } from 'lucide-react';
+import { Image, Video, View } from 'lucide-react';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
-import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import type { CaptureWithDetails, CaptureCategory } from '@/types/captures';
 import { SOURCE_TO_CATEGORY, captureTitle, captureLocationLabel } from '@/types/captures';
@@ -29,7 +28,6 @@ export function CaptureCard({ capture, onClick }: CaptureCardProps) {
   const category = SOURCE_TO_CATEGORY[capture.source_type];
   const Icon = TYPE_ICONS[category];
 
-  const isProcessing = capture.processing_status === 'PENDING' || capture.processing_status === 'PROCESSING';
   const captureDate = capture.captured_at || capture.created_at;
 
   return (
@@ -54,16 +52,6 @@ export function CaptureCard({ capture, onClick }: CaptureCardProps) {
                 {t(`captures.${category}`)}
               </div>
             </div>
-
-            {/* Processing status */}
-            {isProcessing && (
-              <div className="absolute top-3 right-3">
-                <Badge variant="secondary" className="flex items-center gap-1 backdrop-blur-sm">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  {t('captures.processing')}
-                </Badge>
-              </div>
-            )}
 
             {/* Info overlay at bottom - always visible */}
             <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 via-black/50 to-transparent">

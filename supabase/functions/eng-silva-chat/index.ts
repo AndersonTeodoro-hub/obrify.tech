@@ -429,6 +429,8 @@ serve(async (req) => {
         m.especialidade ? `Especialidade: ${m.especialidade}.` : "",
         m.fase ? `Fase: ${m.fase}.` : "",
         (m.piso || m.cota != null) ? `Nível: ${m.piso || ""}${m.cota != null ? ` (cota ${m.cota})` : ""}.` : "",
+        m.ambiente ? `Ambiente: ${m.ambiente}.` : "",
+        m.atividade ? `Atividade: ${m.atividade}.` : "",
         m.data ? `Data: ${m.data}.` : "",
         m.notas ? `Notas do fiscal: ${m.notas}.` : "",
       ].filter(Boolean).join(" ");
