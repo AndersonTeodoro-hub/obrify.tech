@@ -70,10 +70,11 @@ Responde APENAS com JSON valido, sem markdown:
   "confidence": 0.0-1.0
 } ] }
 Se o documento for memoria descritiva ou caderno de encargos, extrai apenas elementos
-com localizacao ou dimensao concreta - especificacoes gerais nao sao elementos.`;
+com localizacao ou dimensao concreta - especificacoes gerais nao sao elementos.
+Usa o CONTEXTO DA OBRA para preencher o campo piso dos elementos a partir das cotas lidas, quando o contexto definir a correspondencia. Nunca contradigas o contexto da obra.`;
 }
 
-async function callClaude(apiKey: string, pdfBase64: string, prompt: string, pStart: number, pEnd: number): Promise<any[]> {
+async function callClaude(apiKey: string, pdfBase64: string, prompt: string, contextBlock: string, pStart: number, pEnd: number): Promise<any[]> {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
@@ -84,6 +85,7 @@ async function callClaude(apiKey: string, pdfBase64: string, prompt: string, pSt
       messages: [{
         role: "user",
         content: [
+          { type: "text", text: contextBlock },
           { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdfBase64 } },
           { type: "text", text: `Extrai os elementos conforme as instrucoes. Este lote corresponde as paginas ${pStart} a ${pEnd} do documento original.` },
         ],
@@ -157,6 +159,16 @@ serve(async (req) => {
       );
     }
 
+    // Carrega o contexto da obra (convencoes do fiscal - autoridade sobre pisos/cotas)
+    const { data: obra, error: obraErr } = await supabase
+      .from("incompaticheck_obras")
+      .select("analysis_context")
+      .eq("id", proj.obra_id)
+      .single();
+    if (obraErr) throw new Error(`Falha a carregar obra: ${obraErr.message}`);
+    const analysisContext = (obra?.analysis_context ?? "").trim() || "(nenhum contexto definido)";
+    const contextBlock = `NOME DO FICHEIRO: ${proj.name}\n\nCONTEXTO DA OBRA (convencoes definidas pelo fiscal - AUTORIDADE MAXIMA sobre pisos, cotas e nomenclatura; prevalece sobre qualquer inferencia tua):\n${analysisContext}`;
+
     const { data: run, error: runErr } = await supabase
       .from("incompaticheck_analysis_runs")
       .insert({ user_id: user.id, obra_id: proj.obra_id, project_id: proj.id, stage: "EXTRACTION", status: "RUNNING" })
@@ -196,7 +208,7 @@ serve(async (req) => {
       }
 
       const prompt = buildExtractionPrompt(inv.especialidade, inv.doc_type, s + 1, e + 1);
-      const elements = await callClaude(anthropicKey, batchBase64, prompt, s + 1, e + 1);
+      const elements = await callClaude(anthropicKey, batchBase64, prompt, contextBlock, s + 1, e + 1);
 
       for (const el of elements) {
         const sourcePage = Number(el.source_page);

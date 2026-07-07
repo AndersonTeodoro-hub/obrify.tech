@@ -4,6 +4,7 @@ export interface Obra {
   nome: string;
   cidade: string;
   fiscal: string;
+  analysis_context: string | null;
   created_at: string;
   updated_at: string;
 }

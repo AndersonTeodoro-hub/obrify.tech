@@ -93,6 +93,17 @@ export function useIncompaticheck() {
     }
   }, [user, obraAtiva]);
 
+  const updateObraContext = useCallback(async (obraId: string, context: string) => {
+    // Tabela incompaticheck_obras nao tem analysis_context nos tipos gerados — cast controlado.
+    const { error } = await (supabase as any)
+      .from('incompaticheck_obras')
+      .update({ analysis_context: context })
+      .eq('id', obraId);
+    if (error) throw new Error(`Erro ao guardar contexto: ${error.message}`);
+    setObras(prev => prev.map(o => o.id === obraId ? { ...o, analysis_context: context } : o));
+    setObraAtiva(prev => (prev && prev.id === obraId ? { ...prev, analysis_context: context } : prev));
+  }, []);
+
   const loadKnowledgeNames = useCallback(async (obraId: string) => {
     if (!user) return;
     const { data } = await supabase
@@ -1418,6 +1429,7 @@ export function useIncompaticheck() {
     loadObras,
     createObra,
     deleteObra,
+    updateObraContext,
     selectObra,
     uploadProject,
     deleteProject,

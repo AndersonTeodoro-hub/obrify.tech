@@ -53,9 +53,10 @@ Responde APENAS com JSON valido, sem markdown, sem backticks, sem texto extra:
   "summary": "2-3 frases: o que este documento contem e para que serve na analise de incompatibilidades",
   "confidence": 0.0-1.0
 }
-Se o documento cobrir varias especialidades, escolhe a dominante e refere as outras no summary. Nao inventes: se nao consegues identificar um campo, usa null.`;
+Se o documento cobrir varias especialidades, escolhe a dominante e refere as outras no summary. Nao inventes: se nao consegues identificar um campo, usa null.
+Usa o NOME DO FICHEIRO e o CONTEXTO DA OBRA para identificar pisos e niveis. Se o contexto da obra definir correspondencias piso-cota ou convencoes de nomenclatura (ex: N-06 no nome = nivel -6), aplica-as obrigatoriamente. So inferes pisos por conta propria quando nem o nome nem o contexto ajudam.`;
 
-async function callClaude(apiKey: string, pdfBase64: string): Promise<any> {
+async function callClaude(apiKey: string, pdfBase64: string, contextBlock: string): Promise<any> {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -70,6 +71,7 @@ async function callClaude(apiKey: string, pdfBase64: string): Promise<any> {
       messages: [{
         role: "user",
         content: [
+          { type: "text", text: contextBlock },
           { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdfBase64 } },
           { type: "text", text: "Classifica este documento conforme as instrucoes." },
         ],
@@ -135,6 +137,16 @@ serve(async (req) => {
     if (proj.user_id !== user.id) throw new Error("Sem permissao sobre este projeto");
     project = proj;
 
+    // Carrega o contexto da obra (convencoes do fiscal - autoridade sobre pisos/cotas)
+    const { data: obra, error: obraErr } = await supabase
+      .from("incompaticheck_obras")
+      .select("analysis_context")
+      .eq("id", proj.obra_id)
+      .single();
+    if (obraErr) throw new Error(`Falha a carregar obra: ${obraErr.message}`);
+    const analysisContext = (obra?.analysis_context ?? "").trim() || "(nenhum contexto definido)";
+    const contextBlock = `NOME DO FICHEIRO: ${proj.name}\n\nCONTEXTO DA OBRA (convencoes definidas pelo fiscal - AUTORIDADE MAXIMA sobre pisos, cotas e nomenclatura; prevalece sobre qualquer inferencia tua):\n${analysisContext}`;
+
     // Cria run RUNNING
     const { data: run, error: runErr } = await supabase
       .from("incompaticheck_analysis_runs")
@@ -167,7 +179,7 @@ serve(async (req) => {
     }
 
     // Classifica com Claude
-    const parsed = await callClaude(anthropicKey, pdfBase64);
+    const parsed = await callClaude(anthropicKey, pdfBase64, contextBlock);
 
     const docType = DOC_TYPES.has(parsed.doc_type) ? parsed.doc_type : "outro";
     const especialidade = typeof parsed.especialidade === "string" && parsed.especialidade.trim()

@@ -12,6 +12,7 @@ import OverlayModal from './incompaticheck/OverlayModal';
 import { useEngSilvaContext } from '@/hooks/use-eng-silva-context';
 import { useAnalysisPipeline } from '@/hooks/useAnalysisPipeline';
 import ElementsExplorer from '@/components/incompaticheck/ElementsExplorer';
+import ContextObraModal from './incompaticheck/ContextObraModal';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -43,6 +44,7 @@ import {
   Play,
   ScanLine,
   Boxes,
+  Settings2,
 } from 'lucide-react';
 import { Eye, EyeOff } from 'lucide-react';
 import { format } from 'date-fns';
@@ -103,6 +105,7 @@ export default function IncompatiCheck() {
   const [showObraModal, setShowObraModal] = useState(false);
   const [showObraList, setShowObraList] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
+  const [showContext, setShowContext] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const [previewProject, setPreviewProject] = useState<Project | null>(null);
   const [filter, setFilter] = useState('all');
@@ -579,6 +582,15 @@ export default function IncompatiCheck() {
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-base">Projectos Carregados</CardTitle>
                     <div className="flex gap-1.5">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowContext(true)}
+                        className="gap-1.5"
+                      >
+                        <Settings2 className="w-3.5 h-3.5" />
+                        Contexto
+                      </Button>
                       <Button
                         variant="accent"
                         size="sm"
@@ -1207,6 +1219,12 @@ export default function IncompatiCheck() {
         onClose={() => setOverlayFinding(null)}
         finding={overlayFinding}
         projects={ic.projects}
+      />
+      <ContextObraModal
+        isOpen={showContext}
+        onClose={() => setShowContext(false)}
+        currentContext={ic.obraAtiva?.analysis_context ?? null}
+        onSave={async (ctx) => { if (ic.obraAtiva) await ic.updateObraContext(ic.obraAtiva.id, ctx); }}
       />
     </div>
   );
