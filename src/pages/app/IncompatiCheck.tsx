@@ -10,6 +10,8 @@ import ObraListModal from './incompaticheck/ObraListModal';
 import ProjectPreviewModal from './incompaticheck/ProjectPreviewModal';
 import OverlayModal from './incompaticheck/OverlayModal';
 import { useEngSilvaContext } from '@/hooks/use-eng-silva-context';
+import { useAnalysisPipeline } from '@/hooks/useAnalysisPipeline';
+import ElementsExplorer from '@/components/incompaticheck/ElementsExplorer';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -38,6 +40,9 @@ import {
   Layers,
   Mail,
   Copy,
+  Play,
+  ScanLine,
+  Boxes,
 } from 'lucide-react';
 import { Eye, EyeOff } from 'lucide-react';
 import { format } from 'date-fns';
@@ -93,6 +98,8 @@ interface AnalysisResult {
 
 export default function IncompatiCheck() {
   const ic = useIncompaticheck();
+  const pipeline = useAnalysisPipeline(ic.obraAtiva?.id ?? null, ic.projects);
+  const [elementsRefreshKey, setElementsRefreshKey] = useState(0);
   const [showObraModal, setShowObraModal] = useState(false);
   const [showObraList, setShowObraList] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
@@ -136,6 +143,11 @@ export default function IncompatiCheck() {
       toast.error('Não foi possível copiar');
     }
   };
+
+  // Recarrega o ElementsExplorer sempre que as contagens de elementos mudam
+  useEffect(() => {
+    setElementsRefreshKey(k => k + 1);
+  }, [pipeline.elementCounts]);
 
   // Push IncompatiCheck context to global Eng. Silva panel
   const { setContext: setSilvaContext } = useEngSilvaContext();
@@ -566,10 +578,22 @@ export default function IncompatiCheck() {
                 <CardHeader className="pb-4">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-base">Projectos Carregados</CardTitle>
-                    <Button variant="outline" size="sm" onClick={() => setShowUpload(true)} className="gap-1.5">
-                      <Plus className="w-3.5 h-3.5" />
-                      Carregar Projecto
-                    </Button>
+                    <div className="flex gap-1.5">
+                      <Button
+                        variant="accent"
+                        size="sm"
+                        onClick={pipeline.runPrepareAll}
+                        disabled={pipeline.preparing || ic.projects.length === 0}
+                        className="gap-1.5"
+                      >
+                        {pipeline.preparing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                        Preparar Análise
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => setShowUpload(true)} className="gap-1.5">
+                        <Plus className="w-3.5 h-3.5" />
+                        Carregar Projecto
+                      </Button>
+                    </div>
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {ic.projects.length} projecto{ic.projects.length !== 1 ? 's' : ''} na obra{' '}
@@ -577,6 +601,29 @@ export default function IncompatiCheck() {
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {/* Progresso da preparacao (inventario/extracao) */}
+                  {pipeline.progress.active && (
+                    <div className="space-y-1.5 rounded-lg bg-primary/5 border border-primary/20 p-3">
+                      <p className="text-xs text-foreground">
+                        {pipeline.progress.stage === 'INVENTORY' ? 'A inventariar' : 'A extrair elementos de'}{' '}
+                        <span className="font-medium">{pipeline.progress.projectName}</span>
+                        {pipeline.progress.total > 1 && ` (${pipeline.progress.index}/${pipeline.progress.total})`}
+                      </p>
+                      <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                        <div className="h-full bg-primary rounded-full animate-pulse" style={{ width: '70%' }} />
+                      </div>
+                    </div>
+                  )}
+                  {/* Erro ruidoso da pipeline (nao desaparece como um toast) */}
+                  {pipeline.pipelineError && (
+                    <div className="rounded-lg bg-destructive/10 border border-destructive/40 p-3 space-y-1.5">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 text-destructive mt-0.5 flex-shrink-0" />
+                        <p className="text-xs text-destructive whitespace-pre-wrap break-words flex-1">{pipeline.pipelineError}</p>
+                      </div>
+                      <Button variant="ghost" size="sm" onClick={pipeline.clearError} className="h-6 text-xs">Fechar</Button>
+                    </div>
+                  )}
                   {Object.entries(projectsByType).map(([type, projects]) => {
                     const typeConfig = PROJECT_TYPES[type];
                     return (
@@ -591,35 +638,69 @@ export default function IncompatiCheck() {
                           </Badge>
                         </div>
                         <div className="space-y-1.5">
-                          {projects.map(project => (
-                            <div
-                              key={project.id}
-                              className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-muted/50 hover:bg-muted transition-colors cursor-pointer group"
-                              onClick={() => setPreviewProject(project)}
-                            >
-                              <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-1.5">
-                                  <p className="text-sm font-medium text-foreground truncate">{project.name}</p>
-                                  {ic.knowledgeNames.has(project.name) && (
-                                    <Badge variant="secondary" className="text-[9px] px-1 py-0 gap-0.5 flex-shrink-0">
-                                      🧠 Knowledge
-                                    </Badge>
-                                  )}
-                                </div>
-                                <p className="text-[11px] text-muted-foreground">
-                                  {formatFileSize(project.file_size)} · {format(new Date(project.created_at), "d MMM yyyy", { locale: pt })}
-                                </p>
-                              </div>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); ic.deleteProject(project.id, project.file_path); }}
-                                className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-destructive/10"
-                                aria-label="Remover"
+                          {projects.map(project => {
+                            const inv = pipeline.inventories[project.id];
+                            const count = pipeline.elementCounts[project.id] ?? 0;
+                            const rowActive = pipeline.progress.active && pipeline.progress.projectId === project.id;
+                            return (
+                            <div key={project.id} className="rounded-lg bg-muted/50 hover:bg-muted transition-colors group">
+                              <div
+                                className="flex items-center gap-3 px-3 py-2.5 cursor-pointer"
+                                onClick={() => setPreviewProject(project)}
                               >
-                                <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                              </button>
+                                <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1.5">
+                                    <p className="text-sm font-medium text-foreground truncate">{project.name}</p>
+                                    {ic.knowledgeNames.has(project.name) && (
+                                      <Badge variant="secondary" className="text-[9px] px-1 py-0 gap-0.5 flex-shrink-0">
+                                        🧠 Knowledge
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-muted-foreground">
+                                    {formatFileSize(project.file_size)} · {format(new Date(project.created_at), "d MMM yyyy", { locale: pt })}
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); ic.deleteProject(project.id, project.file_path); }}
+                                  className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-destructive/10"
+                                  aria-label="Remover"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                                </button>
+                              </div>
+                              {/* Linha da pipeline: inventario + elementos + accoes */}
+                              <div className="flex items-center gap-2 px-3 pb-2.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                                <InventoryBadge inv={inv} running={rowActive && pipeline.progress.stage === 'INVENTORY'} />
+                                {count > 0 && (
+                                  <Badge variant="outline" className="text-[10px] gap-1">
+                                    <Boxes className="w-3 h-3" />{count} elementos
+                                  </Badge>
+                                )}
+                                <div className="flex-1" />
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 gap-1 text-[11px]"
+                                  disabled={pipeline.preparing || rowActive}
+                                  onClick={() => pipeline.runInventory(project).catch(() => {})}
+                                >
+                                  <ScanLine className="w-3 h-3" /> Inventariar
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 gap-1 text-[11px]"
+                                  disabled={pipeline.preparing || rowActive || !inv || inv.processing_status !== 'DONE'}
+                                  onClick={() => pipeline.runExtraction(project).catch(() => {})}
+                                >
+                                  <Boxes className="w-3 h-3" /> Extrair
+                                </Button>
+                              </div>
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     );
@@ -1098,6 +1179,11 @@ export default function IncompatiCheck() {
             </Card>
           )}
 
+          {/* ---- ELEMENTOS EXTRAIDOS (Onda 1) ---- */}
+          {ic.obraAtiva && Object.values(pipeline.elementCounts).some(c => c > 0) && (
+            <ElementsExplorer obraId={ic.obraAtiva.id} refreshKey={elementsRefreshKey} />
+          )}
+
           {/* ---- ESCLARECIMENTOS & PROPOSTAS (PDE) ---- */}
           {(hasResults || ic.analysis || ic.pdeDocuments.length > 0) && (
             <PdeSection ic={ic} clientLogo={clientLogo} fiscalLogo={fiscalLogo} />
@@ -1382,5 +1468,29 @@ function PdeSection({ ic, clientLogo, fiscalLogo }: { ic: ReturnType<typeof useI
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/* ========== Inventory Badge (Onda 1) ========== */
+function InventoryBadge({ inv, running }: {
+  inv?: { processing_status: string; especialidade: string; doc_type: string; pisos: string[]; error_message: string | null };
+  running: boolean;
+}) {
+  if (running) {
+    return <Badge variant="secondary" className="text-[10px] gap-1"><Loader2 className="w-3 h-3 animate-spin" /> A inventariar</Badge>;
+  }
+  if (!inv || inv.processing_status === 'PENDING') {
+    return <Badge variant="outline" className="text-[10px] text-muted-foreground">Sem inventário</Badge>;
+  }
+  if (inv.processing_status === 'RUNNING') {
+    return <Badge variant="secondary" className="text-[10px] gap-1"><Loader2 className="w-3 h-3 animate-spin" /> A inventariar</Badge>;
+  }
+  if (inv.processing_status === 'ERROR') {
+    return <Badge variant="critical" className="text-[10px]" title={inv.error_message || 'Erro'}>Erro no inventário</Badge>;
+  }
+  return (
+    <Badge variant="success" className="text-[10px]">
+      {inv.especialidade} · {inv.doc_type}{inv.pisos?.length ? ` · ${inv.pisos.slice(0, 2).join(', ')}${inv.pisos.length > 2 ? '…' : ''}` : ''}
+    </Badge>
   );
 }

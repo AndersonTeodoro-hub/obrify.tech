@@ -143,3 +143,51 @@ export const VERDICT_CONFIG: Record<string, { label: string; color: string; bg: 
   approved_with_reservations: { label: 'Aprovado c/ Reservas', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', icon: '⚠️' },
   rejected: { label: 'Rejeitado', color: '#ef4444', bg: 'rgba(239,68,68,0.1)', icon: '❌' },
 };
+
+// ---- ONDA 1: Inventario (Estagio 0) e Elementos (Estagio 1) ----
+
+export type ProcessingStatus = 'PENDING' | 'RUNNING' | 'DONE' | 'ERROR';
+
+export interface InventoryRow {
+  id: string;
+  user_id: string;
+  obra_id: string;
+  project_id: string;
+  especialidade: string;
+  doc_type: string;
+  pisos: string[];
+  zonas: string[];
+  sistema_eixos: string | null;
+  escala: string | null;
+  num_paginas: number | null;
+  summary: string | null;
+  confidence: number | null;
+  processing_status: ProcessingStatus;
+  error_message: string | null;
+  created_at: string;
+  analyzed_at: string | null;
+}
+
+export interface ElementRow {
+  id: string;
+  user_id: string;
+  obra_id: string;
+  project_id: string;
+  inventory_id: string | null;
+  especialidade: string;
+  element_type: string;
+  element_ref: string | null;
+  piso: string | null;
+  cota_base: number | null;
+  cota_topo: number | null;
+  cota_raw: string | null;
+  eixo_ref: string | null;
+  dimensions: Record<string, number> | null;
+  material: string | null;
+  route: Array<{ de?: string; para?: string; piso?: string; cota?: number }> | null;
+  source_page: number;
+  source_zone: string | null;
+  raw_evidence: string;
+  confidence: number;
+  created_at: string;
+}
