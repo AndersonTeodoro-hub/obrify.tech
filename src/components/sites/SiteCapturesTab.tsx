@@ -93,8 +93,15 @@ export function SiteCapturesTab({ siteId, siteName }: SiteCapturesTabProps) {
 
       const profileMap = new Map(profiles?.map(p => [p.user_id, p]));
 
-      return (capturesData || []).map(capture => ({
+      return (capturesData || []).map((capture: any) => ({
         ...capture,
+        site: capture.capture_point?.area?.floor?.site
+          ? { id: capture.capture_point.area.floor.site.id, name: capture.capture_point.area.floor.site.name }
+          : null,
+        fase: null,
+        especialidade: null,
+        nivel: null,
+        notes: null,
         profile: profileMap.get(capture.user_id) || null,
       })) as CaptureWithDetails[];
     },

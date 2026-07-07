@@ -145,17 +145,29 @@ const CATEGORY_TO_SOURCE: Record<CaptureCategory, CaptureSource> = {
 
 const MAX_FILES = 10;
 
+// Contexto pegajoso: última obra/especialidade/fase/nível escolhidos pelo fiscal.
+const STICKY_KEY = 'obrify_capture_context';
+type StickyCtx = { siteId?: string; especialidade?: string; fase?: string; nivelId?: string };
+function loadSticky(): StickyCtx {
+  try {
+    return JSON.parse(localStorage.getItem(STICKY_KEY) || '{}') as StickyCtx;
+  } catch {
+    return {};
+  }
+}
+
 export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
 
-  // Selection state
-  const [selectedSite, setSelectedSite] = useState<string>('');
-  const [selectedFloor, setSelectedFloor] = useState<string>('');
-  const [selectedArea, setSelectedArea] = useState<string>('');
-  const [selectedPoint, setSelectedPoint] = useState<string>('');
+  // Selection state (contexto pegajoso via localStorage)
+  const sticky = loadSticky();
+  const [selectedSite, setSelectedSite] = useState<string>(sticky.siteId || '');
+  const [especialidade, setEspecialidade] = useState<string>(sticky.especialidade || '');
+  const [fase, setFase] = useState<string>(sticky.fase || '');
+  const [nivelId, setNivelId] = useState<string>(sticky.nivelId || '');
   const [captureType, setCaptureType] = useState<CaptureCategory>('photo');
   const [notes, setNotes] = useState('');
 
@@ -186,10 +198,10 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
       if (!memberships?.length) return [];
 
       const orgIds = memberships.map((m) => m.org_id);
-      
+
       const { data: sites } = await supabase
         .from('sites')
-        .select('id, name, org_id')
+        .select('id, name, org_id, incompaticheck_obra_id')
         .in('org_id', orgIds)
         .order('name');
 
@@ -198,56 +210,40 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
     enabled: !!user && open,
   });
 
-  // Fetch floors for selected site
-  const { data: floors = [], isLoading: isLoadingFloors } = useQuery({
-    queryKey: ['site-floors', selectedSite],
-    queryFn: async () => {
-      if (!selectedSite) return [];
-      
-      const { data } = await supabase
-        .from('floors')
-        .select('id, name, level')
-        .eq('site_id', selectedSite)
-        .order('level');
+  // Ponte: obra Silva (incompaticheck) desta obra, para carregar o catálogo de níveis
+  const selectedSiteObj = sites.find((s) => s.id === selectedSite);
+  const obraId = (selectedSiteObj as any)?.incompaticheck_obra_id as string | null | undefined;
 
+  // Catálogo de níveis (Especialidade > Fase > Piso/Cota) da obra
+  const { data: niveis = [] } = useQuery({
+    queryKey: ['eng-silva-niveis', obraId],
+    queryFn: async () => {
+      if (!obraId) return [];
+      const { data, error } = await supabase
+        .from('eng_silva_niveis')
+        .select('id, specialty, fase, piso, cota, tipo')
+        .eq('obra_id', obraId)
+        .order('specialty');
+      if (error) {
+        console.error('Erro a carregar níveis:', error);
+        toast.error('Erro ao carregar níveis: ' + error.message);
+        return [];
+      }
       return data || [];
     },
-    enabled: !!selectedSite,
+    enabled: !!obraId,
   });
 
-  // Fetch areas for selected floor
-  const { data: areas = [], isLoading: isLoadingAreas } = useQuery({
-    queryKey: ['floor-areas', selectedFloor],
-    queryFn: async () => {
-      if (!selectedFloor) return [];
-      
-      const { data } = await supabase
-        .from('areas')
-        .select('id, name')
-        .eq('floor_id', selectedFloor)
-        .order('name');
-
-      return data || [];
-    },
-    enabled: !!selectedFloor,
-  });
-
-  // Fetch capture points for selected area
-  const { data: capturePoints = [], isLoading: isLoadingPoints } = useQuery({
-    queryKey: ['area-capture-points', selectedArea],
-    queryFn: async () => {
-      if (!selectedArea) return [];
-      
-      const { data } = await supabase
-        .from('capture_points')
-        .select('id, code, description')
-        .eq('area_id', selectedArea)
-        .order('code');
-
-      return data || [];
-    },
-    enabled: !!selectedArea,
-  });
+  const especialidades = [...new Set(niveis.map((n) => n.specialty).filter(Boolean))] as string[];
+  const fases = [...new Set(
+    niveis
+      .filter((n) => !especialidade || n.specialty === especialidade)
+      .map((n) => n.fase)
+      .filter(Boolean),
+  )] as string[];
+  const niveisFiltrados = niveis.filter(
+    (n) => (!especialidade || n.specialty === especialidade) && (!fase || n.fase === fase),
+  );
 
   // Handle file selection
   const handleFilesSelected = useCallback(async (newFiles: File[]) => {
@@ -291,45 +287,14 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
     });
   }, []);
 
-  // Get or create capture point
-  const getOrCreateCapturePoint = async (): Promise<string | null> => {
-    // If a point is selected, use it
-    if (selectedPoint) return selectedPoint;
-
-    // If no points exist, create a default one
-    if (capturePoints.length === 0 && selectedArea) {
-      const { data, error } = await supabase
-        .from('capture_points')
-        .insert({
-          area_id: selectedArea,
-          code: 'DEFAULT',
-          description: t('captures.defaultPoint'),
-        })
-        .select('id')
-        .single();
-
-      if (error) {
-        console.error('Error creating default point:', error);
-        return null;
-      }
-      return data.id;
-    }
-
-    // Use first available point
-    return capturePoints[0]?.id || null;
-  };
-
   // Upload mutation
   const uploadMutation = useMutation({
     mutationFn: async () => {
       if (!user || files.length === 0) throw new Error('Missing required data');
 
-      const pointId = await getOrCreateCapturePoint();
-      if (!pointId) throw new Error('No capture point available');
-
-      // Get org_id from site
+      // Obter org_id a partir da obra seleccionada
       const site = sites.find((s) => s.id === selectedSite);
-      if (!site) throw new Error('Site not found');
+      if (!site) throw new Error('Selecione a obra');
 
       let successCount = 0;
       let errorCount = 0;
@@ -375,7 +340,7 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
           // Fase 2: Upload com retry
           const timestamp = Date.now();
           const safeName = compressedFile.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-          const filePath = `${site.org_id}/${selectedSite}/${pointId}/${timestamp}_${fileData.id.slice(0, 8)}_${safeName}`;
+          const filePath = `${site.org_id}/${selectedSite}/${timestamp}_${fileData.id.slice(0, 8)}_${safeName}`;
 
           await uploadWithRetry('captures', filePath, compressedFile, {
             cacheControl: '3600',
@@ -387,9 +352,10 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             progress: 80,
           });
 
-          // Fase 3: Insert na BD
+          // Fase 3: Insert na BD (por site_id directo; ponto de captura já não é obrigatório)
           const { error: insertError } = await supabase.from('captures').insert({
-            capture_point_id: pointId,
+            site_id: selectedSite,
+            capture_point_id: null,
             user_id: user.id,
             file_path: filePath,
             source_type: CATEGORY_TO_SOURCE[captureType],
@@ -398,6 +364,9 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             size_bytes: compressedFile.size,
             mime_type: compressedFile.type,
             notes: notes.trim() || null,
+            especialidade: especialidade || null,
+            fase: fase || null,
+            nivel_id: nivelId || null,
           });
 
           if (insertError) throw insertError;
@@ -410,7 +379,8 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
           });
           successCount++;
         } catch (error: any) {
-          console.error('Upload error:', error);
+          console.error('Upload/insert error:', error);
+          toast.error(`${fileData.file.name}: ${error.message || 'falha ao guardar'}`);
           setFiles((prev) =>
             prev.map((f) =>
               f.id === fileData.id
@@ -428,6 +398,11 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
       return { successCount, errorCount };
     },
     onSuccess: ({ successCount, errorCount }) => {
+      // Persistir contexto pegajoso para a próxima captura
+      localStorage.setItem(
+        STICKY_KEY,
+        JSON.stringify({ siteId: selectedSite, especialidade, fase, nivelId }),
+      );
       if (successCount > 0) {
         toast.success(t('captures.uploadComplete'), {
           description: t('captures.uploadSuccessMultiple', { count: successCount }),
@@ -456,13 +431,9 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
   });
 
   const handleClose = () => {
-    // Cleanup
+    // Cleanup (mantém o contexto pegajoso: obra/especialidade/fase/nível)
     files.forEach((f) => URL.revokeObjectURL(f.preview));
     setFiles([]);
-    setSelectedSite('');
-    setSelectedFloor('');
-    setSelectedArea('');
-    setSelectedPoint('');
     setCaptureType('photo');
     setNotes('');
     setIsUploading(false);
@@ -476,7 +447,12 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
     uploadMutation.mutate();
   };
 
-  const isValid = selectedArea && files.length > 0;
+  const isValid = !!selectedSite && files.length > 0;
+  const disabledReason = !selectedSite
+    ? 'Falta selecionar a obra'
+    : files.length === 0
+    ? 'Adicione pelo menos uma foto'
+    : '';
   const pendingFiles = files.filter((f) => f.status === 'pending').length;
   const successFiles = files.filter((f) => f.status === 'success').length;
 
@@ -495,9 +471,9 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
               value={selectedSite}
               onValueChange={(v) => {
                 setSelectedSite(v);
-                setSelectedFloor('');
-                setSelectedArea('');
-                setSelectedPoint('');
+                setEspecialidade('');
+                setFase('');
+                setNivelId('');
               }}
               disabled={isUploading}
             >
@@ -514,26 +490,26 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             </Select>
           </div>
 
-          {/* Floor selection */}
-          {selectedSite && (
+          {/* Especialidade (opcional — do catálogo de níveis da obra) */}
+          {selectedSite && especialidades.length > 0 && (
             <div className="space-y-2">
-              <Label>{t('captures.selectFloor')} *</Label>
+              <Label>Especialidade (opcional)</Label>
               <Select
-                value={selectedFloor}
+                value={especialidade}
                 onValueChange={(v) => {
-                  setSelectedFloor(v);
-                  setSelectedArea('');
-                  setSelectedPoint('');
+                  setEspecialidade(v);
+                  setFase('');
+                  setNivelId('');
                 }}
-                disabled={isLoadingFloors || isUploading}
+                disabled={isUploading}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder={t('captures.selectFloor')} />
+                  <SelectValue placeholder="Especialidade" />
                 </SelectTrigger>
                 <SelectContent>
-                  {floors.map((floor) => (
-                    <SelectItem key={floor.id} value={floor.id}>
-                      {floor.name}
+                  {especialidades.map((esp) => (
+                    <SelectItem key={esp} value={esp}>
+                      {esp}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -541,25 +517,25 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             </div>
           )}
 
-          {/* Area selection */}
-          {selectedFloor && (
+          {/* Fase (opcional) */}
+          {selectedSite && fases.length > 0 && (
             <div className="space-y-2">
-              <Label>{t('captures.selectArea')} *</Label>
+              <Label>Fase (opcional)</Label>
               <Select
-                value={selectedArea}
+                value={fase}
                 onValueChange={(v) => {
-                  setSelectedArea(v);
-                  setSelectedPoint('');
+                  setFase(v);
+                  setNivelId('');
                 }}
-                disabled={isLoadingAreas || isUploading}
+                disabled={isUploading}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder={t('captures.selectArea')} />
+                  <SelectValue placeholder="Fase" />
                 </SelectTrigger>
                 <SelectContent>
-                  {areas.map((area) => (
-                    <SelectItem key={area.id} value={area.id}>
-                      {area.name}
+                  {fases.map((f) => (
+                    <SelectItem key={f} value={f}>
+                      {f}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -567,22 +543,19 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             </div>
           )}
 
-          {/* Capture point selection (optional) */}
-          {selectedArea && capturePoints.length > 0 && (
+          {/* Piso / Cota (opcional) */}
+          {selectedSite && niveisFiltrados.length > 0 && (
             <div className="space-y-2">
-              <Label>{t('captures.selectPoint')}</Label>
-              <Select
-                value={selectedPoint}
-                onValueChange={setSelectedPoint}
-                disabled={isLoadingPoints || isUploading}
-              >
+              <Label>Piso / Cota (opcional)</Label>
+              <Select value={nivelId} onValueChange={setNivelId} disabled={isUploading}>
                 <SelectTrigger>
-                  <SelectValue placeholder={t('captures.selectPoint')} />
+                  <SelectValue placeholder="Piso / Cota" />
                 </SelectTrigger>
                 <SelectContent>
-                  {capturePoints.map((point) => (
-                    <SelectItem key={point.id} value={point.id}>
-                      {point.code} {point.description && `- ${point.description}`}
+                  {niveisFiltrados.map((n) => (
+                    <SelectItem key={n.id} value={n.id}>
+                      {n.piso || '—'}
+                      {n.cota != null ? ` (${String(n.cota).replace('.', ',')})` : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -590,10 +563,10 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             </div>
           )}
 
-          {/* No points warning */}
-          {selectedArea && capturePoints.length === 0 && !isLoadingPoints && (
+          {/* Sem catálogo de níveis para esta obra — captura na mesma */}
+          {selectedSite && obraId && niveis.length === 0 && (
             <p className="text-sm text-muted-foreground">
-              {t('captures.noPointsCreateDefault')}
+              Sem catálogo de níveis para esta obra — pode criar a captura na mesma.
             </p>
           )}
 
@@ -695,24 +668,29 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
               </span>
             )}
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={handleClose} disabled={isUploading}>
-              {t('common.cancel')}
-            </Button>
-            <Button
-              onClick={handleSubmit}
-              disabled={!isValid || isUploading}
-              className="bg-gradient-to-r from-primary to-accent"
-            >
-              {isUploading ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  {t('captures.uploading')}
-                </>
-              ) : (
-                t('common.create')
-              )}
-            </Button>
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={handleClose} disabled={isUploading}>
+                {t('common.cancel')}
+              </Button>
+              <Button
+                onClick={handleSubmit}
+                disabled={!isValid || isUploading}
+                className="bg-gradient-to-r from-primary to-accent"
+              >
+                {isUploading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    {t('captures.uploading')}
+                  </>
+                ) : (
+                  t('common.create')
+                )}
+              </Button>
+            </div>
+            {!isValid && !isUploading && disabledReason && (
+              <p className="text-xs text-muted-foreground">{disabledReason}</p>
+            )}
           </div>
         </div>
       </DialogContent>

@@ -32,6 +32,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
 import type { CaptureWithDetails } from '@/types/captures';
+import { captureTitle } from '@/types/captures';
 
 const ncSchema = z.object({
   title: z.string().min(3, 'Title must be at least 3 characters'),
@@ -130,7 +131,7 @@ export function CreateNCModal({ capture, open, onOpenChange, onSuccess, prefillD
             {t('captures.viewer.createNC')}
           </DialogTitle>
           <DialogDescription>
-            {t('captures.viewer.createNCDesc')} <strong>{capture.capture_point.code}</strong>
+            {t('captures.viewer.createNCDesc')} <strong>{capture.capture_point?.code ?? captureTitle(capture)}</strong>
           </DialogDescription>
         </DialogHeader>
 

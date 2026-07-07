@@ -776,14 +776,19 @@ export type Database = {
         Row: {
           ai_analyzed: boolean | null
           ai_analyzed_at: string | null
-          capture_point_id: string
+          capture_point_id: string | null
           captured_at: string | null
           created_at: string
           duration_seconds: number | null
+          especialidade: string | null
+          fase: string | null
           file_path: string
           id: string
           mime_type: string | null
+          nivel_id: string | null
+          notes: string | null
           processing_status: Database["public"]["Enums"]["processing_status"]
+          site_id: string
           size_bytes: number | null
           source_type: Database["public"]["Enums"]["capture_source"]
           updated_at: string
@@ -792,14 +797,19 @@ export type Database = {
         Insert: {
           ai_analyzed?: boolean | null
           ai_analyzed_at?: string | null
-          capture_point_id: string
+          capture_point_id?: string | null
           captured_at?: string | null
           created_at?: string
           duration_seconds?: number | null
+          especialidade?: string | null
+          fase?: string | null
           file_path: string
           id?: string
           mime_type?: string | null
+          nivel_id?: string | null
+          notes?: string | null
           processing_status?: Database["public"]["Enums"]["processing_status"]
+          site_id: string
           size_bytes?: number | null
           source_type?: Database["public"]["Enums"]["capture_source"]
           updated_at?: string
@@ -808,14 +818,19 @@ export type Database = {
         Update: {
           ai_analyzed?: boolean | null
           ai_analyzed_at?: string | null
-          capture_point_id?: string
+          capture_point_id?: string | null
           captured_at?: string | null
           created_at?: string
           duration_seconds?: number | null
+          especialidade?: string | null
+          fase?: string | null
           file_path?: string
           id?: string
           mime_type?: string | null
+          nivel_id?: string | null
+          notes?: string | null
           processing_status?: Database["public"]["Enums"]["processing_status"]
+          site_id?: string
           size_bytes?: number | null
           source_type?: Database["public"]["Enums"]["capture_source"]
           updated_at?: string
@@ -827,6 +842,20 @@ export type Database = {
             columns: ["capture_point_id"]
             isOneToOne: false
             referencedRelation: "capture_points"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "captures_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "captures_nivel_id_fkey"
+            columns: ["nivel_id"]
+            isOneToOne: false
+            referencedRelation: "eng_silva_niveis"
             referencedColumns: ["id"]
           },
         ]
@@ -2826,6 +2855,7 @@ export type Database = {
           description: string | null
           id: string
           image_url: string | null
+          incompaticheck_obra_id: string | null
           name: string
           org_id: string
           status: string
@@ -2837,6 +2867,7 @@ export type Database = {
           description?: string | null
           id?: string
           image_url?: string | null
+          incompaticheck_obra_id?: string | null
           name: string
           org_id: string
           status?: string
@@ -2848,6 +2879,7 @@ export type Database = {
           description?: string | null
           id?: string
           image_url?: string | null
+          incompaticheck_obra_id?: string | null
           name?: string
           org_id?: string
           status?: string
@@ -2859,6 +2891,13 @@ export type Database = {
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sites_incompaticheck_obra_id_fkey"
+            columns: ["incompaticheck_obra_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_obras"
             referencedColumns: ["id"]
           },
         ]

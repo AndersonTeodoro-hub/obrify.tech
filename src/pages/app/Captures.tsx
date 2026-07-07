@@ -99,18 +99,33 @@ export default function Captures() {
           captured_at,
           created_at,
           user_id,
-          capture_points!inner (
+          site_id,
+          fase,
+          especialidade,
+          nivel_id,
+          notes,
+          sites!captures_site_id_fkey (
+            id,
+            name,
+            org_id
+          ),
+          eng_silva_niveis!captures_nivel_id_fkey (
+            id,
+            piso,
+            cota
+          ),
+          capture_points (
             id,
             code,
             description,
-            areas!inner (
+            areas (
               id,
               name,
-              floors!inner (
+              floors (
                 id,
                 name,
                 level,
-                sites!inner (
+                sites (
                   id,
                   name,
                   org_id
@@ -138,12 +153,13 @@ export default function Captures() {
 
       // Filter by org membership and site/floor filters
       const filteredCaptures = capturesData.filter((capture: any) => {
-        const site = capture.capture_points?.areas?.floors?.sites;
+        // Site directo (novo modelo) com fallback à cadeia legada do ponto
+        const site = capture.sites || capture.capture_points?.areas?.floors?.sites;
         if (!site || !orgIds.includes(site.org_id)) return false;
-        
+
         if (filters.siteId && site.id !== filters.siteId) return false;
         if (filters.floorId && capture.capture_points?.areas?.floors?.id !== filters.floorId) return false;
-        
+
         return true;
       });
 
@@ -165,24 +181,39 @@ export default function Captures() {
         captured_at: capture.captured_at,
         created_at: capture.created_at,
         user_id: capture.user_id,
-        capture_point: {
-          id: capture.capture_points.id,
-          code: capture.capture_points.code,
-          description: capture.capture_points.description,
-          area: {
-            id: capture.capture_points.areas.id,
-            name: capture.capture_points.areas.name,
-            floor: {
-              id: capture.capture_points.areas.floors.id,
-              name: capture.capture_points.areas.floors.name,
-              level: capture.capture_points.areas.floors.level,
-              site: {
-                id: capture.capture_points.areas.floors.sites.id,
-                name: capture.capture_points.areas.floors.sites.name,
+        site: capture.sites
+          ? { id: capture.sites.id, name: capture.sites.name }
+          : null,
+        fase: capture.fase ?? null,
+        especialidade: capture.especialidade ?? null,
+        nivel: capture.eng_silva_niveis
+          ? {
+              id: capture.eng_silva_niveis.id,
+              piso: capture.eng_silva_niveis.piso,
+              cota: capture.eng_silva_niveis.cota,
+            }
+          : null,
+        notes: capture.notes ?? null,
+        capture_point: capture.capture_points
+          ? {
+              id: capture.capture_points.id,
+              code: capture.capture_points.code,
+              description: capture.capture_points.description,
+              area: {
+                id: capture.capture_points.areas.id,
+                name: capture.capture_points.areas.name,
+                floor: {
+                  id: capture.capture_points.areas.floors.id,
+                  name: capture.capture_points.areas.floors.name,
+                  level: capture.capture_points.areas.floors.level,
+                  site: {
+                    id: capture.capture_points.areas.floors.sites.id,
+                    name: capture.capture_points.areas.floors.sites.name,
+                  },
+                },
               },
-            },
-          },
-        },
+            }
+          : null,
         profile: profileMap.get(capture.user_id) || null,
       }));
     },

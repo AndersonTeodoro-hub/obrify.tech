@@ -5,7 +5,7 @@ import { AspectRatio } from '@/components/ui/aspect-ratio';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import type { CaptureWithDetails, CaptureCategory } from '@/types/captures';
-import { SOURCE_TO_CATEGORY } from '@/types/captures';
+import { SOURCE_TO_CATEGORY, captureTitle, captureLocationLabel } from '@/types/captures';
 
 interface CaptureCardProps {
   capture: CaptureWithDetails;
@@ -43,7 +43,7 @@ export function CaptureCard({ capture, onClick }: CaptureCardProps) {
             {/* Placeholder image */}
             <img
               src={`https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=400&h=225&fit=crop`}
-              alt={capture.capture_point.code}
+              alt={captureTitle(capture)}
               className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
             />
             
@@ -68,10 +68,10 @@ export function CaptureCard({ capture, onClick }: CaptureCardProps) {
             {/* Info overlay at bottom - always visible */}
             <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 via-black/50 to-transparent">
               <p className="text-sm font-medium text-white truncate">
-                {capture.capture_point.code}
+                {captureTitle(capture)}
               </p>
               <p className="text-xs text-white/70 truncate">
-                {capture.capture_point.area.floor.name} • {capture.capture_point.area.name}
+                {captureLocationLabel(capture)}
               </p>
               <p className="text-[10px] text-white/50 mt-1">
                 {format(new Date(captureDate), 'dd/MM/yyyy HH:mm')}

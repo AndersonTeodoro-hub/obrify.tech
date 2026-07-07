@@ -3,95 +3,22 @@ import { Loader2, GraduationCap } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { toast } from 'sonner';
-
-// Max base64 para enviar ao Silva (~4.5MB)
-const MAX_BASE64_SIZE = 4_500_000;
-const COMPRESS_MAX_WIDTH = 1920;
-const COMPRESS_QUALITY = 0.85;
+import { toBase64UnderLimit } from '@/lib/capture-image';
 
 interface SilvaAnalysisProps {
   captureId: string;
   filePath: string;
-  siteName: string;
-  floorName: string;
-  areaName: string;
-  pointCode: string;
+  siteName?: string;
+  floorName?: string;
+  areaName?: string;
+  pointCode?: string;
+  fase?: string;
+  especialidade?: string;
+  nivelLabel?: string;
   capturedAt: string | null;
   notes?: string;
   onAnalysisComplete?: () => void;
   disabled?: boolean;
-}
-
-// Compressão via Canvas para garantir que cabe no limite
-function compressForSilva(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(blob);
-    const img = new Image();
-
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      try {
-        let { width, height } = img;
-        if (width > COMPRESS_MAX_WIDTH) {
-          const ratio = COMPRESS_MAX_WIDTH / width;
-          width = COMPRESS_MAX_WIDTH;
-          height = Math.round(height * ratio);
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          reject(new Error('Canvas não suportado'));
-          return;
-        }
-
-        ctx.drawImage(img, 0, 0, width, height);
-        canvas.toBlob(
-          (result) => {
-            if (!result) {
-              reject(new Error('Falha na compressão'));
-              return;
-            }
-            const reader = new FileReader();
-            reader.onloadend = () => {
-              const dataUrl = reader.result as string;
-              // Remover prefixo data:image/jpeg;base64,
-              const base64 = dataUrl.split(',')[1];
-              resolve(base64);
-            };
-            reader.onerror = () => reject(new Error('Falha a ler ficheiro'));
-            reader.readAsDataURL(result);
-          },
-          'image/jpeg',
-          COMPRESS_QUALITY
-        );
-      } catch (err) {
-        reject(err);
-      }
-    };
-
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error('Falha a carregar imagem'));
-    };
-
-    img.src = url;
-  });
-}
-
-// Converter blob para base64 directamente
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const dataUrl = reader.result as string;
-      resolve(dataUrl.split(',')[1]);
-    };
-    reader.onerror = () => reject(new Error('Falha a ler ficheiro'));
-    reader.readAsDataURL(blob);
-  });
 }
 
 export function SilvaAnalysisButton({
@@ -101,6 +28,9 @@ export function SilvaAnalysisButton({
   floorName,
   areaName,
   pointCode,
+  fase,
+  especialidade,
+  nivelLabel,
   capturedAt,
   notes,
   onAnalysisComplete,
@@ -123,16 +53,8 @@ export function SilvaAnalysisButton({
         throw new Error('Não foi possível descarregar a foto');
       }
 
-      // 2. Converter para base64, comprimir se necessário
-      let base64 = await blobToBase64(fileData);
-
-      if (base64.length > MAX_BASE64_SIZE) {
-        base64 = await compressForSilva(fileData);
-      }
-
-      if (base64.length > MAX_BASE64_SIZE) {
-        throw new Error('Foto demasiado grande mesmo após compressão');
-      }
+      // 2. Converter para base64, comprimir se necessário (util partilhado)
+      const base64 = await toBase64UnderLimit(fileData);
 
       // 3. Buscar obra_id da memória do Silva (se disponível)
       let obraId: string | null = null;
@@ -150,9 +72,13 @@ export function SilvaAnalysisButton({
         ? new Date(capturedAt).toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
         : 'Data desconhecida';
 
+      const localParts = [siteName, floorName, areaName, pointCode].filter(Boolean);
       const prompt = [
         'Analisa esta fotografia de fiscalização de obra.',
-        `Local: ${siteName} > ${floorName} > ${areaName} > ${pointCode}.`,
+        `Local: ${localParts.length ? localParts.join(' > ') : '—'}.`,
+        especialidade ? `Especialidade: ${especialidade}.` : '',
+        fase ? `Fase: ${fase}.` : '',
+        nivelLabel ? `Nível: ${nivelLabel}.` : '',
         `Data: ${dateStr}.`,
         notes ? `Notas: ${notes}.` : '',
         'Dá o teu parecer técnico:',

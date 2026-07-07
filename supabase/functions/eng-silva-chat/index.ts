@@ -407,7 +407,72 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const { message, conversation_history, system, image, obra_id, user_id } = await req.json();
+    const { message, conversation_history, system, image, obra_id, user_id, mode, meta } = await req.json();
+
+    // ── MODO LEGENDA (relatório fotográfico) ─────────────────────────────
+    // Short-circuit: sem retrieval de conhecimento nem download de PDFs.
+    // Input: { mode:'caption', image(base64), meta:{obra,especialidade,fase,piso,cota,notas,data} }
+    // Output: { caption } — máx. 2 frases, tom de fiscal sénior, PT-PT.
+    if (mode === "caption") {
+      if (!image) {
+        return new Response(JSON.stringify({ error: "image is required for caption mode" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const apiKeyCap = Deno.env.get("ANTHROPIC_API_KEY");
+      if (!apiKeyCap) {
+        return new Response(JSON.stringify({ error: "ANTHROPIC_API_KEY em falta" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const m = meta || {};
+      const ctx = [
+        m.obra ? `Obra: ${m.obra}.` : "",
+        m.especialidade ? `Especialidade: ${m.especialidade}.` : "",
+        m.fase ? `Fase: ${m.fase}.` : "",
+        (m.piso || m.cota != null) ? `Nível: ${m.piso || ""}${m.cota != null ? ` (cota ${m.cota})` : ""}.` : "",
+        m.data ? `Data: ${m.data}.` : "",
+        m.notas ? `Notas do fiscal: ${m.notas}.` : "",
+      ].filter(Boolean).join(" ");
+
+      const captionSystem =
+        "És o Eng. Silva, director de fiscalização de obra. Escreves a legenda de uma " +
+        "fotografia para um relatório fotográfico diário. Regras: português europeu; " +
+        "tom técnico de fiscal sénior; NO MÁXIMO DUAS frases; descreve o elemento e o " +
+        "estado/observação relevante para fiscalização (não faças descrição genérica de " +
+        "imagem nem listas). Usa os metadados apenas como contexto — não os repitas em bruto. " +
+        "Responde só com a legenda, sem aspas nem prefixos.";
+
+      const capResp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": apiKeyCap, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-5-20250929",
+          max_tokens: 150,
+          temperature: 0.4,
+          system: captionSystem,
+          messages: [{ role: "user", content: [
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: image } },
+            { type: "text", text: `Contexto: ${ctx || "(sem metadados)"}\nEscreve a legenda (máx. 2 frases).` },
+          ]}],
+        }),
+      });
+      if (!capResp.ok) {
+        const errBody = await capResp.text();
+        console.error(`ENG-SILVA-CHAT[caption]: Anthropic ${capResp.status}:`, errBody);
+        return new Response(JSON.stringify({ error: `Anthropic ${capResp.status}` }),
+          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const capJson = await capResp.json();
+      const caption = (capJson.content?.[0]?.text || "").trim();
+      if (!caption) {
+        console.error("ENG-SILVA-CHAT[caption]: resposta sem texto:", JSON.stringify(capJson).slice(0, 1000));
+        return new Response(JSON.stringify({ error: "Sem legenda gerada" }),
+          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ caption }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    // ── FIM MODO LEGENDA ─────────────────────────────────────────────────
+
     if (!message || typeof message !== "string" || message.trim().length === 0) {
       if (!image) {
         return new Response(JSON.stringify({ error: "message or image is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -425,6 +490,9 @@ serve(async (req) => {
 
     let systemPrompt = system || "";
     let downloadedFiles: { document_name: string; base64: string; mimeType: string }[] = [];
+    // Resumos de texto dos documentos anexados como PDF, para degradação elegante
+    // caso a Anthropic recuse o pedido com os PDFs inteiros.
+    let attachedPdfSummaries: { document_name: string; summary: string | null }[] = [];
 
     // Smart knowledge search if we have obra_id and a user message
     if (obra_id && user_id && message && supabaseUrl && supabaseKey) {
@@ -513,6 +581,12 @@ serve(async (req) => {
         const failedDownloads = top5ForPdf.filter((d: any) => !downloadedNames.has(d.document_name));
         const summaryDocs = [...restDocs, ...failedDownloads];
 
+        // Guardar o resumo de texto dos documentos que vão como PDF, para poder
+        // responder a partir deles se a Anthropic recusar o pedido com os anexos.
+        attachedPdfSummaries = top5ForPdf
+          .filter((d: any) => downloadedNames.has(d.document_name))
+          .map((d: any) => ({ document_name: d.document_name, summary: d.summary || null }));
+
         if (relevantDocs.length > 0) {
           // Contexto de resumos para os documentos sem PDF original
           const knowledgeContext = summaryDocs.length > 0
@@ -594,6 +668,15 @@ serve(async (req) => {
 
     messages.push({ role: "user", content: userContent });
 
+    // Bloco de resumos dos documentos anexados como PDF — usado se for preciso
+    // repetir a chamada sem os PDFs (ver ramo de degradação elegante abaixo).
+    const attachedPdfSummaryBlock = attachedPdfSummaries.length > 0
+      ? "RESUMOS DOS DOCUMENTOS DO PROJECTO (o documento original não pôde ser anexado na íntegra; usa estes resumos para responder e cita o nome do documento):\n\n" +
+        attachedPdfSummaries
+          .map((d) => `### ${d.document_name}\n${d.summary || "(sem resumo disponível)"}`)
+          .join("\n\n")
+      : "";
+
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -610,8 +693,75 @@ serve(async (req) => {
       }),
     });
 
+    // não falhar em silêncio: se a Anthropic devolveu erro, regista-o
+    if (!response.ok) {
+      const errBody = await response.text();
+      console.error(`ENG-SILVA-CHAT: Anthropic API ${response.status}:`, errBody);
+
+      // Degradação elegante: se o pedido levava PDFs anexados, a recusa pode
+      // dever-se a eles (documento longo, demasiadas páginas, tamanho, etc).
+      // Repetir UMA vez sem os PDFs, injetando os resumos de texto desses
+      // documentos para o conhecimento não se perder.
+      const hadPdfAttachments = downloadedFiles.some((f) => !isImageMime(f.mimeType));
+      if (hadPdfAttachments) {
+        const textOnlyContent = userContent.filter((b: any) => b.type !== "document");
+        if (attachedPdfSummaryBlock) {
+          textOnlyContent.unshift({ type: "text", text: attachedPdfSummaryBlock });
+        }
+        const retryMessages = [
+          ...(conversation_history || []),
+          { role: "user", content: textOnlyContent },
+        ];
+
+        const retryResponse = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": apiKey!,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-5-20250929",
+            max_tokens: 600,
+            temperature: 0.3,
+            system: systemPrompt,
+            messages: retryMessages,
+          }),
+        });
+
+        if (retryResponse.ok) {
+          const retryResult = await retryResponse.json();
+          const retryReply = retryResult.content?.[0]?.text;
+          if (retryReply) {
+            return new Response(JSON.stringify({ reply: retryReply }), {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          console.error("ENG-SILVA-CHAT: retry sem PDF — resposta sem content:", JSON.stringify(retryResult).slice(0, 2000));
+        } else {
+          const retryErrBody = await retryResponse.text();
+          console.error(`ENG-SILVA-CHAT: retry sem PDF — Anthropic API ${retryResponse.status}:`, retryErrBody);
+        }
+      }
+
+      return new Response(JSON.stringify({
+        reply: "Desculpa, não consegui processar este pedido agora.",
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const result = await response.json();
-    const reply = result.content?.[0]?.text || "Desculpa, não consegui processar. Tenta novamente.";
+    const reply = result.content?.[0]?.text;
+    if (!reply) {
+      // resposta 2xx mas sem content — regista o corpo real para diagnóstico
+      console.error("ENG-SILVA-CHAT: resposta Anthropic sem content:", JSON.stringify(result).slice(0, 2000));
+      return new Response(JSON.stringify({
+        reply: "Desculpa, não consegui processar. Tenta novamente.",
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     return new Response(JSON.stringify({ reply }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

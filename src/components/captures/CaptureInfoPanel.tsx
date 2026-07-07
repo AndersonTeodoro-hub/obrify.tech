@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import type { CaptureWithDetails, CaptureCategory } from '@/types/captures';
-import { SOURCE_TO_CATEGORY } from '@/types/captures';
+import { SOURCE_TO_CATEGORY, captureTitle, captureLocationLabel } from '@/types/captures';
 import { cn } from '@/lib/utils';
 
 interface CaptureInfoPanelProps {
@@ -99,14 +99,14 @@ export function CaptureInfoPanel({ capture, onClose, className }: CaptureInfoPan
               <span className="text-sm font-medium">{t('captures.location')}</span>
             </div>
             <div className="pl-6 space-y-1 text-sm">
-              <p className="font-medium">{capture.capture_point.code}</p>
+              <p className="font-medium">{captureTitle(capture)}</p>
               <p className="text-muted-foreground">
-                {capture.capture_point.area.floor.site.name}
+                {captureLocationLabel(capture)}
               </p>
-              <p className="text-muted-foreground">
-                {capture.capture_point.area.floor.name} • {capture.capture_point.area.name}
-              </p>
-              {capture.capture_point.description && (
+              {capture.fase && (
+                <p className="text-muted-foreground">Fase: {capture.fase}</p>
+              )}
+              {capture.capture_point?.description && (
                 <p className="text-muted-foreground italic">
                   {capture.capture_point.description}
                 </p>

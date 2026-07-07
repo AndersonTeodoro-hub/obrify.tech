@@ -17,13 +17,24 @@ import { cn } from '@/lib/utils';
 import {
   Camera, Plus, Trash2, Building2, ArrowLeft, CalendarIcon,
   Loader2, ArrowUp, ArrowDown, X, ImageIcon, Edit, FileText,
-  Download, Upload,
+  Download, Upload, GraduationCap,
 } from 'lucide-react';
 import { generatePhotoReportPDF, type PhotoForExport } from '@/utils/photo-report-pdf';
 import { generatePhotoReportDOCX } from '@/utils/photo-report-docx';
+import { toBase64UnderLimit } from '@/lib/capture-image';
 
 type Obra = { id: string; nome: string; cidade: string | null };
-type PhotoMeta = { file_path: string; description: string; location: string; sort_order: number };
+// Contexto da captura de origem (para a legenda do Silva). Guardado no JSON photos.
+type CaptureMeta = {
+  capture_id?: string;
+  especialidade?: string | null;
+  fase?: string | null;
+  piso?: string | null;
+  cota?: number | null;
+  notes?: string | null;
+  captured_at?: string | null;
+};
+type PhotoMeta = { file_path: string; description: string; location: string; sort_order: number; capture?: CaptureMeta };
 type Report = {
   id: string; obra_id: string; user_id: string; report_date: string;
   weather: string | null; workers_count: string | null; equipment: string | null;
@@ -34,6 +45,8 @@ type Report = {
 type LocalPhoto = {
   file?: File; file_path?: string; preview: string;
   description: string; location: string; sort_order: number;
+  capture?: CaptureMeta;
+  captionStatus?: 'idle' | 'pending' | 'done' | 'error';
 };
 
 export default function PhotoReports() {
@@ -65,6 +78,11 @@ export default function PhotoReports() {
   const [reportLogo, setReportLogo] = useState<string | null>(() => localStorage.getItem('photo_report_logo'));
   const [clientLogo, setClientLogo] = useState<string | null>(() => localStorage.getItem('photo_report_client_logo'));
   const [exporting, setExporting] = useState(false);
+
+  // Importação de capturas + geração de legendas em lote
+  const [importing, setImporting] = useState(false);
+  const [captioning, setCaptioning] = useState(false);
+  const [captionProgress, setCaptionProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
 
   // Load obras
   useEffect(() => {
@@ -158,6 +176,8 @@ export default function PhotoReports() {
         description: p.description,
         location: p.location,
         sort_order: p.sort_order,
+        capture: p.capture,
+        captionStatus: 'idle',
       });
     }
     setPhotos(existingPhotos);
@@ -242,6 +262,7 @@ export default function PhotoReports() {
             description: photo.description,
             location: photo.location,
             sort_order: photo.sort_order,
+            capture: photo.capture,
           });
         } else if (photo.file_path) {
           photosMeta.push({
@@ -249,6 +270,7 @@ export default function PhotoReports() {
             description: photo.description,
             location: photo.location,
             sort_order: photo.sort_order,
+            capture: photo.capture,
           });
         }
       }
@@ -380,6 +402,137 @@ export default function PhotoReports() {
     if (saved) {
       await handleExport(saved, type);
     }
+  };
+
+  // ── Importar capturas do período (via ponte obra -> site) ──
+  const importCaptures = async () => {
+    if (!user || !selectedObra) return;
+    setImporting(true);
+    try {
+      // Ponte: obra Silva -> estaleiro (sites.incompaticheck_obra_id)
+      const { data: siteRow, error: siteErr } = await supabase
+        .from('sites')
+        .select('id, name')
+        .eq('incompaticheck_obra_id', selectedObra.id)
+        .maybeSingle();
+      if (siteErr) throw siteErr;
+      if (!siteRow) {
+        toast.error('Esta obra ainda não está ligada a um estaleiro (ponte em falta).');
+        return;
+      }
+
+      const day = format(reportDate, 'yyyy-MM-dd');
+      const { data: caps, error: capErr } = await supabase
+        .from('captures')
+        .select('id, file_path, captured_at, fase, especialidade, notes, eng_silva_niveis!captures_nivel_id_fkey ( piso, cota )')
+        .eq('site_id', siteRow.id)
+        .gte('captured_at', `${day}T00:00:00`)
+        .lte('captured_at', `${day}T23:59:59`)
+        .order('captured_at', { ascending: true });
+      if (capErr) throw capErr;
+      if (!caps?.length) {
+        toast.info('Sem capturas para esta obra nesta data.');
+        return;
+      }
+
+      const imported: LocalPhoto[] = [];
+      for (const c of caps as any[]) {
+        const { data: blob, error: dErr } = await supabase.storage.from('captures').download(c.file_path);
+        if (dErr || !blob) {
+          console.error('Falha download captura', c.id, dErr);
+          toast.error(`Captura ${c.id}: ${dErr?.message || 'download falhou'}`);
+          continue;
+        }
+        const piso = (c.eng_silva_niveis?.piso ?? null) as string | null;
+        const cota = (c.eng_silva_niveis?.cota ?? null) as number | null;
+        imported.push({
+          file: new File([blob], `${c.id}.jpg`, { type: blob.type || 'image/jpeg' }),
+          preview: URL.createObjectURL(blob),
+          description: '',
+          location: [c.especialidade, piso ? `${piso}${cota != null ? ` (${cota})` : ''}` : '']
+            .filter(Boolean)
+            .join(' — '),
+          sort_order: photos.length + imported.length,
+          capture: {
+            capture_id: c.id,
+            especialidade: c.especialidade,
+            fase: c.fase,
+            piso,
+            cota,
+            notes: c.notes,
+            captured_at: c.captured_at,
+          },
+          captionStatus: 'idle',
+        });
+      }
+      if (imported.length) {
+        setPhotos((prev) => [...prev, ...imported]);
+        toast.success(`${imported.length} captura(s) importada(s).`);
+      }
+    } catch (err: any) {
+      console.error('Importar capturas:', err);
+      toast.error('Erro ao importar: ' + err.message);
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  // ── Gerar legendas com o Eng. Silva (modo caption) ──
+  const captionOne = async (photo: LocalPhoto): Promise<string> => {
+    const blob = photo.file
+      ? photo.file
+      : (await supabase.storage.from('photo-reports').download(photo.file_path!)).data;
+    if (!blob) throw new Error('Sem imagem para legendar');
+    const base64 = await toBase64UnderLimit(blob);
+    const meta = {
+      obra: selectedObra?.nome,
+      especialidade: photo.capture?.especialidade,
+      fase: photo.capture?.fase,
+      piso: photo.capture?.piso,
+      cota: photo.capture?.cota,
+      notas: photo.capture?.notes,
+      data: photo.capture?.captured_at
+        ? new Date(photo.capture.captured_at).toLocaleDateString('pt-PT')
+        : format(reportDate, 'dd/MM/yyyy'),
+    };
+    const { data, error } = await supabase.functions.invoke('eng-silva-chat', {
+      body: { mode: 'caption', image: base64, meta, user_id: user!.id },
+    });
+    if (error || !data?.caption) throw new Error(error?.message || 'Silva não devolveu legenda');
+    return data.caption as string;
+  };
+
+  const generateCaptions = async (onlyFailed = false) => {
+    const targets = photos
+      .map((p, i) => ({ p, i }))
+      .filter(({ p }) => (onlyFailed ? p.captionStatus === 'error' : true));
+    if (!targets.length) {
+      toast.info('Nada para legendar.');
+      return;
+    }
+    setCaptioning(true);
+    setCaptionProgress({ done: 0, total: targets.length });
+    let ok = 0;
+    let fail = 0;
+    for (const { i } of targets) {
+      setPhotos((prev) => prev.map((p, idx) => (idx === i ? { ...p, captionStatus: 'pending' } : p)));
+      try {
+        const caption = await captionOne(photos[i]);
+        setPhotos((prev) =>
+          prev.map((p, idx) => (idx === i ? { ...p, description: caption, captionStatus: 'done' } : p)),
+        );
+        ok++;
+      } catch (err: any) {
+        console.error('Legenda falhou (foto', i, '):', err);
+        toast.error(`Foto ${i + 1}: ${err.message}`);
+        setPhotos((prev) => prev.map((p, idx) => (idx === i ? { ...p, captionStatus: 'error' } : p)));
+        fail++;
+      }
+      setCaptionProgress((cp) => ({ ...cp, done: cp.done + 1 }));
+    }
+    setCaptioning(false);
+    if (ok) toast.success(`${ok} legenda(s) gerada(s).`);
+    if (fail) toast.error(`${fail} falhada(s) — use "Repetir falhadas".`);
   };
 
   // === OBRA SELECTOR ===
@@ -570,6 +723,28 @@ export default function PhotoReports() {
         <Card>
           <CardHeader><CardTitle className="text-base flex items-center gap-2"><Camera className="w-4 h-4" /> Registo Fotográfico</CardTitle></CardHeader>
           <CardContent className="space-y-4">
+            {/* Importar capturas + gerar legendas */}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" size="sm" onClick={importCaptures} disabled={importing || captioning}>
+                {importing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+                Importar capturas do período
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => generateCaptions(false)} disabled={captioning || photos.length === 0}>
+                {captioning ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <GraduationCap className="w-4 h-4 mr-2" />}
+                Gerar legendas (Eng. Silva)
+              </Button>
+              {photos.some((p) => p.captionStatus === 'error') && (
+                <Button variant="ghost" size="sm" onClick={() => generateCaptions(true)} disabled={captioning}>
+                  Repetir falhadas
+                </Button>
+              )}
+              {captioning && (
+                <span className="text-xs text-muted-foreground self-center">
+                  {captionProgress.done}/{captionProgress.total}
+                </span>
+              )}
+            </div>
+
             {/* Upload area */}
             <div
               className="border-2 border-dashed border-border rounded-lg p-8 text-center cursor-pointer hover:border-primary/50 transition"

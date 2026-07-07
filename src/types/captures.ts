@@ -24,6 +24,13 @@ export interface CaptureWithDetails {
   captured_at: string | null;
   created_at: string;
   user_id: string;
+  // Localização directa (novo modelo por site_id)
+  site: { id: string; name: string } | null;
+  fase: string | null;
+  especialidade: string | null;
+  nivel: { id: string; piso: string | null; cota: number | null } | null;
+  notes: string | null;
+  // Localização legada via ponto de captura (pode ser null no novo modelo)
   capture_point: {
     id: string;
     code: string;
@@ -41,11 +48,28 @@ export interface CaptureWithDetails {
         };
       };
     };
-  };
+  } | null;
   profile: {
     full_name: string | null;
     avatar_url: string | null;
   } | null;
+}
+
+// Rótulos de localização tolerantes a capture_point nulo (novo modelo por site_id).
+export function captureTitle(c: CaptureWithDetails): string {
+  return c.capture_point?.code ?? c.nivel?.piso ?? c.site?.name ?? 'Captura';
+}
+
+export function captureLocationLabel(c: CaptureWithDetails): string {
+  if (c.capture_point) {
+    const f = c.capture_point.area.floor;
+    return `${f.site.name} • ${f.name} • ${c.capture_point.area.name}`;
+  }
+  const nivelLabel = c.nivel
+    ? `${c.nivel.piso ?? ''}${c.nivel.cota != null ? ` (${c.nivel.cota})` : ''}`.trim()
+    : '';
+  const parts = [c.site?.name, c.especialidade, nivelLabel].filter(Boolean);
+  return parts.join(' • ') || '—';
 }
 
 export interface CaptureFiltersState {

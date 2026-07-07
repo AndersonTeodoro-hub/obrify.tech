@@ -39,7 +39,7 @@ import { AIAnalysisPanel } from './AIAnalysisPanel';
 import { SilvaAnalysisButton } from './SilvaAnalysisButton';
 import { SilvaAssessmentPanel } from './SilvaAssessmentPanel';
 import type { CaptureWithDetails, AIAnalysisResult, AIDetection } from '@/types/captures';
-import { SOURCE_TO_CATEGORY } from '@/types/captures';
+import { SOURCE_TO_CATEGORY, captureTitle, captureLocationLabel } from '@/types/captures';
 import { cn } from '@/lib/utils';
 
 interface CaptureViewerProps {
@@ -179,7 +179,7 @@ export function CaptureViewer({
 
       toast({
         title: t('captures.viewer.downloadStarted'),
-        description: capture.capture_point.code,
+        description: captureTitle(capture),
       });
     } catch (err) {
       toast({
@@ -366,10 +366,13 @@ export function CaptureViewer({
                     <SilvaAnalysisButton
                       captureId={capture.id}
                       filePath={capture.file_path}
-                      siteName={capture.capture_point.area.floor.site.name}
-                      floorName={capture.capture_point.area.floor.name}
-                      areaName={capture.capture_point.area.name}
-                      pointCode={capture.capture_point.code}
+                      siteName={capture.capture_point?.area.floor.site.name ?? capture.site?.name ?? ''}
+                      floorName={capture.capture_point?.area.floor.name ?? ''}
+                      areaName={capture.capture_point?.area.name ?? ''}
+                      pointCode={capture.capture_point?.code ?? ''}
+                      fase={capture.fase ?? undefined}
+                      especialidade={capture.especialidade ?? undefined}
+                      nivelLabel={capture.nivel ? `${capture.nivel.piso ?? ''}${capture.nivel.cota != null ? ` (${capture.nivel.cota})` : ''}`.trim() : undefined}
                       capturedAt={capture.captured_at}
                       disabled={isAnalyzing}
                       onAnalysisComplete={() => {
@@ -503,7 +506,7 @@ export function CaptureViewer({
                   ) : (
                     <ImageViewerWithZoom
                       src={imageUrl}
-                      alt={capture.capture_point.code}
+                      alt={captureTitle(capture)}
                       className="w-full h-full"
                     />
                   )}
@@ -550,9 +553,9 @@ export function CaptureViewer({
           {!showInfoPanel && !showAIPanel && !showSilvaPanel && (
             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 pt-12">
               <div className="max-w-2xl mx-auto text-center text-white">
-                <h3 className="font-semibold">{capture.capture_point.code}</h3>
+                <h3 className="font-semibold">{captureTitle(capture)}</h3>
                 <p className="text-sm text-white/70">
-                  {capture.capture_point.area.floor.site.name} • {capture.capture_point.area.floor.name} • {capture.capture_point.area.name}
+                  {captureLocationLabel(capture)}
                 </p>
               </div>
             </div>
