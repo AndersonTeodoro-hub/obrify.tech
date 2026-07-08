@@ -3,13 +3,14 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import JSZip from 'jszip';
 import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.js?url';
 import type { Obra, Project, Analysis, Finding, ChatMessage, PdeDocument, PdeAnalysis, PdeDocType } from './types';
 import { analyzeText, crossAnalyze, getFileExtension, generateAgentResponseFromFindings } from './helpers';
 import { EXTRACTABLE_FORMATS, ZIP_FORMATS, ACCEPTED_FORMATS, FILE_SIZE_LIMIT } from './types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 export function useIncompaticheck() {
   const { user } = useAuth();
