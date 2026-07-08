@@ -71,6 +71,12 @@ ${analysisContext}
 CHECKLIST DE VERIFICACAO PARA ESTE PAR (verifica cada ponto sistematicamente):
 ${checklist}
 
+REGRAS DE SENSO CONSTRUTIVO (verifica ANTES de reportar cada finding):
+1. A diferenca entre cota estrutural (tosco) e cota de acabado definida no CONTEXTO DA OBRA e NORMAL e ESPERADA. So reportas diferenca de cotas entre especialidades quando ela e DIFERENTE da diferenca esperada do contexto - e mostras SEMPRE o calculo explicito na description.
+2. Fundacoes, sapatas e muros arrancam ABAIXO da laje que suportam - normal, nao e conflito.
+3. Ausencia de informacao NAO e incompatibilidade. Se a justificacao contem "nao ha informacao sobre", descarta.
+4. Na duvida, NAO reportes. Um finding que um engenheiro senior rejeitaria a primeira leitura destroi a credibilidade do relatorio inteiro.
+
 REGRAS ABSOLUTAS:
 1. Baseia-te EXCLUSIVAMENTE nos elementos fornecidos e no contexto da obra. Nao inventes elementos, cotas ou dimensoes que nao estejam nos dados.
 2. Cada finding referencia element_a_id (obrigatorio, de ${espA}) e element_b_id (de ${espB}; null apenas em conflitos de AUSENCIA, explicando o que falta).

@@ -216,3 +216,26 @@ export interface CrossFinding {
   status: 'novo' | 'confirmado' | 'rejeitado';
   created_at: string;
 }
+
+// ---- ONDA 2.5: Analise isolada (coerencia interna) ----
+
+export interface SelfFinding {
+  id: string;
+  user_id: string;
+  obra_id: string;
+  project_id: string;
+  run_id: string | null;
+  especialidade: string;
+  tipo_problema: string;
+  severity: 'alta' | 'media' | 'baixa';
+  title: string;
+  description: string;
+  impact: string | null;
+  location: string | null;
+  recommendation: string | null;
+  element_a_id: string;
+  element_b_id: string | null;
+  confidence: number;
+  status: 'novo' | 'confirmado' | 'rejeitado';
+  created_at: string;
+}

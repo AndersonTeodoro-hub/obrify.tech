@@ -11,8 +11,10 @@ import ProjectPreviewModal from './incompaticheck/ProjectPreviewModal';
 import OverlayModal from './incompaticheck/OverlayModal';
 import { useEngSilvaContext } from '@/hooks/use-eng-silva-context';
 import { useAnalysisPipeline } from '@/hooks/useAnalysisPipeline';
+import { useSelfAnalysis } from '@/hooks/useSelfAnalysis';
 import ElementsExplorer from '@/components/incompaticheck/ElementsExplorer';
 import CrossAnalysisPanel from '@/components/incompaticheck/CrossAnalysisPanel';
+import SelfAnalysisPanel from '@/components/incompaticheck/SelfAnalysisPanel';
 import ContextObraModal from './incompaticheck/ContextObraModal';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -46,6 +48,7 @@ import {
   ScanLine,
   Boxes,
   Settings2,
+  ShieldCheck,
 } from 'lucide-react';
 import { Eye, EyeOff } from 'lucide-react';
 import { format } from 'date-fns';
@@ -103,6 +106,7 @@ export default function IncompatiCheck() {
   const ic = useIncompaticheck();
   const pipeline = useAnalysisPipeline(ic.obraAtiva?.id ?? null, ic.projects);
   const [elementsRefreshKey, setElementsRefreshKey] = useState(0);
+  const self = useSelfAnalysis(ic.obraAtiva?.id ?? null, elementsRefreshKey);
   const [showObraModal, setShowObraModal] = useState(false);
   const [showObraList, setShowObraList] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
@@ -710,6 +714,15 @@ export default function IncompatiCheck() {
                                 >
                                   <Boxes className="w-3 h-3" /> Extrair
                                 </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 gap-1 text-[11px]"
+                                  disabled={pipeline.preparing || rowActive || self.progress.active || count === 0}
+                                  onClick={() => self.runProject(project.id, project.name).catch(() => {})}
+                                >
+                                  <ShieldCheck className="w-3 h-3" /> Verificar Coerência
+                                </Button>
                               </div>
                             </div>
                             );
@@ -1195,6 +1208,16 @@ export default function IncompatiCheck() {
           {/* ---- ELEMENTOS EXTRAIDOS (Onda 1) ---- */}
           {ic.obraAtiva && Object.values(pipeline.elementCounts).some(c => c > 0) && (
             <ElementsExplorer obraId={ic.obraAtiva.id} refreshKey={elementsRefreshKey} />
+          )}
+
+          {/* ---- COERENCIA INTERNA (Onda 2.5) ---- */}
+          {ic.obraAtiva && (self.findings.length > 0 || self.progress.active || self.selfError) && (
+            <SelfAnalysisPanel
+              self={self}
+              obraId={ic.obraAtiva.id}
+              refreshKey={elementsRefreshKey}
+              projectNames={Object.fromEntries(ic.projects.map(p => [p.id, p.name]))}
+            />
           )}
 
           {/* ---- ANALISE CRUZADA (Onda 2) ---- */}
