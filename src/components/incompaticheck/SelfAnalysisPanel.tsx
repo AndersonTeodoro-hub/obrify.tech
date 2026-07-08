@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { ShieldCheck, AlertTriangle, RotateCcw, Check, X } from 'lucide-react';
+import EvidenceImage from '@/components/incompaticheck/EvidenceImage';
 
 type SelfHook = ReturnType<typeof useSelfAnalysis>;
 
@@ -14,8 +15,8 @@ const SEV_ORDER: Record<string, number> = { alta: 0, media: 1, baixa: 2 };
 const sevVariant = (s: string) => (s === 'alta' ? 'critical' : s === 'media' ? 'high' : 'success');
 const sevLabel = (s: string) => (s === 'alta' ? 'Alta' : s === 'media' ? 'Média' : 'Baixa');
 
-export default function SelfAnalysisPanel({ self, obraId, refreshKey, projectNames }: {
-  self: SelfHook; obraId: string; refreshKey: number; projectNames: Record<string, string>;
+export default function SelfAnalysisPanel({ self, obraId, refreshKey, projectNames, projectFiles }: {
+  self: SelfHook; obraId: string; refreshKey: number; projectNames: Record<string, string>; projectFiles: Record<string, string>;
 }) {
   const [elementsMap, setElementsMap] = useState<Record<string, ElementRow>>({});
   const [selected, setSelected] = useState<SelfFinding | null>(null);
@@ -171,6 +172,44 @@ export default function SelfAnalysisPanel({ self, obraId, refreshKey, projectNam
                     <EvidenceCard el={elementsMap[selected.element_b_id]} />
                   </div>
                 )}
+
+                {(() => {
+                  const elA = elementsMap[selected.element_a_id];
+                  const elB = selected.element_b_id ? elementsMap[selected.element_b_id] : null;
+                  const shared = !!(elA && elB && elA.project_id === elB.project_id && elA.source_page === elB.source_page);
+                  return (
+                    <div className="space-y-3 pt-2">
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Evidência visual</p>
+                      {elA && shared ? (
+                        <EvidenceImage
+                          filePath={projectFiles[elA.project_id]}
+                          page={elA.source_page}
+                          positions={[elA.position, elB!.position].filter(Boolean) as { x: number; y: number }[]}
+                          caption={!elA.position && !elB!.position ? 'Posição não capturada — re-extrair o projeto para ativar a marcação.' : undefined}
+                        />
+                      ) : (
+                        <>
+                          {elA && (
+                            <EvidenceImage
+                              filePath={projectFiles[elA.project_id]}
+                              page={elA.source_page}
+                              positions={elA.position ? [elA.position] : []}
+                              caption={elA.position ? undefined : 'Posição não capturada — re-extrair o projeto para ativar a marcação.'}
+                            />
+                          )}
+                          {elB && (
+                            <EvidenceImage
+                              filePath={projectFiles[elB.project_id]}
+                              page={elB.source_page}
+                              positions={elB.position ? [elB.position] : []}
+                              caption={elB.position ? undefined : 'Posição não capturada — re-extrair o projeto para ativar a marcação.'}
+                            />
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 <div className="flex gap-2 pt-3">
                   <Button size="sm" variant={selected.status === 'confirmado' ? 'default' : 'outline'} onClick={() => setStatus(selected, 'confirmado')} className="gap-1.5 flex-1">

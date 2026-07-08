@@ -66,11 +66,13 @@ Responde APENAS com JSON valido, sem markdown:
   "route": [ { "de": "...", "para": "...", "piso": "...", "cota": n } ] ou null,
   "source_page": numero,
   "source_zone": "descricao da zona da prancha, ex: quadrante superior direito, junto ao nucleo de escadas; null",
+  "position": { "x": 0.0-1.0, "y": 0.0-1.0 } ou null,
   "raw_evidence": "obrigatorio",
   "confidence": 0.0-1.0
 } ] }
 Se o documento for memoria descritiva ou caderno de encargos, extrai apenas elementos
 com localizacao ou dimensao concreta - especificacoes gerais nao sao elementos.
+position: localizacao aproximada do CENTRO do elemento na pagina source_page, normalizada (x: 0=esquerda 1=direita; y: 0=topo 1=fundo). Estima pela posicao visual no desenho. Se nao conseguires estimar com razoavel confianca, null. NUNCA inventes posicao precisa - aproximada e honesta e suficiente.
 Usa o CONTEXTO DA OBRA para preencher o campo piso dos elementos a partir das cotas lidas, quando o contexto definir a correspondencia. Nunca contradigas o contexto da obra.`;
 }
 
@@ -221,6 +223,14 @@ serve(async (req) => {
         const elementType = ELEMENT_TYPES.has(el.element_type) ? el.element_type : "outro";
         porTipo[elementType] = (porTipo[elementType] || 0) + 1;
 
+        // position so entra se x e y forem numericos entre 0 e 1; caso contrario null
+        let position: { x: number; y: number } | null = null;
+        const px = Number(el.position?.x);
+        const py = Number(el.position?.y);
+        if (Number.isFinite(px) && Number.isFinite(py) && px >= 0 && px <= 1 && py >= 0 && py <= 1) {
+          position = { x: px, y: py };
+        }
+
         rows.push({
           user_id: user.id, obra_id: proj.obra_id, project_id: proj.id, inventory_id: inv.id,
           especialidade: inv.especialidade, element_type: elementType,
@@ -235,6 +245,7 @@ serve(async (req) => {
           route: el.route ?? null,
           source_page: sourcePage,
           source_zone: el.source_zone ?? null,
+          position,
           raw_evidence: el.raw_evidence.trim(),
           confidence: Math.max(0, Math.min(1, confidence)),
         });

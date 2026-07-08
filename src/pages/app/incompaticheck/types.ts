@@ -188,6 +188,7 @@ export interface ElementRow {
   route: Array<{ de?: string; para?: string; piso?: string; cota?: number }> | null;
   source_page: number;
   source_zone: string | null;
+  position: { x: number; y: number } | null;
   raw_evidence: string;
   confidence: number;
   created_at: string;

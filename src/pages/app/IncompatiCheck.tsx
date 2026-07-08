@@ -1,14 +1,12 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useIncompaticheck } from './incompaticheck/useIncompaticheck';
 import { PROJECT_TYPES, PDE_DOC_TYPES, VERDICT_CONFIG } from './incompaticheck/types';
 import type { Project, PdeDocType } from './incompaticheck/types';
 import { formatFileSize } from './incompaticheck/helpers';
 import UploadModal from './incompaticheck/UploadModal';
-import ShareModal from './incompaticheck/ShareModal';
 import ObraRegistModal from './incompaticheck/ObraRegistModal';
 import ObraListModal from './incompaticheck/ObraListModal';
 import ProjectPreviewModal from './incompaticheck/ProjectPreviewModal';
-import OverlayModal from './incompaticheck/OverlayModal';
 import { useEngSilvaContext } from '@/hooks/use-eng-silva-context';
 import { useAnalysisPipeline } from '@/hooks/useAnalysisPipeline';
 import { useSelfAnalysis } from '@/hooks/useSelfAnalysis';
@@ -36,71 +34,17 @@ import {
   Plus,
   Loader2,
   Building2,
-  RotateCcw,
   Trash2,
-  CheckCircle2,
-  MapPin,
   Lightbulb,
-  Layers,
-  Mail,
-  Copy,
   Play,
   ScanLine,
   Boxes,
   Settings2,
   ShieldCheck,
 } from 'lucide-react';
-import { Eye, EyeOff } from 'lucide-react';
 import { format } from 'date-fns';
 import { pt } from 'date-fns/locale';
-import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-
-// Types for the real AI analysis
-interface AIFindingZone {
-  description: string;
-  x_percent: number;
-  y_percent: number;
-  radius_percent: number;
-  source_project: string;
-}
-
-interface AIFinding {
-  id: string;
-  severity: 'alta' | 'media' | 'baixa';
-  title: string;
-  description: string;
-  specialties: string[];
-  location: string;
-  recommendation: string;
-  zone?: AIFindingZone;
-  conflicting_projects?: string[];
-}
-
-interface AnalysisResult {
-  findings: AIFinding[];
-  analyzed_at: string;
-  projects_analyzed: { name: string; type: string; size_mb: string }[];
-  skipped_files?: { name: string; reason: string }[];
-  strategy: string;
-  summary?: {
-    total_findings: number;
-    critical: number;
-    medium: number;
-    low: number;
-    overall_assessment: string;
-    priority_action: string;
-  };
-  email_response?: {
-    context: string;
-    to_name: string;
-    subject_suggestion: string;
-    body: string;
-  };
-  analysis_limitations?: string[];
-}
 
 export default function IncompatiCheck() {
   const ic = useIncompaticheck();
@@ -111,46 +55,9 @@ export default function IncompatiCheck() {
   const [showObraList, setShowObraList] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [showContext, setShowContext] = useState(false);
-  const [showShare, setShowShare] = useState(false);
   const [previewProject, setPreviewProject] = useState<Project | null>(null);
-  const [filter, setFilter] = useState('all');
-  const [expandedZones, setExpandedZones] = useState<Set<string>>(new Set());
-  const [zoneImages, setZoneImages] = useState<Map<string, string>>(new Map());
-  const [loadingZones, setLoadingZones] = useState<Set<string>>(new Set());
-  const [exportingPdf, setExportingPdf] = useState(false);
-  const [overlayFinding, setOverlayFinding] = useState<AIFinding | null>(null);
   const [clientLogo, setClientLogo] = useState<string | null>(() => localStorage.getItem('incompaticheck_client_logo'));
   const [fiscalLogo, setFiscalLogo] = useState<string | null>(() => localStorage.getItem('incompaticheck_fiscal_logo'));
-
-  // Real AI analysis state
-  const [aiAnalyzing, setAiAnalyzing] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
-  const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [severityFilter, setSeverityFilter] = useState<string | null>(null);
-
-  // Email draft state — keyed by analysis (one active analysis per page)
-  const [emailDraft, setEmailDraft] = useState<{ subject: string; body: string } | null>(null);
-
-  const getEmailDraft = (er: { subject_suggestion: string; body: string }) => {
-    return emailDraft || { subject: er.subject_suggestion || '', body: er.body || '' };
-  };
-
-  const updateEmailDraft = (patch: Partial<{ subject: string; body: string }>, er: { subject_suggestion: string; body: string }) => {
-    const current = emailDraft || { subject: er.subject_suggestion || '', body: er.body || '' };
-    setEmailDraft({ ...current, ...patch });
-  };
-
-  const resetEmailDraft = () => setEmailDraft(null);
-
-  const copyEmail = async (er: { subject_suggestion: string; body: string }) => {
-    const draft = getEmailDraft(er);
-    try {
-      await navigator.clipboard.writeText(`${draft.subject}\n\n${draft.body}`);
-      toast.success('Email copiado');
-    } catch {
-      toast.error('Não foi possível copiar');
-    }
-  };
 
   // Recarrega o ElementsExplorer sempre que as contagens de elementos mudam
   useEffect(() => {
@@ -183,140 +90,6 @@ export default function IncompatiCheck() {
     return () => setSilvaContext(null);
   }, [ic.obraAtiva, ic.chatMessages, ic.agentThinking, ic.sendUserMessage, ic.findings, ic.pdeAnalyses, ic.projects, setSilvaContext]);
 
-  // Zone image loading
-  const handleToggleZone = useCallback(async (finding: AIFinding) => {
-    const key = finding.id;
-    if (expandedZones.has(key)) {
-      setExpandedZones(prev => { const n = new Set(prev); n.delete(key); return n; });
-      return;
-    }
-    setExpandedZones(prev => new Set(prev).add(key));
-
-    if (zoneImages.has(key)) return;
-    if (!finding.zone?.source_project) return;
-
-    setLoadingZones(prev => new Set(prev).add(key));
-    try {
-      const project = ic.projects.find(p => p.name === finding.zone!.source_project);
-      if (!project) return;
-
-      const { data: fileData } = await supabase.storage
-        .from('incompaticheck-files')
-        .download(project.file_path);
-      if (!fileData) return;
-
-      const arrayBuffer = await fileData.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-      let binary = '';
-      const chunkSize = 8192;
-      for (let i = 0; i < uint8Array.length; i += chunkSize) {
-        const chunk = uint8Array.subarray(i, i + chunkSize);
-        binary += String.fromCharCode(...chunk);
-      }
-      const base64 = btoa(binary);
-
-      const { pdfPageToImage, annotateImage } = await import('@/utils/annotate-plan-image');
-      const baseImage = await pdfPageToImage(base64);
-      const annotated = await annotateImage(baseImage, [{
-        x_percent: finding.zone!.x_percent,
-        y_percent: finding.zone!.y_percent,
-        radius_percent: finding.zone!.radius_percent,
-        label: finding.id,
-        severity: finding.severity,
-      }]);
-      setZoneImages(prev => new Map(prev).set(key, annotated));
-    } catch (err) {
-      console.error('Zone image error:', err);
-    } finally {
-      setLoadingZones(prev => { const n = new Set(prev); n.delete(key); return n; });
-    }
-  }, [expandedZones, zoneImages, ic.projects]);
-
-  // PDF export with annotations
-  const handleExportPdfWithAnnotations = useCallback(async () => {
-    // Build result from local or persisted data
-    const resultToExport = analysisResult || (ic.analysis && ic.findings.length > 0 ? {
-      findings: ic.findings.map(f => ({
-        id: f.id,
-        severity: (f.severity === 'critical' ? 'alta' : f.severity === 'warning' ? 'media' : 'baixa') as 'alta' | 'media' | 'baixa',
-        title: f.title,
-        description: f.description,
-        location: f.location || '',
-        specialties: f.tags || [],
-        recommendation: '',
-      })),
-      analyzed_at: ic.analysis.completed_at || ic.analysis.created_at || new Date().toISOString(),
-      projects_analyzed: ic.projects.map(p => ({ name: p.name, type: p.type, size_mb: '' })),
-      strategy: 'persisted',
-      skipped_files: [],
-    } : null);
-
-    if (!resultToExport || resultToExport.findings.length === 0) {
-      toast.error('Execute uma análise primeiro.');
-      return;
-    }
-    setExportingPdf(true);
-    toast.info('A gerar relatório com imagens anotadas...');
-
-    try {
-      const annotatedImages = new Map<string, string>();
-      const projectCache = new Map<string, string>();
-
-      for (const finding of resultToExport.findings as AIFinding[]) {
-        if (!finding.zone?.source_project) continue;
-        const projectName = finding.zone.source_project;
-
-        if (!projectCache.has(projectName)) {
-          const project = ic.projects.find(p => p.name === projectName);
-          if (project) {
-            try {
-              const { data: fileData } = await supabase.storage
-                .from('incompaticheck-files')
-                .download(project.file_path);
-              if (fileData) {
-                const arrayBuffer = await fileData.arrayBuffer();
-                const uint8Array = new Uint8Array(arrayBuffer);
-                let binary = '';
-                const chunkSize = 8192;
-                for (let i = 0; i < uint8Array.length; i += chunkSize) {
-                  const chunk = uint8Array.subarray(i, i + chunkSize);
-                  binary += String.fromCharCode(...chunk);
-                }
-                const base64 = btoa(binary);
-                const { pdfPageToImage } = await import('@/utils/annotate-plan-image');
-                const imageDataUrl = await pdfPageToImage(base64);
-                projectCache.set(projectName, imageDataUrl);
-              }
-            } catch (err) {
-              console.error(`Failed to process ${projectName}:`, err);
-            }
-          }
-        }
-
-        if (projectCache.has(projectName)) {
-          const baseImage = projectCache.get(projectName)!;
-          const { annotateImage } = await import('@/utils/annotate-plan-image');
-          const annotated = await annotateImage(baseImage, [{
-            x_percent: finding.zone.x_percent,
-            y_percent: finding.zone.y_percent,
-            radius_percent: finding.zone.radius_percent,
-            label: finding.id,
-            severity: finding.severity,
-          }]);
-          annotatedImages.set(finding.id, annotated);
-        }
-      }
-
-      await ic.generateReportWithAnnotations(resultToExport, annotatedImages, clientLogo, fiscalLogo);
-      toast.success('Relatório gerado com sucesso!');
-    } catch (err) {
-      console.error('PDF generation error:', err);
-      toast.error('Não foi possível gerar o relatório.');
-    } finally {
-      setExportingPdf(false);
-    }
-  }, [analysisResult, ic]);
-
   const handleCreateObra = async (info: { nome: string; cidade: string; fiscal: string }) => {
     const obra = await ic.createObra(info.nome, info.cidade, info.fiscal);
     if (obra) {
@@ -330,142 +103,8 @@ export default function IncompatiCheck() {
     await ic.uploadProject(file, type, ic.obraAtiva.id);
   };
 
-  const handleRunAnalysis = async () => {
-    if (!ic.obraAtiva) return;
-    setAiAnalyzing(true);
-    setAnalysisError(null);
-    setAnalysisResult(null);
-
-    try {
-      // Fetch knowledge data for this obra
-      const { data: knowledgeData } = await supabase
-        .from('eng_silva_project_knowledge')
-        .select('document_name, specialty, summary, key_elements, processed')
-        .eq('obra_id', ic.obraAtiva.id)
-        .eq('processed', true);
-
-      const knowledgePayload = knowledgeData?.map(k => ({
-        project_name: k.document_name,
-        specialty: k.specialty,
-        summary: k.summary,
-        key_elements: k.key_elements,
-      })) || [];
-
-      if (knowledgePayload.length > 0) {
-        toast.info(`Usando resumos inteligentes para ${knowledgePayload.length} projecto(s).`);
-      }
-
-      const projectData = ic.projects.map(p => ({
-        id: p.id,
-        name: p.name,
-        type: p.type,
-        file_path: p.file_path,
-      }));
-
-      console.log('INCOMPATICHECK: Invoking analysis with', projectData.length, 'projects,', knowledgePayload.length, 'knowledge entries');
-
-      const { data, error } = await supabase.functions.invoke('incompaticheck-analyze', {
-        body: { projects: projectData, knowledge_data: knowledgePayload },
-      });
-
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-
-      console.log('INCOMPATICHECK: Analysis result received:', data);
-      console.log('INCOMPATICHECK: Findings count:', data?.findings?.length);
-      setAnalysisResult(data as AnalysisResult);
-
-      // Persist to DB via existing hook flow
-      await persistAnalysis(data as AnalysisResult);
-
-      // Save to Eng. Silva memory for voice conversations
-      if (data.findings && data.findings.length > 0) {
-        saveAnalysisToEngSilva(data as AnalysisResult, ic.obraAtiva?.nome || 'obra');
-      }
-
-      toast.success(`Análise concluída: ${data.findings.length} incompatibilidade(s) encontrada(s)`);
-    } catch (err: any) {
-      console.error('INCOMPATICHECK: Analysis error:', err);
-      setAnalysisError(err.message || 'Erro na análise. Verifique os ficheiros e tente novamente.');
-      toast.error('Erro na análise de incompatibilidades');
-    } finally {
-      setAiAnalyzing(false);
-    }
-  };
-
-  const persistAnalysis = async (result: AnalysisResult) => {
-    if (!ic.obraAtiva) return;
-    try {
-      const { data: user } = await supabase.auth.getUser();
-      if (!user.user) return;
-
-      const altaCount = result.findings.filter(f => f.severity === 'alta').length;
-      const mediaCount = result.findings.filter(f => f.severity === 'media').length;
-      const baixaCount = result.findings.filter(f => f.severity === 'baixa').length;
-
-      const { data: analysisRow } = await (supabase as any)
-        .from('incompaticheck_analyses')
-        .insert({
-          user_id: user.user.id,
-          obra_id: ic.obraAtiva.id,
-          status: 'completed',
-          total_projects: result.projects_analyzed.length,
-          critical_count: altaCount,
-          warning_count: mediaCount,
-          info_count: baixaCount,
-          completed_at: result.analyzed_at,
-          ai_analysis: result,
-        })
-        .select()
-        .single();
-
-      if (analysisRow && result.findings.length > 0) {
-        const findingsToInsert = result.findings.map(f => ({
-          analysis_id: (analysisRow as any).id,
-          severity: f.severity === 'alta' ? 'critical' : f.severity === 'media' ? 'warning' : 'info',
-          title: f.title,
-          description: f.description,
-          location: f.location || '',
-          tags: f.specialties || [],
-          resolved: false,
-        }));
-
-        await supabase.from('incompaticheck_findings').insert(findingsToInsert);
-      }
-    } catch (err) {
-      console.error('INCOMPATICHECK: Failed to persist analysis:', err);
-    }
-  };
-
-  const saveAnalysisToEngSilva = async (result: AnalysisResult, obraName: string) => {
-    try {
-      console.log('INCOMPATICHECK: Saving to Eng. Silva memory...');
-      const alta = result.findings.filter(f => f.severity === 'alta');
-      const media = result.findings.filter(f => f.severity === 'media');
-      const baixa = result.findings.filter(f => f.severity === 'baixa');
-
-      let summary = `Análise de incompatibilidades na obra ${obraName}: ${result.findings.length} incompatibilidades detectadas (${alta.length} alta, ${media.length} média, ${baixa.length} baixa). `;
-
-      alta.forEach(f => {
-        summary += `[ALTA] ${f.id} - ${f.title}: ${f.description.substring(0, 150)}. Recomendação: ${f.recommendation.substring(0, 150)}. `;
-      });
-
-      media.forEach(f => {
-        summary += `[MÉDIA] ${f.id} - ${f.title}: ${f.description.substring(0, 100)}. `;
-      });
-
-      const response = await supabase.functions.invoke('eng-silva-memory', {
-        body: { action: 'add_summary', summary: summary.trim() },
-      });
-      console.log('INCOMPATICHECK: Memory save response:', response);
-    } catch (err) {
-      console.error('INCOMPATICHECK: Failed to save to Eng. Silva memory:', err);
-    }
-  };
-
   const hasObra = !!ic.obraAtiva;
   const hasProjects = ic.projects.length > 0;
-  const canAnalyze = ic.projects.length >= 2;
 
   // Group projects by type
   const projectsByType = ic.projects.reduce<Record<string, Project[]>>((acc, p) => {
@@ -473,42 +112,6 @@ export default function IncompatiCheck() {
     acc[p.type].push(p);
     return acc;
   }, {});
-
-  // Fallback: use persisted DB data when local analysisResult is absent
-  const hasPersistedAnalysis = !analysisResult && !!ic.analysis && ic.findings.length > 0;
-
-  const displayFindings: AIFinding[] = analysisResult?.findings || (hasPersistedAnalysis ? ic.findings.map(f => ({
-    id: f.id,
-    severity: (f.severity === 'critical' ? 'alta' : f.severity === 'warning' ? 'media' : 'baixa') as 'alta' | 'media' | 'baixa',
-    title: f.title,
-    description: f.description,
-    location: f.location || '',
-    specialties: f.tags || [],
-    recommendation: '',
-  })) : []);
-
-  const hasResults = !!analysisResult || hasPersistedAnalysis;
-
-  // Extract enriched fields from fresh result or persisted DB
-  const persistedAi = (ic.analysis as any)?.ai_analysis as AnalysisResult | undefined;
-  const displaySummary = analysisResult?.summary || persistedAi?.summary || null;
-  const displayEmailResponse = analysisResult?.email_response || persistedAi?.email_response || null;
-  const displayLimitations = analysisResult?.analysis_limitations || persistedAi?.analysis_limitations || [];
-
-  // Filtered findings
-  const filteredFindings = displayFindings.filter(
-    f => !severityFilter || f.severity === severityFilter
-  );
-
-  const severityBadgeVariant = (s: string) =>
-    s === 'alta' ? 'critical' : s === 'media' ? 'high' : 'success';
-
-  const severityLabel = (s: string) =>
-    s === 'alta' ? 'Alta' : s === 'media' ? 'Média' : 'Baixa';
-
-  const displayAltaCount = displayFindings.filter(f => f.severity === 'alta').length;
-  const displayMediaCount = displayFindings.filter(f => f.severity === 'media').length;
-  const displayBaixaCount = displayFindings.filter(f => f.severity === 'baixa').length;
 
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6 lg:p-8 space-y-6">
@@ -559,7 +162,7 @@ export default function IncompatiCheck() {
       )}
 
       {/* STATE: Obra selected, no projects */}
-      {hasObra && !hasProjects && !aiAnalyzing && (
+      {hasObra && !hasProjects && (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-20 text-center">
             <Upload className="w-12 h-12 text-muted-foreground mb-4" />
@@ -579,9 +182,7 @@ export default function IncompatiCheck() {
       {/* STATE: Has projects (main working state) */}
       {hasObra && hasProjects && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-            {/* Left: Projects Panel (3 cols) */}
-            <div className="lg:col-span-3 space-y-4">
+          <div className="space-y-4">
               <Card>
                 <CardHeader className="pb-4">
                   <div className="flex items-center justify-between">
@@ -749,461 +350,63 @@ export default function IncompatiCheck() {
               )}
             </div>
 
-            {/* Right: Analysis Panel (2 cols) */}
-            <div className="lg:col-span-2 space-y-4">
-              {/* Analyzing state */}
-              {aiAnalyzing && (
-                <Card>
-                  <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-                    <Loader2 className="w-12 h-12 text-primary animate-spin mb-4" />
-                    <h2 className="text-lg font-semibold text-foreground mb-2">A analisar incompatibilidades...</h2>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      Isto pode demorar 1-3 minutos dependendo do tamanho dos projectos.
-                    </p>
-                    <div className="w-full max-w-xs h-1.5 bg-muted rounded-full overflow-hidden">
-                      <div className="h-full bg-primary rounded-full animate-pulse" style={{ width: '60%' }} />
+          {/* Logótipos do relatório (usados no relatório de excelência, PDE e partilha) */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Logótipos do Relatório</CardTitle>
+              <p className="text-xs text-muted-foreground">Aparecem no cabeçalho dos relatórios gerados (fiscalização à esquerda, cliente à direita).</p>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-2 max-w-md">
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground font-medium">Logo Fiscalização</label>
+                  {fiscalLogo ? (
+                    <div className="flex items-center gap-1.5 p-1.5 rounded border border-border bg-muted/30">
+                      <img src={fiscalLogo} alt="Fiscal" className="h-6 object-contain" />
+                      <button onClick={() => { setFiscalLogo(null); localStorage.removeItem('incompaticheck_fiscal_logo'); }} className="ml-auto p-0.5 rounded hover:bg-destructive/10">
+                        <Trash2 className="w-3 h-3 text-destructive" />
+                      </button>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-3">
-                      O Claude está a comparar todas as especialidades.
-                    </p>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Error state */}
-              {!aiAnalyzing && analysisError && (
-                <Card className="border-destructive/50">
-                  <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                    <AlertTriangle className="w-10 h-10 text-destructive mb-3" />
-                    <h3 className="text-sm font-semibold text-foreground mb-2">Erro na análise</h3>
-                    <p className="text-xs text-muted-foreground mb-4 max-w-xs">{analysisError}</p>
-                    <Button variant="outline" size="sm" onClick={handleRunAnalysis} className="gap-1.5">
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      Tentar Novamente
-                    </Button>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Ready to analyze */}
-              {!aiAnalyzing && !analysisError && !analysisResult && !hasPersistedAnalysis && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">Análise</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {!canAnalyze ? (
-                      <div className="text-center py-8">
-                        <AlertTriangle className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
-                        <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-                          Carregue pelo menos 2 projectos de especialidades diferentes para analisar incompatibilidades.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="text-center py-6 space-y-4">
-                        <Button onClick={handleRunAnalysis} variant="accent" size="lg" className="w-full gap-2">
-                          <FileSearch className="w-5 h-5" />
-                          Analisar Incompatibilidades
-                        </Button>
-                        <p className="text-xs text-muted-foreground">
-                          Os projectos carregados serão comparados para identificar potenciais conflitos entre especialidades.
-                        </p>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Results summary (right panel) */}
-              {!aiAnalyzing && hasResults && (
-                <div className="space-y-4">
-                  {/* Stats */}
-                  <div className="grid grid-cols-3 gap-3">
-                    <Card className="text-center py-3">
-                      <p className="text-2xl font-bold text-destructive">{displayAltaCount}</p>
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Alta</p>
-                    </Card>
-                    <Card className="text-center py-3">
-                      <p className="text-2xl font-bold text-amber-500">{displayMediaCount}</p>
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Média</p>
-                    </Card>
-                    <Card className="text-center py-3">
-                      <p className="text-2xl font-bold text-emerald-500">{displayBaixaCount}</p>
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Baixa</p>
-                    </Card>
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => {
-                      setAnalysisResult(null);
-                      setAnalysisError(null);
-                      setSeverityFilter(null);
-                    }} className="gap-1.5 flex-1">
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      Nova Análise
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleExportPdfWithAnnotations}
-                      disabled={exportingPdf}
-                      className="gap-1.5 flex-1"
-                    >
-                      {exportingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                      PDF Completo
-                    </Button>
-                    <Button
-                      variant="default"
-                      size="sm"
-                      onClick={() => {
-                        ic.generateExecutiveSummary(displayFindings, clientLogo, fiscalLogo);
-                        toast.success('Resumo executivo gerado.');
-                      }}
-                      className="gap-1.5 flex-1"
-                    >
-                      <FileSearch className="w-3.5 h-3.5" />
-                      Resumo 1pg
-                    </Button>
-                    {ic.analysis && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          if (confirm('Tem a certeza que deseja excluir esta análise?')) {
-                            ic.deleteAnalysis(ic.analysis!.id);
-                            setAnalysisResult(null);
-                            setSeverityFilter(null);
-                          }
-                        }}
-                        className="gap-1.5 text-destructive hover:text-destructive"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
-                    )}
-                  </div>
-
-                  {/* Logo uploads for PDF */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-muted-foreground font-medium">Logo Fiscalização</label>
-                      {fiscalLogo ? (
-                        <div className="flex items-center gap-1.5 p-1.5 rounded border border-border bg-muted/30">
-                          <img src={fiscalLogo} alt="Fiscal" className="h-6 object-contain" />
-                          <button onClick={() => { setFiscalLogo(null); localStorage.removeItem('incompaticheck_fiscal_logo'); }} className="ml-auto p-0.5 rounded hover:bg-destructive/10">
-                            <Trash2 className="w-3 h-3 text-destructive" />
-                          </button>
-                        </div>
-                      ) : (
-                        <label className="flex items-center justify-center gap-1 p-1.5 rounded border border-dashed border-border cursor-pointer hover:bg-muted/50 text-[10px] text-muted-foreground">
-                          <Plus className="w-3 h-3" /> Carregar
-                          <input type="file" accept="image/*" className="hidden" onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (!file) return;
-                            const reader = new FileReader();
-                            reader.onload = () => { const b64 = reader.result as string; setFiscalLogo(b64); localStorage.setItem('incompaticheck_fiscal_logo', b64); };
-                            reader.readAsDataURL(file);
-                            e.target.value = '';
-                          }} />
-                        </label>
-                      )}
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-muted-foreground font-medium">Logo Cliente</label>
-                      {clientLogo ? (
-                        <div className="flex items-center gap-1.5 p-1.5 rounded border border-border bg-muted/30">
-                          <img src={clientLogo} alt="Cliente" className="h-6 object-contain" />
-                          <button onClick={() => { setClientLogo(null); localStorage.removeItem('incompaticheck_client_logo'); }} className="ml-auto p-0.5 rounded hover:bg-destructive/10">
-                            <Trash2 className="w-3 h-3 text-destructive" />
-                          </button>
-                        </div>
-                      ) : (
-                        <label className="flex items-center justify-center gap-1 p-1.5 rounded border border-dashed border-border cursor-pointer hover:bg-muted/50 text-[10px] text-muted-foreground">
-                          <Plus className="w-3 h-3" /> Carregar
-                          <input type="file" accept="image/*" className="hidden" onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (!file) return;
-                            const reader = new FileReader();
-                            reader.onload = () => { const b64 = reader.result as string; setClientLogo(b64); localStorage.setItem('incompaticheck_client_logo', b64); };
-                            reader.readAsDataURL(file);
-                            e.target.value = '';
-                          }} />
-                        </label>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Filters */}
-                  <div className="flex gap-1.5 flex-wrap">
-                    {[
-                      { key: null, label: `Todas (${displayFindings.length})` },
-                      { key: 'alta', label: `Alta (${displayAltaCount})` },
-                      { key: 'media', label: `Média (${displayMediaCount})` },
-                      { key: 'baixa', label: `Baixa (${displayBaixaCount})` },
-                    ].map(f => (
-                      <Button
-                        key={f.key || 'all'}
-                        variant={severityFilter === f.key ? 'default' : 'ghost'}
-                        size="sm"
-                        onClick={() => setSeverityFilter(f.key)}
-                        className="text-xs h-7"
-                      >
-                        {f.label}
-                      </Button>
-                    ))}
-                  </div>
-
-                  {analysisResult && (
-                    <p className="text-[11px] text-muted-foreground">
-                      Analisado em {new Date(analysisResult.analyzed_at).toLocaleString('pt-PT')} · {analysisResult.projects_analyzed.length} projectos · Estratégia: {analysisResult.strategy === 'pairs' ? 'pares' : 'conjunta'}
-                    </p>
-                  )}
-
-                  {hasPersistedAnalysis && !analysisResult && (
-                    <p className="text-[10px] text-muted-foreground text-center italic">
-                      Resultados da última análise guardada {ic.analysis?.completed_at ? `· ${format(new Date(ic.analysis.completed_at), "d MMM yyyy 'às' HH:mm", { locale: pt })}` : ''}
-                    </p>
+                  ) : (
+                    <label className="flex items-center justify-center gap-1 p-1.5 rounded border border-dashed border-border cursor-pointer hover:bg-muted/50 text-[10px] text-muted-foreground">
+                      <Plus className="w-3 h-3" /> Carregar
+                      <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = () => { const b64 = reader.result as string; setFiscalLogo(b64); localStorage.setItem('incompaticheck_fiscal_logo', b64); };
+                        reader.readAsDataURL(file);
+                        e.target.value = '';
+                      }} />
+                    </label>
                   )}
                 </div>
-              )}
-            </div>
-          </div>
-
-          {/* Skipped files warning */}
-          {analysisResult && analysisResult.skipped_files && analysisResult.skipped_files.length > 0 && (
-            <Card className="border-amber-500/50 bg-amber-500/5">
-              <CardContent className="py-3 px-4">
-                <div className="flex items-center gap-2 text-sm">
-                  <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" />
-                  <span className="text-muted-foreground">
-                    Ficheiros não analisados: {analysisResult.skipped_files.map(f => f.name).join(', ')}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* === EMAIL DE RESPOSTA (em destaque) === */}
-          {!aiAnalyzing && hasResults && displayEmailResponse && (() => {
-            const er = displayEmailResponse;
-            const draft = getEmailDraft(er);
-            return (
-              <Card className="border-2 border-primary/30 bg-primary/5">
-                <CardContent className="p-4 space-y-3">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Mail className="w-4 h-4 text-primary" />
-                    <h3 className="text-sm font-semibold text-foreground">Email de Resposta</h3>
-                    {er.to_name && (
-                      <span className="text-xs text-muted-foreground">Para: {er.to_name}</span>
-                    )}
-                    {er.context && (
-                      <Badge variant="outline" className="text-[10px]">{er.context}</Badge>
-                    )}
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground">Assunto</label>
-                    <Input
-                      value={draft.subject}
-                      onChange={e => updateEmailDraft({ subject: e.target.value }, er)}
-                      className="mt-1"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground">Corpo do Email</label>
-                    <Textarea
-                      value={draft.body}
-                      onChange={e => updateEmailDraft({ body: e.target.value }, er)}
-                      rows={Math.max(8, Math.min(20, draft.body.split('\n').length + 1))}
-                      className="mt-1 font-mono text-sm"
-                    />
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button size="sm" onClick={() => copyEmail(er)} className="gap-1">
-                      <Copy className="w-3 h-3" /> Copiar Email
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={resetEmailDraft} className="gap-1">
-                      <RotateCcw className="w-3 h-3" /> Repor sugestão
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })()}
-
-          {/* === RESUMO === */}
-          {!aiAnalyzing && hasResults && displaySummary && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Resumo</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {displaySummary.overall_assessment && (
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {displaySummary.overall_assessment}
-                  </p>
-                )}
-                {displaySummary.priority_action && (
-                  <div className="flex items-start gap-2 bg-amber-500/5 border border-amber-500/20 rounded-lg p-3">
-                    <Lightbulb className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-xs font-semibold text-foreground mb-1">Acção prioritária</p>
-                      <p className="text-xs text-muted-foreground leading-relaxed">{displaySummary.priority_action}</p>
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground font-medium">Logo Cliente</label>
+                  {clientLogo ? (
+                    <div className="flex items-center gap-1.5 p-1.5 rounded border border-border bg-muted/30">
+                      <img src={clientLogo} alt="Cliente" className="h-6 object-contain" />
+                      <button onClick={() => { setClientLogo(null); localStorage.removeItem('incompaticheck_client_logo'); }} className="ml-auto p-0.5 rounded hover:bg-destructive/10">
+                        <Trash2 className="w-3 h-3 text-destructive" />
+                      </button>
                     </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* === LIMITAÇÕES === */}
-          {!aiAnalyzing && hasResults && displayLimitations.length > 0 && (
-            <Card className="border-amber-500/30 bg-amber-500/5">
-              <CardContent className="p-4 space-y-2">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-500" />
-                  <h3 className="text-sm font-semibold text-foreground">Limitações da análise</h3>
+                  ) : (
+                    <label className="flex items-center justify-center gap-1 p-1.5 rounded border border-dashed border-border cursor-pointer hover:bg-muted/50 text-[10px] text-muted-foreground">
+                      <Plus className="w-3 h-3" /> Carregar
+                      <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = () => { const b64 = reader.result as string; setClientLogo(b64); localStorage.setItem('incompaticheck_client_logo', b64); };
+                        reader.readAsDataURL(file);
+                        e.target.value = '';
+                      }} />
+                    </label>
+                  )}
                 </div>
-                <ul className="space-y-1.5 text-xs text-muted-foreground pl-1">
-                  {displayLimitations.map((lim, i) => (
-                    <li key={i} className="flex gap-2">
-                      <span className="text-amber-500 mt-0.5">•</span>
-                      <span className="leading-relaxed">{lim}</span>
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Results: Full width findings list */}
-          {!aiAnalyzing && hasResults && filteredFindings.length > 0 && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">
-                  Incompatibilidades Detectadas ({filteredFindings.length})
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-0 divide-y divide-border">
-                {filteredFindings.map((finding, idx) => (
-                  <div key={finding.id || idx} className="p-4 space-y-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[11px] font-mono text-muted-foreground">{finding.id}</span>
-                        <Badge variant={severityBadgeVariant(finding.severity) as any} className="text-[10px]">
-                          {severityLabel(finding.severity)}
-                        </Badge>
-                      </div>
-                    </div>
-
-                    <h4 className="text-sm font-semibold text-foreground">{finding.title}</h4>
-                    <p className="text-xs text-muted-foreground leading-relaxed">{finding.description}</p>
-
-                    {finding.specialties && finding.specialties.length > 0 && (
-                      <div className="flex gap-1.5 flex-wrap">
-                        {finding.specialties.map(s => (
-                          <Badge key={s} variant="outline" className="text-[10px]">
-                            {s}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-
-                    {finding.location && finding.location !== 'N/A' && (
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <MapPin className="w-3 h-3" />
-                        {finding.location}
-                      </div>
-                    )}
-
-                    {finding.recommendation && (
-                      <div className="flex items-start gap-2 bg-muted/50 rounded-lg p-3">
-                        <Lightbulb className="w-3.5 h-3.5 text-primary mt-0.5 flex-shrink-0" />
-                        <p className="text-xs text-muted-foreground leading-relaxed">
-                          <span className="font-medium text-foreground">Recomendação:</span> {finding.recommendation}
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Zone annotation button */}
-                    {finding.zone && (
-                      <div className="space-y-2">
-                        <div className="flex gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="gap-1.5 text-xs h-7"
-                            onClick={() => handleToggleZone(finding)}
-                            disabled={loadingZones.has(finding.id)}
-                          >
-                            {loadingZones.has(finding.id) ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                            ) : expandedZones.has(finding.id) ? (
-                              <EyeOff className="w-3 h-3" />
-                            ) : (
-                              <Eye className="w-3 h-3" />
-                            )}
-                            {expandedZones.has(finding.id) ? 'Ocultar zona' : 'Ver zona'}
-                          </Button>
-
-                          {(finding.severity === 'alta' || finding.severity === 'critical') && ic.projects.length >= 2 && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="gap-1.5 text-xs h-7"
-                              onClick={() => setOverlayFinding(finding)}
-                            >
-                              <Layers className="w-3 h-3" />
-                              Sobrepor Plantas
-                            </Button>
-                          )}
-                        </div>
-
-                        {expandedZones.has(finding.id) && zoneImages.has(finding.id) && (
-                          <div className="space-y-1.5">
-                            <img
-                              src={zoneImages.get(finding.id)}
-                              alt={`Zona: ${finding.zone.description}`}
-                              className="rounded-lg border border-border w-full max-h-80 object-contain bg-muted"
-                            />
-                            <p className="text-[11px] text-muted-foreground italic px-1">
-                              Zona identificada: {finding.zone.description}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Overlay button for findings without zone but with severity alta */}
-                    {!finding.zone && (finding.severity === 'alta' || finding.severity === 'critical') && ic.projects.length >= 2 && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-1.5 text-xs h-7"
-                        onClick={() => setOverlayFinding(finding)}
-                      >
-                        <Layers className="w-3 h-3" />
-                        Sobrepor Plantas
-                      </Button>
-                    )}
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* No findings for current filter */}
-          {!aiAnalyzing && hasResults && filteredFindings.length === 0 && (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                <CheckCircle2 className="w-10 h-10 text-emerald-500 mb-3" />
-                <p className="text-sm text-muted-foreground">
-                  {severityFilter
-                    ? `Nenhuma incompatibilidade com severidade "${severityLabel(severityFilter)}" encontrada.`
-                    : 'Nenhuma incompatibilidade encontrada.'}
-                </p>
-              </CardContent>
-            </Card>
-          )}
+              </div>
+            </CardContent>
+          </Card>
 
           {/* ---- ELEMENTOS EXTRAIDOS (Onda 1) ---- */}
           {ic.obraAtiva && Object.values(pipeline.elementCounts).some(c => c > 0) && (
@@ -1217,16 +420,25 @@ export default function IncompatiCheck() {
               obraId={ic.obraAtiva.id}
               refreshKey={elementsRefreshKey}
               projectNames={Object.fromEntries(ic.projects.map(p => [p.id, p.name]))}
+              projectFiles={Object.fromEntries(ic.projects.map(p => [p.id, p.file_path]))}
             />
           )}
 
           {/* ---- ANALISE CRUZADA (Onda 2) ---- */}
           {ic.obraAtiva && Object.values(pipeline.elementCounts).some(c => c > 0) && (
-            <CrossAnalysisPanel obraId={ic.obraAtiva.id} refreshKey={elementsRefreshKey} />
+            <CrossAnalysisPanel
+              obraId={ic.obraAtiva.id}
+              refreshKey={elementsRefreshKey}
+              selfFindings={self.findings}
+              projectFiles={Object.fromEntries(ic.projects.map(p => [p.id, p.file_path]))}
+              obra={{ id: ic.obraAtiva.id, nome: ic.obraAtiva.nome, cidade: ic.obraAtiva.cidade, fiscal: ic.obraAtiva.fiscal }}
+              clientLogo={clientLogo}
+              fiscalLogo={fiscalLogo}
+            />
           )}
 
           {/* ---- ESCLARECIMENTOS & PROPOSTAS (PDE) ---- */}
-          {(hasResults || ic.analysis || ic.pdeDocuments.length > 0) && (
+          {(ic.analysis || ic.pdeDocuments.length > 0) && (
             <PdeSection ic={ic} clientLogo={clientLogo} fiscalLogo={fiscalLogo} />
           )}
         </div>
@@ -1238,17 +450,8 @@ export default function IncompatiCheck() {
         onSelect={obra => ic.selectObra(obra)} onDelete={id => ic.deleteObra(id)} onNew={() => { setShowObraList(false); setShowObraModal(true); }} />
       <UploadModal isOpen={showUpload} onClose={() => setShowUpload(false)} onUpload={handleUpload}
         obraNome={ic.obraAtiva?.nome} uploadProgress={ic.uploadProgress} />
-      <ShareModal isOpen={showShare} onClose={() => setShowShare(false)} obraAtiva={ic.obraAtiva}
-        findingsCount={{ critical: displayAltaCount, warning: displayMediaCount, info: displayBaixaCount }}
-        onGenerateReport={() => ic.generateReport(clientLogo, fiscalLogo)} />
       <ProjectPreviewModal project={previewProject} onClose={() => setPreviewProject(null)}
         onDelete={(id, path) => ic.deleteProject(id, path)} />
-      <OverlayModal
-        isOpen={!!overlayFinding}
-        onClose={() => setOverlayFinding(null)}
-        finding={overlayFinding}
-        projects={ic.projects}
-      />
       <ContextObraModal
         isOpen={showContext}
         onClose={() => setShowContext(false)}

@@ -6,16 +6,49 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { GitCompareArrows, AlertTriangle, Loader2, RotateCcw, Check, X } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { GitCompareArrows, AlertTriangle, Loader2, RotateCcw, Check, X, Download } from 'lucide-react';
+import EvidenceImage from '@/components/incompaticheck/EvidenceImage';
+import { generateExcellenceReport } from '@/lib/excellenceReport';
+import type { SelfFinding } from '@/pages/app/incompaticheck/types';
 
 const SEV_ORDER: Record<string, number> = { alta: 0, media: 1, baixa: 2 };
 const sevVariant = (s: string) => (s === 'alta' ? 'critical' : s === 'media' ? 'high' : 'success');
 const sevLabel = (s: string) => (s === 'alta' ? 'Alta' : s === 'media' ? 'Média' : 'Baixa');
 
-export default function CrossAnalysisPanel({ obraId, refreshKey }: { obraId: string; refreshKey: number }) {
+export default function CrossAnalysisPanel({ obraId, refreshKey, selfFindings, projectFiles, obra, clientLogo, fiscalLogo }: {
+  obraId: string;
+  refreshKey: number;
+  selfFindings: SelfFinding[];
+  projectFiles: Record<string, string>;
+  obra: { id: string; nome: string; cidade?: string | null; fiscal?: string | null };
+  clientLogo: string | null;
+  fiscalLogo: string | null;
+}) {
   const cross = useCrossAnalysis(obraId, refreshKey);
   const [elementsMap, setElementsMap] = useState<Record<string, ElementRow>>({});
   const [selected, setSelected] = useState<CrossFinding | null>(null);
+  const [showToneDialog, setShowToneDialog] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportStep, setExportStep] = useState<string>('');
+
+  const runExport = async (tone: 'fiscalizacao' | 'projetista') => {
+    setShowToneDialog(false);
+    setExporting(true);
+    setExportStep('A preparar...');
+    cross.clearError();
+    try {
+      await generateExcellenceReport({
+        obra, crossFindings: cross.findings, selfFindings, elementsMap, projectFiles,
+        clientLogo, fiscalLogo, tone, onProgress: (s) => setExportStep(s),
+      });
+    } catch (err: any) {
+      cross.setCrossError(`Falha a gerar o relatório: ${err.message}`);
+    } finally {
+      setExporting(false);
+      setExportStep('');
+    }
+  };
 
   // Carrega elementos da obra para renderizar a evidencia dupla
   useEffect(() => {
@@ -93,6 +126,16 @@ export default function CrossAnalysisPanel({ obraId, refreshKey }: { obraId: str
               {cross.running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <GitCompareArrows className="w-3.5 h-3.5" />}
               Cruzar Especialidades
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowToneDialog(true)}
+              disabled={exporting || (cross.findings.length === 0 && selfFindings.length === 0)}
+              className="gap-1.5"
+            >
+              {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+              Exportar Relatório
+            </Button>
           </div>
         </div>
         {!canCross && (
@@ -102,6 +145,12 @@ export default function CrossAnalysisPanel({ obraId, refreshKey }: { obraId: str
         )}
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Progresso de exportacao do relatorio */}
+        {exporting && (
+          <div className="flex items-center gap-2 rounded-lg bg-primary/5 border border-primary/20 p-3 text-xs text-foreground">
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" /> A gerar relatório — {exportStep}
+          </div>
+        )}
         {/* Progresso */}
         {cross.progress.active && (
           <div className="space-y-1.5 rounded-lg bg-primary/5 border border-primary/20 p-3">
@@ -203,6 +252,45 @@ export default function CrossAnalysisPanel({ obraId, refreshKey }: { obraId: str
                     )}
                 </div>
 
+                {(() => {
+                  const elA = elementsMap[selected.element_a_id];
+                  const elB = selected.element_b_id ? elementsMap[selected.element_b_id] : null;
+                  const fileA = elA ? projectFiles[elA.project_id] : undefined;
+                  const shared = !!(elA && elB && elA.project_id === elB.project_id && elA.source_page === elB.source_page);
+                  return (
+                    <div className="space-y-3 pt-2">
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Evidência visual</p>
+                      {elA && shared ? (
+                        <EvidenceImage
+                          filePath={fileA}
+                          page={elA.source_page}
+                          positions={[elA.position, elB!.position].filter(Boolean) as { x: number; y: number }[]}
+                          caption={!elA.position && !elB!.position ? 'Posição não capturada — re-extrair o projeto para ativar a marcação.' : undefined}
+                        />
+                      ) : (
+                        <>
+                          {elA && (
+                            <EvidenceImage
+                              filePath={fileA}
+                              page={elA.source_page}
+                              positions={elA.position ? [elA.position] : []}
+                              caption={elA.position ? undefined : 'Posição não capturada — re-extrair o projeto para ativar a marcação.'}
+                            />
+                          )}
+                          {elB && (
+                            <EvidenceImage
+                              filePath={projectFiles[elB.project_id]}
+                              page={elB.source_page}
+                              positions={elB.position ? [elB.position] : []}
+                              caption={elB.position ? undefined : 'Posição não capturada — re-extrair o projeto para ativar a marcação.'}
+                            />
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 <div className="flex gap-2 pt-3">
                   <Button
                     size="sm"
@@ -226,6 +314,20 @@ export default function CrossAnalysisPanel({ obraId, refreshKey }: { obraId: str
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Dialog de escolha de tom do email antes de exportar */}
+      <Dialog open={showToneDialog} onOpenChange={setShowToneDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Exportar Relatório</DialogTitle>
+            <DialogDescription>Escolha o tom do corpo de email incluído no relatório.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => runExport('fiscalizacao')}>Fiscalização</Button>
+            <Button variant="default" onClick={() => runExport('projetista')}>Projetista</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
