@@ -17,7 +17,23 @@ import {
   Layers, Plus, Edit, Archive, ArchiveRestore, Trash2, Loader2, Building2,
 } from 'lucide-react';
 
-type Site = { id: string; name: string };
+type Site = { id: string; name: string; incompaticheck_obra_id: string | null };
+type Nivel = {
+  id: string;
+  specialty: string;
+  fase: string | null;
+  piso: string | null;
+  cota: number | null;
+  tipo: string | null;
+};
+
+// Especialidades canónicas do sistema (mesmas do Conhecimento do Projecto).
+const CATALOGO_ESPECIALIDADES = [
+  'Topografia', 'Arquitectura', 'Estrutural', 'Fundações', 'Rede Enterrada',
+  'AVAC', 'Águas e Esgotos', 'Electricidade', 'Telecomunicações', 'Gás',
+  'Segurança Contra Incêndios', 'Acústica', 'Térmica',
+];
+
 type Ctx = {
   id: string;
   site_id: string;
@@ -75,6 +91,20 @@ export default function EstruturaObra() {
   const [f, setF] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
+  // Catálogo de fases/níveis (eng_silva_niveis)
+  const [niveis, setNiveis] = useState<Nivel[]>([]);
+  const [loadingNiveis, setLoadingNiveis] = useState(false);
+  const [faseOpen, setFaseOpen] = useState(false);
+  const [novaFase, setNovaFase] = useState('');
+  const [faseEspecialidade, setFaseEspecialidade] = useState('');
+  const [faseTodas, setFaseTodas] = useState(true);
+  const [savingFase, setSavingFase] = useState(false);
+  const [nivelOpen, setNivelOpen] = useState(false);
+  const [nivelEditing, setNivelEditing] = useState<Nivel | null>(null);
+  const [nivelCtx, setNivelCtx] = useState<{ specialty: string; fase: string } | null>(null);
+  const [nivelForm, setNivelForm] = useState<{ cota: string; piso: string; tipo: string }>({ cota: '', piso: '', tipo: '' });
+  const [savingNivel, setSavingNivel] = useState(false);
+
   // Carregar obras (mundo captura: sites via memberships)
   useEffect(() => {
     if (!user) return;
@@ -92,7 +122,7 @@ export default function EstruturaObra() {
       if (!orgIds.length) { setSites([]); return; }
       const { data, error } = await supabase
         .from('sites')
-        .select('id, name')
+        .select('id, name, incompaticheck_obra_id')
         .in('org_id', orgIds)
         .order('name');
       if (error) {
@@ -240,6 +270,139 @@ export default function EstruturaObra() {
     await loadContexts();
   };
 
+  // ---- Catálogo de fases/níveis (eng_silva_niveis) ----
+  // Ponte site -> obra IncompatiCheck (mesma usada pelas capturas e pela KB).
+  const obraId = sites.find((s) => s.id === siteId)?.incompaticheck_obra_id || null;
+
+  const loadNiveis = async () => {
+    if (!obraId) { setNiveis([]); return; }
+    setLoadingNiveis(true);
+    const { data, error } = await supabase
+      .from('eng_silva_niveis')
+      .select('id, specialty, fase, piso, cota, tipo')
+      .eq('obra_id', obraId)
+      .order('specialty');
+    if (error) {
+      console.error('Erro ao carregar catálogo:', error);
+      toast.error('Erro ao carregar catálogo de níveis: ' + error.message);
+    }
+    setNiveis((data as Nivel[]) || []);
+    setLoadingNiveis(false);
+  };
+  useEffect(() => { loadNiveis(); /* eslint-disable-next-line */ }, [obraId]);
+
+  // Criar fase: uma linha por especialidade escolhida (placeholder cota/piso/tipo a NULL).
+  const saveFase = async () => {
+    if (!user || !obraId) return;
+    const fase = novaFase.trim();
+    if (!fase) { toast.error('Indique a fase (ex: 1.1).'); return; }
+    const especialidades = faseTodas
+      ? CATALOGO_ESPECIALIDADES
+      : (faseEspecialidade ? [faseEspecialidade] : []);
+    if (especialidades.length === 0) { toast.error('Escolha uma especialidade ou "todas".'); return; }
+    setSavingFase(true);
+    const rows = especialidades.map((specialty) => ({
+      obra_id: obraId, user_id: user.id, specialty, fase, cota: null, piso: null, tipo: null,
+    }));
+    const { error } = await supabase.from('eng_silva_niveis').insert(rows);
+    setSavingFase(false);
+    if (error) {
+      console.error('Criar fase:', error);
+      toast.error('Erro ao criar fase: ' + error.message);
+      return;
+    }
+    toast.success(`Fase ${fase} criada para ${especialidades.length} especialidade(s).`);
+    setFaseOpen(false);
+    setNovaFase('');
+    setFaseEspecialidade('');
+    setFaseTodas(true);
+    await loadNiveis();
+  };
+
+  const openNovoNivel = (specialty: string, fase: string) => {
+    setNivelEditing(null);
+    setNivelCtx({ specialty, fase });
+    setNivelForm({ cota: '', piso: '', tipo: '' });
+    setNivelOpen(true);
+  };
+
+  const openEditNivel = (n: Nivel) => {
+    setNivelEditing(n);
+    setNivelCtx({ specialty: n.specialty, fase: n.fase || '' });
+    setNivelForm({ cota: n.cota != null ? String(n.cota) : '', piso: n.piso || '', tipo: n.tipo || '' });
+    setNivelOpen(true);
+  };
+
+  const saveNivel = async () => {
+    if (!user || !obraId || !nivelCtx) return;
+    let cotaNum: number | null = null;
+    if (nivelForm.cota.trim()) {
+      cotaNum = Number(nivelForm.cota.trim().replace(',', '.'));
+      if (Number.isNaN(cotaNum)) { toast.error('Cota inválida.'); return; }
+    }
+    if (!nivelForm.piso.trim() && cotaNum == null && !nivelForm.tipo.trim()) {
+      toast.error('Preencha pelo menos cota, piso ou tipo.');
+      return;
+    }
+    setSavingNivel(true);
+    const payload = {
+      piso: nivelForm.piso.trim() || null,
+      cota: cotaNum,
+      tipo: nivelForm.tipo.trim() || null,
+    };
+    let error;
+    if (nivelEditing) {
+      ({ error } = await supabase.from('eng_silva_niveis').update(payload).eq('id', nivelEditing.id));
+    } else {
+      ({ error } = await supabase.from('eng_silva_niveis').insert({
+        obra_id: obraId, user_id: user.id, specialty: nivelCtx.specialty, fase: nivelCtx.fase || null, ...payload,
+      }));
+    }
+    setSavingNivel(false);
+    if (error) {
+      console.error('Guardar nível:', error);
+      toast.error('Erro ao guardar nível: ' + error.message);
+      return;
+    }
+    toast.success(nivelEditing ? 'Nível atualizado.' : 'Nível adicionado.');
+    setNivelOpen(false);
+    await loadNiveis();
+  };
+
+  const removeNivel = async (n: Nivel) => {
+    if (!window.confirm('Apagar este nível?')) return;
+    const { error } = await supabase.from('eng_silva_niveis').delete().eq('id', n.id);
+    if (error) { console.error('Apagar nível:', error); toast.error('Erro ao apagar: ' + error.message); return; }
+    toast.success('Nível apagado.');
+    await loadNiveis();
+  };
+
+  const removeFase = async (specialty: string, fase: string) => {
+    if (!obraId) return;
+    if (!window.confirm(`Apagar a fase ${fase} de ${specialty} e todos os seus níveis?`)) return;
+    const { error } = await supabase
+      .from('eng_silva_niveis')
+      .delete()
+      .eq('obra_id', obraId)
+      .eq('specialty', specialty)
+      .eq('fase', fase);
+    if (error) { console.error('Apagar fase:', error); toast.error('Erro ao apagar fase: ' + error.message); return; }
+    toast.success(`Fase ${fase} apagada.`);
+    await loadNiveis();
+  };
+
+  // Agrupar catálogo: especialidade -> fase -> níveis
+  const catalogoPorEspecialidade = useMemo(() => {
+    const bySpec: Record<string, Record<string, Nivel[]>> = {};
+    for (const n of niveis) {
+      const fase = n.fase || '(sem fase)';
+      if (!bySpec[n.specialty]) bySpec[n.specialty] = {};
+      if (!bySpec[n.specialty][fase]) bySpec[n.specialty][fase] = [];
+      bySpec[n.specialty][fase].push(n);
+    }
+    return bySpec;
+  }, [niveis]);
+
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       {/* Header */}
@@ -317,6 +480,158 @@ export default function EstruturaObra() {
           ))}
         </div>
       )}
+
+      {/* Catálogo de Fases e Níveis */}
+      {sites.length > 0 && (
+        <Card>
+          <CardContent className="p-4 space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-2">
+                <Layers className="w-5 h-5 text-primary" />
+                <div>
+                  <h2 className="text-lg font-semibold text-foreground">Fases e Níveis (Catálogo da Obra)</h2>
+                  <p className="text-xs text-muted-foreground">Alimenta o Eng. Silva e o upload da Base de Conhecimento</p>
+                </div>
+              </div>
+              <Button size="sm" onClick={() => setFaseOpen(true)} disabled={!obraId}>
+                <Plus className="w-4 h-4 mr-2" /> Nova Fase
+              </Button>
+            </div>
+
+            {!obraId ? (
+              <p className="text-sm text-muted-foreground">
+                Esta obra não está ligada a uma obra do IncompatiCheck — o catálogo de níveis usa essa ligação.
+              </p>
+            ) : loadingNiveis ? (
+              <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+            ) : Object.keys(catalogoPorEspecialidade).length === 0 ? (
+              <p className="text-sm text-muted-foreground">Ainda não há fases neste catálogo. Comece por criar uma fase.</p>
+            ) : (
+              <div className="space-y-4">
+                {Object.entries(catalogoPorEspecialidade).map(([specialty, fases]) => (
+                  <div key={specialty} className="space-y-2">
+                    <p className="text-sm font-medium text-foreground">{specialty}</p>
+                    {Object.entries(fases).map(([fase, rows]) => {
+                      const nivelRows = rows.filter((r) => r.piso || r.cota != null || r.tipo);
+                      return (
+                        <div key={fase} className="rounded-lg border p-3 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <Badge variant="secondary">{fase === '(sem fase)' ? 'Sem fase' : `Fase ${fase}`}</Badge>
+                            <div className="flex items-center gap-1">
+                              <Button variant="ghost" size="sm" onClick={() => openNovoNivel(specialty, fase === '(sem fase)' ? '' : fase)}>
+                                <Plus className="w-3.5 h-3.5 mr-1" /> Nível
+                              </Button>
+                              {fase !== '(sem fase)' && (
+                                <Button
+                                  variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
+                                  onClick={() => removeFase(specialty, fase)} title="Apagar fase"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                          {nivelRows.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">Sem níveis. Adicione cota/piso/tipo.</p>
+                          ) : (
+                            <div className="space-y-1">
+                              {nivelRows.map((n) => (
+                                <div key={n.id} className="flex items-center justify-between gap-2 text-sm">
+                                  <span className="text-foreground truncate">
+                                    {[n.piso, n.cota != null ? `(${n.cota})` : '', n.tipo].filter(Boolean).join(' · ')}
+                                  </span>
+                                  <div className="flex items-center gap-1 flex-shrink-0">
+                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditNivel(n)} title="Editar nível">
+                                      <Edit className="w-3.5 h-3.5" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => removeNivel(n)} title="Apagar nível">
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Dialog: Nova Fase */}
+      <Dialog open={faseOpen} onOpenChange={setFaseOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Nova Fase</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1">
+              <Label>Fase</Label>
+              <Input value={novaFase} onChange={(e) => setNovaFase(e.target.value)} placeholder="ex: 1.1" />
+            </div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" checked={faseTodas} onChange={(e) => setFaseTodas(e.target.checked)} className="h-4 w-4 rounded border-input" />
+              Criar para todas as especialidades
+            </label>
+            {!faseTodas && (
+              <div className="space-y-1">
+                <Label>Especialidade</Label>
+                <Select value={faseEspecialidade} onValueChange={setFaseEspecialidade}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar especialidade" /></SelectTrigger>
+                  <SelectContent>
+                    {CATALOGO_ESPECIALIDADES.map((e) => <SelectItem key={e} value={e}>{e}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFaseOpen(false)} disabled={savingFase}>Cancelar</Button>
+            <Button onClick={saveFase} disabled={savingFase}>
+              {savingFase && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Criar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Nível */}
+      <Dialog open={nivelOpen} onOpenChange={setNivelOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {nivelEditing ? 'Editar Nível' : 'Novo Nível'}
+              {nivelCtx ? ` — ${nivelCtx.specialty}${nivelCtx.fase ? ` · Fase ${nivelCtx.fase}` : ''}` : ''}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Cota</Label>
+                <Input value={nivelForm.cota} onChange={(e) => setNivelForm((s) => ({ ...s, cota: e.target.value }))} placeholder="ex: -21.45" />
+              </div>
+              <div className="space-y-1">
+                <Label>Piso</Label>
+                <Input value={nivelForm.piso} onChange={(e) => setNivelForm((s) => ({ ...s, piso: e.target.value }))} placeholder="ex: Piso -6" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Tipo</Label>
+              <Input value={nivelForm.tipo} onChange={(e) => setNivelForm((s) => ({ ...s, tipo: e.target.value }))} placeholder="ex: laje de fundação" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNivelOpen(false)} disabled={savingNivel}>Cancelar</Button>
+            <Button onClick={saveNivel} disabled={savingNivel}>
+              {savingNivel && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Guardar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Form dialog */}
       <Dialog open={formOpen} onOpenChange={setFormOpen}>

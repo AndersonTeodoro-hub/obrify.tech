@@ -16,7 +16,7 @@ async function callClaudeWithRetry(apiKey: string, content: any[], systemPrompt:
         },
         body: JSON.stringify({
           model: "claude-sonnet-4-5-20250929",
-          max_tokens: 6000,
+          max_tokens: 8000,
           messages: [{ role: "user", content }],
           system: systemPrompt,
         }),
@@ -118,10 +118,12 @@ Responde APENAS com JSON (sem markdown, sem backticks):
   ]
 }
 
-Extrai TODOS os elementos identificáveis: pilares, sapatas, vigas, lajes, tubagens, caixas de visita, eixos, cotas, materiais, normas referenciadas, notas gerais, quadros de materiais.
+Extrai os elementos mais relevantes — NO MÁXIMO 25 entradas em key_elements: pilares, sapatas, vigas, lajes, tubagens, caixas de visita, eixos, cotas, materiais, normas referenciadas, notas gerais, quadros de materiais.
 Sê específico com IDs, cotas, dimensões e localizações.
 
-Se o documento for um contrato, caderno de encargos, ou memória descritiva, extrai TODA a informação relevante incluindo: partes envolvidas, valores, prazos, condições, especificações de materiais, marcas de referência, cláusulas importantes sobre substituição de materiais, penalidades, e qualquer informação técnica relevante.
+Se o documento for um contrato, caderno de encargos, ou memória descritiva, resume a informação relevante de forma concisa, incluindo: partes envolvidas, valores, prazos, condições, especificações de materiais, marcas de referência, cláusulas importantes sobre substituição de materiais, penalidades, e qualquer informação técnica relevante.
+
+IMPORTANTE: o summary deve ser completo e auto-suficiente. Não excedas 25 entradas em key_elements (prioriza as mais importantes) para garantir que a resposta JSON fica completa e válida.
 
 Responde em português europeu.`,
       });
@@ -130,55 +132,63 @@ Responde em português europeu.`,
 
       const replyText = await callClaudeWithRetry(anthropicKey, content, systemPrompt);
 
-      // 3-tier JSON parsing
-      let parsed: { summary: string; key_elements: any[] };
+      // --- parsing robusto: NUNCA guardar fragmento de JSON como summary ---
+      let parsed: { summary: string; key_elements: any[] } = { summary: "", key_elements: [] };
       try {
         const cleaned = replyText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
         parsed = JSON.parse(cleaned);
       } catch {
-        console.warn("KNOWLEDGE: Standard JSON parse failed, trying regex extraction...");
+        console.warn("KNOWLEDGE: JSON direto falhou, a tentar extrair objeto...");
         try {
-          const jsonMatch = replyText.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            parsed = JSON.parse(jsonMatch[0]);
-          } else {
-            throw new Error("No JSON found");
-          }
+          const cleaned = replyText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+          const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+          parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { summary: "", key_elements: [] };
         } catch {
-          console.warn("KNOWLEDGE: JSON extraction failed, using raw text as summary");
-          const cleanText = replyText
-            .replace(/```json\s*/g, '').replace(/```\s*/g, '')
-            .replace(/\{[\s\S]*\}/g, '')
-            .trim();
-
-          parsed = {
-            summary: cleanText.length > 50
-              ? cleanText.substring(0, 2000)
-              : "Documento carregado mas a análise automática não gerou resumo estruturado. O documento está disponível para consulta directa.",
-            key_elements: [],
-          };
+          // JSON inválido ou truncado (doc grande): não guardamos fragmento.
+          // Deixamos vazio para o retry em prosa abaixo gerar um summary limpo.
+          console.warn("KNOWLEDGE: JSON inválido/truncado — sem fragmento; vai para retry em prosa.");
+          parsed = { summary: "", key_elements: [] };
         }
       }
 
-      // Validate summary quality — fallback to simpler prompt if needed
-      if (!parsed.summary || parsed.summary === "Não foi possível processar este documento." || parsed.summary.length < 20) {
-        console.warn("KNOWLEDGE: Summary too short or default error, retrying with simpler prompt...");
+      // saneamento de tipos
+      if (!Array.isArray(parsed.key_elements)) parsed.key_elements = [];
+      if (typeof parsed.summary !== "string") parsed.summary = "";
 
+      // deteta summary-lixo (fragmento de JSON: começa por , { } [ ")
+      const looksLikeJsonFragment = (s: string) => /^[,{}\[\]"]/.test((s || "").trim());
+
+      // --- retry em prosa se o summary estiver vazio, curto, default ou for lixo ---
+      const summaryIsBad =
+        !parsed.summary ||
+        parsed.summary.length < 50 ||
+        parsed.summary.startsWith("Documento carregado mas a análise automática") ||
+        parsed.summary === "Não foi possível processar este documento." ||
+        looksLikeJsonFragment(parsed.summary);
+
+      if (summaryIsBad) {
+        console.warn("KNOWLEDGE: summary vazio/curto/lixo — retry com prompt em prosa...");
         const simpleContent = [...content.slice(0, -1), {
           type: "text",
           text: "Descreve este documento de construção civil em 3-5 parágrafos. Que tipo de documento é, que informação contém, que elementos técnicos são visíveis ou descritos. Não uses JSON, responde em texto normal em português europeu.",
         }];
-
         try {
           const simpleReply = await callClaudeWithRetry(anthropicKey, simpleContent,
             "És um engenheiro civil sénior. Descreve documentos técnicos de forma clara e completa em português europeu.", 2);
-          if (simpleReply && simpleReply.length > 50) {
+          if (simpleReply && simpleReply.length > 50 && !looksLikeJsonFragment(simpleReply)) {
             parsed.summary = simpleReply.substring(0, 2000);
-            console.log("KNOWLEDGE: Fallback text summary succeeded");
+            console.log("KNOWLEDGE: summary de prosa (fallback) recuperado com sucesso.");
+          } else {
+            console.error("KNOWLEDGE: fallback em prosa devolveu conteúdo inválido.");
           }
         } catch (fallbackErr) {
-          console.error("KNOWLEDGE: Fallback also failed:", fallbackErr);
+          console.error("KNOWLEDGE: fallback em prosa falhou:", fallbackErr);
         }
+      }
+
+      // rede final: nunca gravar vazio nem fragmento
+      if (!parsed.summary || parsed.summary.length < 50 || looksLikeJsonFragment(parsed.summary)) {
+        parsed.summary = "Documento carregado; o resumo automático não ficou disponível. Consultar o documento directamente.";
       }
 
       // Always update the record
@@ -197,18 +207,71 @@ Responde em português europeu.`,
         updateData.document_type = "minimal";
       }
 
-      await supabase
+      // --- grava o resumo (agora com captura de erro: não falha em silêncio) ---
+      const { error: updateError } = await supabase
         .from("eng_silva_project_knowledge")
         .update(updateData)
         .eq("id", document_id);
 
+      if (updateError) {
+        console.error(`KNOWLEDGE: UPDATE FAILED ${document_name} (${document_id}):`, updateError);
+        return new Response(JSON.stringify({
+          ok: false,
+          stage: "update",
+          error: updateError.message,
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
       console.log(`KNOWLEDGE: Processed ${document_name} — ${parsed.key_elements?.length || 0} elements, quality: ${updateData.document_type}`);
+
+      // --- CORREÇÃO RAIZ: embeber logo após processar, para o documento ficar
+      // pesquisável pelo Eng. Silva. Sem isto, fica processado mas invisível
+      // (a RPC match_knowledge_embeddings é INNER JOIN sobre os embeddings).
+      // embed-document é idempotente (DELETE+INSERT) -> reprocessar é seguro.
+      let embedded = false;
+      let chunksEmbedded = 0;
+      let embedError: string | null = null;
+      try {
+        const embedResp = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/embed-document`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+          },
+          body: JSON.stringify({ knowledge_id: document_id }),
+        });
+
+        if (!embedResp.ok) {
+          embedError = `embed-document HTTP ${embedResp.status}: ${await embedResp.text()}`;
+        } else {
+          const embedJson = await embedResp.json();
+          chunksEmbedded = embedJson?.chunks_embedded ?? 0;
+          embedded = embedJson?.success === true && chunksEmbedded > 0;
+          if (!embedded) {
+            embedError = `embed-document: success=${embedJson?.success}, chunks=${chunksEmbedded}`;
+          }
+        }
+      } catch (e) {
+        embedError = e instanceof Error ? e.message : String(e);
+      }
+
+      if (embedded) {
+        console.log(`KNOWLEDGE: Embedded ${document_name} — ${chunksEmbedded} chunks`);
+      } else {
+        console.error(`KNOWLEDGE: EMBED FAILED ${document_name} (${document_id}): ${embedError}`);
+      }
 
       return new Response(JSON.stringify({
         ok: true,
         summary: parsed.summary,
         elements_count: parsed.key_elements?.length || 0,
         quality: updateData.document_type,
+        embedded,
+        chunks_embedded: chunksEmbedded,
+        embed_error: embedError,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

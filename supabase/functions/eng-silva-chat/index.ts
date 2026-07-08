@@ -3,6 +3,83 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { voyageEmbed, voyageRerank } from "../_shared/embeddings/voyage-client.ts";
 
+type NivelCat = {
+  id: string;
+  specialty: string;
+  fase: string | null;
+  piso: string | null;
+  cota: number | null;
+  tipo: string | null;
+};
+
+// Deteta escopo de fase/nível na pergunta, validado contra o catálogo da obra.
+// Sem match no catálogo → devolve nulls (retrieval normal, sem boost).
+function detectScope(
+  message: string,
+  niveis: NivelCat[],
+): { fase: string | null; nivelId: string | null } {
+  const msg = message.toLowerCase();
+  const norm = (s: string) =>
+    s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+
+  // Fase: só aceita tokens \d+.\d+ que EXISTAM no catálogo da obra
+  const fasesCat = [...new Set(niveis.map((n) => n.fase).filter(Boolean))] as string[];
+  const faseTokens = message.match(/\b\d+\.\d+\b/g) || [];
+  const fase = faseTokens.find((t) => fasesCat.includes(t)) || null;
+
+  // Nível: match único por piso (substring) ou por cota (número presente na msg)
+  const nums = (message.match(/-?\d+(?:[.,]\d+)?/g) || []).map((x) => parseFloat(x.replace(",", ".")));
+  const candidatos = niveis.filter((n) => {
+    const scopeOk = !fase || n.fase === fase;
+    const pisoOk = n.piso ? msg.includes(norm(n.piso)) : false;
+    const cotaOk = n.cota != null ? nums.some((v) => Math.abs(v - Number(n.cota)) < 0.005) : false;
+    return scopeOk && (pisoOk || cotaOk);
+  });
+  const nivelId = candidatos.length === 1 ? candidatos[0].id : null;
+  return { fase, nivelId };
+}
+
+// Bloco de contexto para o system prompt: catálogo de fases/níveis da obra +
+// analysis_context do IncompatiCheck (se existir) + regras de senso construtivo.
+function buildSilvaContextBlock(
+  niveis: NivelCat[],
+  analysisContext: string | null,
+  scopeFase: string | null,
+): string {
+  const parts: string[] = [];
+
+  parts.push(
+    "SENSO CONSTRUTIVO (aplica sempre): distinguir betão tosco de acabado é normal; " +
+    "fundações e sapatas situam-se abaixo da laje de piso — não é incompatibilidade; " +
+    "nunca especules além dos documentos — se um dado não está nos trechos, dizes que não está.",
+  );
+
+  if (niveis.length > 0) {
+    const especialidades = [...new Set(niveis.map((n) => n.specialty))];
+    const linhas = especialidades.map((esp) => {
+      const fases = [...new Set(
+        niveis.filter((n) => n.specialty === esp).map((n) => n.fase).filter(Boolean),
+      )];
+      return `- ${esp}: ${fases.length ? "fases " + fases.join(", ") : "(sem fases definidas)"}`;
+    });
+    parts.push("CATÁLOGO DE FASES/NÍVEIS DESTA OBRA:\n" + linhas.join("\n"));
+  }
+
+  if (analysisContext && analysisContext.trim()) {
+    parts.push("CONTEXTO DA OBRA (IncompatiCheck):\n" + analysisContext.trim());
+  }
+
+  if (scopeFase) {
+    parts.push(
+      `ESCOPO DA PERGUNTA: o fiscal referiu-se à Fase ${scopeFase}. Prioriza os documentos ` +
+      `dessa fase e cita o escopo; usa documentos gerais como apoio e não mistures informação ` +
+      `de outras fases.`,
+    );
+  }
+
+  return parts.length ? "\n\n" + parts.join("\n\n") : "";
+}
+
 /**
  * Retrieval semântico com Voyage embeddings + reranking.
  *
@@ -21,7 +98,9 @@ async function searchKnowledgeSemantic(
   supabase: any,
   obraId: string,
   userId: string,
-  query: string
+  query: string,
+  pFase: string | null,
+  pNivelId: string | null
 ): Promise<any[]> {
   // 1. Embed query
   const queryEmbedding = await voyageEmbed({
@@ -29,7 +108,9 @@ async function searchKnowledgeSemantic(
     inputType: "query",
   });
 
-  // 2. Retrieval inicial via RPC (top 30)
+  // 2. Retrieval inicial via RPC (top 30). p_fase/p_nivel_id são opcionais:
+  //    funcionam como boost (escopo exato primeiro) e excluem OUTRAS fases;
+  //    documentos gerais (fase NULL) continuam sempre elegíveis.
   const { data: chunks, error: rpcErr } = await supabase.rpc(
     "match_knowledge_embeddings",
     {
@@ -38,6 +119,8 @@ async function searchKnowledgeSemantic(
       match_user_id: userId,
       match_count: 30,
       match_threshold: 0.3,
+      p_fase: pFase,
+      p_nivel_id: pNivelId,
     }
   );
 
@@ -200,7 +283,7 @@ async function searchKnowledgeLegacy(
   if (specialties.length > 0 && !isAmbiguousSingle) {
     const { data: bySpecialty } = await supabase
       .from("eng_silva_project_knowledge")
-      .select("document_name, specialty, summary, key_elements, file_path")
+      .select("document_name, specialty, summary, key_elements, file_path, fase")
       .eq("obra_id", obraId)
       .eq("user_id", userId)
       .eq("processed", true)
@@ -286,7 +369,7 @@ function buildKnowledgeContext(chunks: any[]): string {
 
   // Agrupar chunks por documento
   const byDoc: Record<string, any[]> = {};
-  const docMeta: Record<string, { specialty: string | null; document_type: string | null }> = {};
+  const docMeta: Record<string, { specialty: string | null; document_type: string | null; fase: string | null }> = {};
 
   for (const chunk of chunks) {
     const docName = chunk.document_name || "Documento sem nome";
@@ -295,6 +378,7 @@ function buildKnowledgeContext(chunks: any[]): string {
       docMeta[docName] = {
         specialty: chunk.specialty,
         document_type: chunk.document_type,
+        fase: chunk.fase || null,
       };
     }
     byDoc[docName].push(chunk);
@@ -308,6 +392,7 @@ function buildKnowledgeContext(chunks: any[]): string {
     const meta = docMeta[docName];
     const header = `### ${docName}` +
       (meta.specialty ? ` — ${meta.specialty}` : "") +
+      (meta.fase ? ` [Fase ${meta.fase}]` : " [Geral]") +
       (meta.document_type ? ` (${meta.document_type})` : "") +
       "\n";
 
@@ -501,6 +586,33 @@ serve(async (req) => {
       try {
         const supabase = createClient(supabaseUrl, supabaseKey);
 
+        // Catálogo de níveis da obra (para detetar escopo e anotar o contexto).
+        // Erro ruidoso mas não fatal: o chat continua sem boost de fase.
+        let niveisCat: NivelCat[] = [];
+        {
+          const { data: niveisData, error: niveisErr } = await supabase
+            .from("eng_silva_niveis")
+            .select("id, specialty, fase, piso, cota, tipo")
+            .eq("obra_id", obra_id);
+          if (niveisErr) console.error("ENG-SILVA-CHAT: catálogo de níveis falhou:", niveisErr);
+          else niveisCat = niveisData || [];
+        }
+
+        // Contexto da obra IncompatiCheck ligada (analysis_context), se existir.
+        let analysisContext: string | null = null;
+        {
+          const { data: obraRow, error: obraErr } = await supabase
+            .from("incompaticheck_obras")
+            .select("analysis_context")
+            .eq("id", obra_id)
+            .maybeSingle();
+          if (obraErr) console.error("ENG-SILVA-CHAT: analysis_context falhou:", obraErr);
+          else analysisContext = (obraRow as any)?.analysis_context || null;
+        }
+
+        const { fase: scopeFase, nivelId: scopeNivelId } = detectScope(message, niveisCat);
+        console.log(`[retrieval] escopo detetado: fase=${scopeFase ?? "-"}, nivel=${scopeNivelId ?? "-"}`);
+
         let relevantDocs: any[] = [];
         let retrievalMode = "semantic";
 
@@ -510,6 +622,8 @@ serve(async (req) => {
             obra_id,
             user_id,
             message,
+            scopeFase,
+            scopeNivelId,
           );
           console.log(`[retrieval] semantic OK: ${relevantDocs.length} chunks`);
         } catch (semanticErr) {
@@ -620,6 +734,18 @@ serve(async (req) => {
             systemPrompt = systemPrompt.substring(0, profileIdx) + noResultsNote + systemPrompt.substring(profileIdx);
           } else {
             systemPrompt += noResultsNote;
+          }
+        }
+
+        // Catálogo de fases/níveis + contexto da obra + senso construtivo.
+        // Injetado independentemente de haver documentos encontrados.
+        const contextBlock = buildSilvaContextBlock(niveisCat, analysisContext, scopeFase);
+        if (contextBlock) {
+          const profileIdx2 = systemPrompt.indexOf("\n\nEXTRAÇÃO DE PERFIL:");
+          if (profileIdx2 > -1) {
+            systemPrompt = systemPrompt.substring(0, profileIdx2) + contextBlock + systemPrompt.substring(profileIdx2);
+          } else {
+            systemPrompt += contextBlock;
           }
         }
       } catch (searchErr) {

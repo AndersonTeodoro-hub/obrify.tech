@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { pt } from 'date-fns/locale';
+import { bridgeToIncompaticheck } from '@/lib/incompaticheckBridge';
 
 const PROJECT_SPECIALTIES = [
   'Topografia', 'Arquitectura', 'Estrutural', 'Fundações', 'Rede Enterrada',
@@ -56,6 +57,8 @@ interface KnowledgeDoc {
   document_name: string;
   document_type: string;
   specialty: string;
+  fase: string | null;
+  nivel_id: string | null;
   summary: string;
   key_elements: any[];
   file_path: string | null;
@@ -80,6 +83,11 @@ export default function ProjectKnowledge() {
   const [showObraList, setShowObraList] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [uploadSpecialty, setUploadSpecialty] = useState('');
+  const [uploadFase, setUploadFase] = useState('');
+  const [uploadNivelId, setUploadNivelId] = useState('');
+  const [bridgeToIncompati, setBridgeToIncompati] = useState(true);
+  const [niveis, setNiveis] = useState<{ id: string; specialty: string; fase: string | null; piso: string | null; cota: number | null; tipo: string | null }[]>([]);
+  const [faseFilter, setFaseFilter] = useState('__all__');
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -116,6 +124,19 @@ export default function ProjectKnowledge() {
   useEffect(() => {
     loadDocuments();
   }, [loadDocuments]);
+
+  // Catálogo de fases/níveis da obra (obra_id === selectedObra.id)
+  useEffect(() => {
+    if (!selectedObra) { setNiveis([]); return; }
+    supabase
+      .from('eng_silva_niveis')
+      .select('id, specialty, fase, piso, cota, tipo')
+      .eq('obra_id', selectedObra.id)
+      .then(({ data, error }) => {
+        if (error) { toast.error('Erro ao carregar catálogo de níveis: ' + error.message); return; }
+        setNiveis(data || []);
+      });
+  }, [selectedObra]);
 
   // Save current obra to Silva's memory
   const syncObraToSilva = useCallback(async (obra: Obra) => {
@@ -162,6 +183,8 @@ export default function ProjectKnowledge() {
             document_name: file.name,
             document_type: docType,
             specialty: uploadSpecialty,
+            fase: (uploadFase && uploadFase !== '__none__') ? uploadFase : null,
+            nivel_id: (uploadNivelId && uploadNivelId !== '__none__') ? uploadNivelId : null,
             summary: '',
             file_path: filePath,
             file_size: file.size,
@@ -176,12 +199,23 @@ export default function ProjectKnowledge() {
         if (insertData) {
           processDocument(insertData.id, file, file.name, uploadSpecialty);
         }
+
+        // Ponte de upload único: só peças desenhadas (especialidades de projeto).
+        // Falha aqui NÃO desfaz o upload da KB — reporta por extenso.
+        if (bridgeToIncompati && PROJECT_SPECIALTIES.includes(uploadSpecialty)) {
+          const bridge = await bridgeToIncompaticheck(file, uploadSpecialty, selectedObra.id, user.id);
+          if (!bridge.ok) {
+            toast.error(`"${file.name}" ficou na Base de Conhecimento mas NÃO no IncompatiCheck: ${bridge.error}`);
+          }
+        }
       }
 
       toast.success(`${uploadFiles.length} documento(s) carregado(s)`);
       setShowUpload(false);
       setUploadFiles([]);
       setUploadSpecialty('');
+      setUploadFase('');
+      setUploadNivelId('');
       loadDocuments();
     } catch (err: any) {
       console.error('Upload error:', err);
@@ -286,8 +320,18 @@ export default function ProjectKnowledge() {
     });
   };
 
+  // Fases disponíveis nos documentos desta obra (para o filtro)
+  const availableFases = [...new Set(documents.map(d => d.fase).filter(Boolean))] as string[];
+
+  // Filtro por fase (topo da listagem)
+  const filteredDocuments = documents.filter(d => {
+    if (faseFilter === '__all__') return true;
+    if (faseFilter === '__geral__') return !d.fase;
+    return d.fase === faseFilter;
+  });
+
   // Group by specialty
-  const grouped = documents.reduce<Record<string, KnowledgeDoc[]>>((acc, doc) => {
+  const grouped = filteredDocuments.reduce<Record<string, KnowledgeDoc[]>>((acc, doc) => {
     if (!acc[doc.specialty]) acc[doc.specialty] = [];
     acc[doc.specialty].push(doc);
     return acc;
@@ -388,6 +432,20 @@ export default function ProjectKnowledge() {
                 Processar Todos ({pendingCount})
               </Button>
             )}
+            {availableFases.length > 0 && (
+              <Select value={faseFilter} onValueChange={setFaseFilter}>
+                <SelectTrigger className="w-48 ml-auto">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">Todas as fases</SelectItem>
+                  <SelectItem value="__geral__">Geral (sem fase)</SelectItem>
+                  {availableFases.map(f => (
+                    <SelectItem key={f} value={f}>Fase {f}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           {/* Documents grouped by specialty */}
@@ -435,6 +493,11 @@ export default function ProjectKnowledge() {
                           <span className="text-xs text-muted-foreground shrink-0">
                             {format(new Date(doc.created_at), 'dd/MM/yy', { locale: pt })}
                           </span>
+                          {doc.fase ? (
+                            <Badge variant="outline" className="text-xs shrink-0">Fase {doc.fase}</Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-xs shrink-0 opacity-60">Geral</Badge>
+                          )}
                           {doc.processed ? (
                             <Badge className="bg-green-500/10 text-green-600 border-green-500/20 shrink-0">
                               <CheckCircle2 className="w-3 h-3 mr-1" />
@@ -546,7 +609,7 @@ export default function ProjectKnowledge() {
           <div className="space-y-4">
             <div>
               <label className="text-sm font-medium mb-2 block">Tipo de Documento</label>
-              <Select value={uploadSpecialty} onValueChange={setUploadSpecialty}>
+              <Select value={uploadSpecialty} onValueChange={(v) => { setUploadSpecialty(v); setUploadFase(''); setUploadNivelId(''); }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Selecione o tipo de documento" />
                 </SelectTrigger>
@@ -566,6 +629,56 @@ export default function ProjectKnowledge() {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Fase / Nível / Ponte — só para especialidades de projeto (peças desenhadas) */}
+            {PROJECT_SPECIALTIES.includes(uploadSpecialty) && (
+              <>
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Fase (opcional)</label>
+                  <Select value={uploadFase} onValueChange={(v) => { setUploadFase(v); setUploadNivelId(''); }}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Geral (sem fase)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Geral (sem fase)</SelectItem>
+                      {[...new Set(niveis.filter(n => n.specialty === uploadSpecialty).map(n => n.fase).filter(Boolean))].map(f => (
+                        <SelectItem key={f as string} value={f as string}>Fase {f}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Nível (opcional)</label>
+                  <Select value={uploadNivelId} onValueChange={setUploadNivelId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Toda a fase" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Toda a fase</SelectItem>
+                      {niveis
+                        .filter(n => n.specialty === uploadSpecialty
+                          && (!uploadFase || uploadFase === '__none__' || n.fase === uploadFase)
+                          && (n.piso || n.cota != null))
+                        .map(n => (
+                          <SelectItem key={n.id} value={n.id}>
+                            {[n.piso, n.cota != null ? `(${n.cota})` : '', n.tipo].filter(Boolean).join(' · ')}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={bridgeToIncompati}
+                    onChange={(e) => setBridgeToIncompati(e.target.checked)}
+                    className="h-4 w-4 rounded border-input"
+                  />
+                  Disponibilizar também para Análise de Incompatibilidades
+                </label>
+              </>
+            )}
+
             <div>
               <label className="text-sm font-medium mb-2 block">Ficheiros</label>
               <div
