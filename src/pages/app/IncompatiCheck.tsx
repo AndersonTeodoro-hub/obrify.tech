@@ -12,6 +12,7 @@ import OverlayModal from './incompaticheck/OverlayModal';
 import { useEngSilvaContext } from '@/hooks/use-eng-silva-context';
 import { useAnalysisPipeline } from '@/hooks/useAnalysisPipeline';
 import ElementsExplorer from '@/components/incompaticheck/ElementsExplorer';
+import CrossAnalysisPanel from '@/components/incompaticheck/CrossAnalysisPanel';
 import ContextObraModal from './incompaticheck/ContextObraModal';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -1194,6 +1195,11 @@ export default function IncompatiCheck() {
           {/* ---- ELEMENTOS EXTRAIDOS (Onda 1) ---- */}
           {ic.obraAtiva && Object.values(pipeline.elementCounts).some(c => c > 0) && (
             <ElementsExplorer obraId={ic.obraAtiva.id} refreshKey={elementsRefreshKey} />
+          )}
+
+          {/* ---- ANALISE CRUZADA (Onda 2) ---- */}
+          {ic.obraAtiva && Object.values(pipeline.elementCounts).some(c => c > 0) && (
+            <CrossAnalysisPanel obraId={ic.obraAtiva.id} refreshKey={elementsRefreshKey} />
           )}
 
           {/* ---- ESCLARECIMENTOS & PROPOSTAS (PDE) ---- */}

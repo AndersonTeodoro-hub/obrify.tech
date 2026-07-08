@@ -192,3 +192,27 @@ export interface ElementRow {
   confidence: number;
   created_at: string;
 }
+
+// ---- ONDA 2: Cruzamento por pares (Estagio 2) ----
+
+export interface CrossFinding {
+  id: string;
+  user_id: string;
+  obra_id: string;
+  run_id: string | null;
+  especialidade_a: string;
+  especialidade_b: string;
+  tipo_conflito: string;
+  severity: 'alta' | 'media' | 'baixa';
+  title: string;
+  description: string;
+  impact: string | null;
+  location: string | null;
+  recommendation: string | null;
+  constructability_note: string | null;
+  element_a_id: string;
+  element_b_id: string | null;
+  confidence: number;
+  status: 'novo' | 'confirmado' | 'rejeitado';
+  created_at: string;
+}
