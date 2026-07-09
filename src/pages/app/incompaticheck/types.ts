@@ -114,6 +114,9 @@ export interface PdeAnalysis {
   ai_analysis: {
     summary: string;
     findings_addressed: Array<{
+      finding_id?: string | null;
+      origem?: 'cruzamento' | 'coerencia_interna' | null;
+      confirmado?: boolean;
       finding_title: string;
       resolved: boolean;
       comment: string;
@@ -126,6 +129,7 @@ export interface PdeAnalysis {
     }>;
     technical_notes: string[];
     recommendation: string;
+    engine_findings_count?: number;
   } | null;
   pde_document_ids: string[];
   desenho_document_ids: string[];

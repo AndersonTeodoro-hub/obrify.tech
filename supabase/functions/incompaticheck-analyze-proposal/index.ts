@@ -33,11 +33,39 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const { obra_id, pde_documents, desenho_documents, original_projects, existing_findings, knowledge_data } = await req.json();
+    const { obra_id, pde_documents, desenho_documents, resposta_documents, original_projects, knowledge_data } = await req.json();
 
     if (!pde_documents?.length && !desenho_documents?.length) {
       throw new Error("É necessário pelo menos 1 PDE ou 1 Desenho de Preparação.");
     }
+
+    // Valida posse da obra + contexto (mesmo padrão das Ondas 1-3)
+    const { data: obra, error: obraErr } = await supabase
+      .from("incompaticheck_obras")
+      .select("user_id, analysis_context")
+      .eq("id", obra_id)
+      .single();
+    if (obraErr || !obra) throw new Error(`Obra não encontrada: ${obraErr?.message || obra_id}`);
+    if (obra.user_id !== user.id) throw new Error("Sem permissão sobre esta obra");
+    const analysisContext = (obra.analysis_context ?? "").trim() || "(nenhum contexto definido)";
+
+    // Findings do motor NOVO (cruzamento + coerência interna), exceto rejeitados.
+    // Fonte autoritativa — a function carrega ela própria por obra_id.
+    const [crossRes, selfRes] = await Promise.all([
+      supabase.from("incompaticheck_cross_findings")
+        .select("id, especialidade_a, especialidade_b, tipo_conflito, severity, title, description, location, recommendation, status")
+        .eq("obra_id", obra_id).neq("status", "rejeitado"),
+      supabase.from("incompaticheck_self_findings")
+        .select("id, especialidade, tipo_problema, severity, title, description, location, recommendation, status")
+        .eq("obra_id", obra_id).neq("status", "rejeitado"),
+    ]);
+    if (crossRes.error) throw new Error(`Falha a carregar cruzamento: ${crossRes.error.message}`);
+    if (selfRes.error) throw new Error(`Falha a carregar coerência interna: ${selfRes.error.message}`);
+
+    const engineFindings = [
+      ...(crossRes.data || []).map((f: any) => ({ finding_id: f.id, origem: "cruzamento", especialidades: `${f.especialidade_a} × ${f.especialidade_b}`, severity: f.severity, title: f.title, description: f.description, location: f.location, recommendation: f.recommendation, status: f.status })),
+      ...(selfRes.data || []).map((f: any) => ({ finding_id: f.id, origem: "coerencia_interna", especialidades: f.especialidade, severity: f.severity, title: f.title, description: f.description, location: f.location, recommendation: f.recommendation, status: f.status })),
+    ];
 
     console.log(`PDE-ANALYZE: Analyzing ${pde_documents?.length || 0} PDEs + ${desenho_documents?.length || 0} Desenhos vs ${original_projects?.length || 0} projects, knowledge: ${knowledge_data?.length || 0}`);
 
@@ -109,12 +137,16 @@ serve(async (req) => {
       }
     }
 
-    // Existing findings text
-    if (existing_findings?.length > 0) {
-      const findingsText = existing_findings.map((f: any, i: number) =>
-        `${i + 1}. [${f.severity}] ${f.title}: ${f.description}${f.location ? ` (Local: ${f.location})` : ''}`
-      ).join('\n');
-      content.push({ type: "text", text: `\n--- INCOMPATIBILIDADES PREVIAMENTE DETECTADAS ---\n${findingsText}\n---\n` });
+    // Findings do motor de análise (fonte autoritativa)
+    if (engineFindings.length > 0) {
+      const findingsText = engineFindings.map((f, i) => {
+        const conf = f.status === "confirmado" ? " [CONFIRMADO PELO FISCAL]" : "";
+        const origemLabel = f.origem === "cruzamento" ? "Cruzamento" : "Coerência interna";
+        return `${i + 1}. (finding_id: ${f.finding_id} | origem: ${f.origem} | ${origemLabel} — ${f.especialidades})${conf} [${f.severity}] ${f.title}: ${f.description}${f.location ? ` (Local: ${f.location})` : ""}${f.recommendation ? ` | Recomendação registada: ${f.recommendation}` : ""}`;
+      }).join("\n");
+      content.push({ type: "text", text: `\n--- INCOMPATIBILIDADES DETECTADAS PELO MOTOR DE ANÁLISE (confronta a proposta com estas; os [CONFIRMADO PELO FISCAL] têm prioridade) ---\n${findingsText}\n---\n` });
+    } else {
+      content.push({ type: "text", text: `\n--- Não há incompatibilidades registadas pelo motor de análise. Avalia a proposta pelos restantes critérios (o que se propõe resolver, problemas novos, construtibilidade, normas, documentação). ---\n` });
     }
 
     // PDE documents (always download — these are new)
@@ -126,6 +158,17 @@ serve(async (req) => {
     for (const doc of pdeFiles) {
       content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: doc.base64 } });
       content.push({ type: "text", text: `[PDE (Pedido de Esclarecimento) acima: "${doc.name}"]` });
+    }
+
+    // Resposta do projetista ao PDE (quando existe)
+    const respostaFiles = [];
+    for (const d of (resposta_documents || [])) {
+      const result = await downloadFile(d);
+      if (result) respostaFiles.push(result);
+    }
+    for (const doc of respostaFiles) {
+      content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: doc.base64 } });
+      content.push({ type: "text", text: `[Resposta do Projetista ao PDE acima: "${doc.name}"]` });
     }
 
     // Desenho documents (always download — these are new)
@@ -144,18 +187,28 @@ serve(async (req) => {
     }
 
     // User prompt
-    content.push({ type: "text", text: getProposalPrompt() });
+    content.push({ type: "text", text: getProposalPrompt(respostaFiles.length > 0) });
 
     // Call Claude
-    const result = await callClaude(anthropicKey, content);
+    const result = await callClaude(anthropicKey, content, analysisContext, respostaFiles.length > 0);
 
-    console.log(`PDE-ANALYZE: Analysis complete — verdict: ${result?.verdict || 'unknown'}, knowledge_used: ${knowledgeUsed}`);
+    // Origem/confirmado autoritativos por finding_id (não confiar só no modelo)
+    const byId = new Map(engineFindings.map((f) => [f.finding_id, f]));
+    if (Array.isArray(result?.findings_addressed)) {
+      result.findings_addressed = result.findings_addressed.map((fa: any) => {
+        const src = fa.finding_id ? byId.get(fa.finding_id) : null;
+        return { ...fa, origem: src?.origem ?? fa.origem ?? null, confirmado: src?.status === "confirmado" };
+      });
+    }
+
+    console.log(`PDE-ANALYZE: Analysis complete — verdict: ${result?.verdict || 'unknown'}, knowledge_used: ${knowledgeUsed}, engine_findings: ${engineFindings.length}`);
 
     return new Response(
       JSON.stringify({
         ...result,
         analyzed_at: new Date().toISOString(),
         knowledge_used: knowledgeUsed,
+        engine_findings_count: engineFindings.length,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
@@ -168,11 +221,11 @@ serve(async (req) => {
   }
 });
 
-function getProposalPrompt(): string {
-  return `Analisa a proposta do empreiteiro (PDE + Desenhos de Preparação acima) confrontando com os projectos originais e as incompatibilidades detectadas.
+function getProposalPrompt(hasResposta: boolean): string {
+  return `Analisa a proposta do empreiteiro (PDE + Desenhos de Preparação acima${hasResposta ? " + Resposta do Projetista" : ""}) confrontando com os projectos originais e com as INCOMPATIBILIDADES DETECTADAS PELO MOTOR DE ANÁLISE listadas acima.
 
 NOTA: Alguns projectos originais são apresentados como resumos técnicos da Base de Conhecimento (texto com elementos-chave), enquanto outros são PDFs completos. Usa TODA a informação disponível.
-
+${hasResposta ? "\nHÁ RESPOSTA DO PROJETISTA: avalia se a resposta esclarece efectivamente os pontos do PDE e se é coerente com os projectos e com os findings. O findings_addressed deve reflectir também o que a resposta resolve ou deixa em aberto.\n" : ""}
 Responde APENAS com um JSON (sem markdown, sem backticks, sem texto antes ou depois) neste formato exacto:
 
 {
@@ -180,9 +233,11 @@ Responde APENAS com um JSON (sem markdown, sem backticks, sem texto antes ou dep
   "summary": "Resumo geral do parecer em 2-3 frases claras",
   "findings_addressed": [
     {
-      "finding_title": "Título da incompatibilidade original",
+      "finding_id": "o finding_id EXACTO do finding do motor de análise a que este item responde (ou null se não mapeia a nenhum)",
+      "origem": "cruzamento | coerencia_interna | null (a mesma origem indicada no finding)",
+      "finding_title": "Título da incompatibilidade abordada",
       "resolved": true,
-      "comment": "Como a proposta resolve (ou não resolve) este ponto específico"
+      "comment": "Como a proposta (e/ou a resposta do projetista) resolve ou não resolve este ponto específico"
     }
   ],
   "new_issues": [
@@ -204,26 +259,18 @@ Regras:
 - "approved_with_reservations": Resolve parcialmente mas tem pontos a verificar ou pequenas correcções necessárias
 - "rejected": Não resolve os problemas ou cria novos conflitos significativos
 - Sê específico: referencia cotas, eixos, diâmetros, materiais, dimensões concretas
-- Em findings_addressed, mapeia a proposta às incompatibilidades existentes usando títulos e descrições
-- Se a proposta não se relaciona com nenhum finding existente, indica isso
+- Em findings_addressed, usa o finding_id e a origem EXACTOS do finding do motor de análise a que respondes (não inventes ids)
+- Se a proposta não se relaciona com nenhum finding do motor, indica isso (finding_id e origem a null)
 - NÃO uses caracteres especiais como ≥ ≤ → ← Ø ° ² ³ × ÷ € — usa alternativas ASCII: >= <= -> <- O/ graus 2 3 x / EUR -
 - Para diâmetros usa "O/" em vez de "Ø" (ex: O/125 em vez de Ø125)
 - Responde APENAS com o JSON, nada mais`;
 }
 
-async function callClaude(apiKey: string, content: any[]): Promise<any> {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-5-20250929",
-      max_tokens: 8000,
-      messages: [{ role: "user", content }],
-      system: `És o engenheiro de fiscalização que revê as propostas de resolução do empreiteiro. Quando o empreiteiro envia um PDE (Pedido de Esclarecimento) ou desenhos de preparação, não basta ver se "resolveu" — tens de verificar se a solução não cria problemas novos, se é exequível em obra, e se respeita o projecto e as normas.
+function buildSystemPrompt(analysisContext: string, hasResposta: boolean): string {
+  return `És o engenheiro de fiscalização que revê as propostas de resolução do empreiteiro. Quando o empreiteiro envia um PDE (Pedido de Esclarecimento) ou desenhos de preparação, não basta ver se "resolveu" — tens de verificar se a solução não cria problemas novos, se é exequível em obra, e se respeita o projecto e as normas.
+
+CONTEXTO DA OBRA (autoridade máxima sobre pisos, cotas e convenções):
+${analysisContext}
 
 COMO AVALIAS UMA PROPOSTA:
 
@@ -241,11 +288,32 @@ Eurocódigos, regulamentação portuguesa, segurança contra incêndio, acústic
 
 5. A proposta está bem documentada?
 Os desenhos têm qualidade suficiente? As cotas estão indicadas? Os materiais estão especificados? Há pormenores construtivos onde necessário?
+${hasResposta ? "\n6. A resposta do projetista esclarece o PDE?\nQuando há resposta do projetista, verificas se ela responde efectivamente às questões do PDE, se é coerente com os projectos e com os findings, e se as decisões que toma são exequíveis e regulamentares.\n" : ""}
+REGRAS DE SENSO CONSTRUTIVO (aplica antes de reportar):
+1. A diferença entre cota estrutural (tosco) e cota de acabado definida no CONTEXTO DA OBRA é NORMAL e ESPERADA — só é problema quando difere dessa diferença, e mostras o cálculo.
+2. Fundações, sapatas e muros arrancam ABAIXO da laje que suportam — normal, não é conflito.
+3. Em qualquer conclusão sobre cotas, faz a verificação aritmética explícita antes de afirmar.
+4. Nunca especules além dos documentos e do contexto — ausência de informação não é problema.
 
 TOM DO PARECER:
 Escreves como um fiscal que revê com seriedade mas é construtivo. Se a proposta é boa, dizes "conforme, pode avançar". Se tem falhas, dizes exactamente o que falta. Se é má, rejeitas com justificação clara e indicação do que o empreiteiro precisa de refazer.
 
-Responde sempre em português europeu.`,
+Responde sempre em português europeu.`;
+}
+
+async function callClaude(apiKey: string, content: any[], analysisContext: string, hasResposta: boolean): Promise<any> {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-5-20250929",
+      max_tokens: 8000,
+      messages: [{ role: "user", content }],
+      system: buildSystemPrompt(analysisContext, hasResposta),
     }),
   });
 
@@ -256,6 +324,9 @@ Responde sempre em português europeu.`,
   }
 
   const result = await response.json();
+  if (result.stop_reason === "max_tokens") {
+    throw new Error("Resposta truncada pela API — proposta/documentos demasiado densos. Reduza os documentos e repita.");
+  }
   const replyText = result.content?.[0]?.text || "{}";
 
   try {

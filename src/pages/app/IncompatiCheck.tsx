@@ -73,6 +73,9 @@ export default function IncompatiCheck() {
         agentThinking: ic.agentThinking,
         sendUserMessage: ic.sendUserMessage,
         obraName: ic.obraAtiva.nome,
+        // NOTA: esta lista vem do motor ANTIGO (ic.findings) e está vazia por design
+        // até o contexto do Eng. Silva ser ligado ao motor novo (cross/self) — correção
+        // futura já identificada. Mantida por uso vivo (não remover sem religar a fonte).
         findings: ic.findings.map(f => ({
           severity: f.severity,
           title: f.title,
@@ -438,7 +441,9 @@ export default function IncompatiCheck() {
           )}
 
           {/* ---- ESCLARECIMENTOS & PROPOSTAS (PDE) ---- */}
-          {(ic.analysis || ic.pdeDocuments.length > 0) && (
+          {/* Sempre visível com obra ativa: os botões de upload vivem dentro da secção.
+              (Antes dependia de ic.analysis do motor antigo — inalcançável em obras novas.) */}
+          {ic.obraAtiva && (
             <PdeSection ic={ic} clientLogo={clientLogo} fiscalLogo={fiscalLogo} />
           )}
         </div>
@@ -625,6 +630,13 @@ function PdeSection({ ic, clientLogo, fiscalLogo }: { ic: ReturnType<typeof useI
               <p className="text-sm text-foreground leading-relaxed">{latestAnalysis.ai_analysis.summary}</p>
             </div>
 
+            {/* Nota quando o parecer correu sem findings do motor novo */}
+            {latestAnalysis.ai_analysis.engine_findings_count === 0 && (
+              <p className="text-[11px] text-muted-foreground italic">
+                Parecer emitido sem incompatibilidades registadas — corra a Análise Cruzada primeiro para um parecer mais completo.
+              </p>
+            )}
+
             {/* Findings addressed */}
             {latestAnalysis.ai_analysis.findings_addressed?.length > 0 && (
               <div className="space-y-2">
@@ -635,6 +647,14 @@ function PdeSection({ ic, clientLogo, fiscalLogo }: { ic: ReturnType<typeof useI
                       <span className="mt-0.5 flex-shrink-0">{fa.resolved ? '✅' : '❌'}</span>
                       <div>
                         <p className="font-medium text-foreground">{fa.finding_title}</p>
+                        <div className="flex items-center gap-1 my-0.5">
+                          {fa.origem && (
+                            <Badge variant="outline" className="text-[10px]">
+                              {fa.origem === 'cruzamento' ? 'Cruzamento' : 'Coerência Interna'}
+                            </Badge>
+                          )}
+                          {fa.confirmado && <Badge variant="secondary" className="text-[10px]">Confirmado</Badge>}
+                        </div>
                         <p className="text-muted-foreground">{fa.comment}</p>
                       </div>
                     </div>

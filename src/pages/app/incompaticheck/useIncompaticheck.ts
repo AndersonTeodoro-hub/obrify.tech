@@ -1,11 +1,12 @@
 import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { invokeNoisy } from '@/lib/invokeNoisy';
 import { useAuth } from '@/hooks/use-auth';
 import JSZip from 'jszip';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.js?url';
 import type { Obra, Project, Analysis, Finding, ChatMessage, PdeDocument, PdeAnalysis, PdeDocType } from './types';
-import { analyzeText, crossAnalyze, getFileExtension, generateAgentResponseFromFindings } from './helpers';
+import { getFileExtension } from './helpers';
 import { EXTRACTABLE_FORMATS, ZIP_FORMATS, ACCEPTED_FORMATS, FILE_SIZE_LIMIT } from './types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -276,107 +277,6 @@ export function useIncompaticheck() {
     }
   }, []);
 
-  const runAnalysis = useCallback(async (obraId: string) => {
-    if (!user) return;
-    setAnalyzing(true);
-
-    // Create analysis record
-    const { data: analysisRow, error: createErr } = await supabase
-      .from('incompaticheck_analyses')
-      .insert({ user_id: user.id, obra_id: obraId, status: 'running', total_projects: projects.length })
-      .select()
-      .single();
-
-    if (createErr || !analysisRow) {
-      console.error('Create analysis error:', createErr);
-      setAnalyzing(false);
-      return;
-    }
-
-    const analysisId = (analysisRow as any).id;
-
-    try {
-      // Extract text from PDFs
-      const projectsData: Array<{ type: string; name: string; format: string; data: ReturnType<typeof analyzeText> | null }> = [];
-
-      for (const project of projects) {
-        if (project.format === 'pdf') {
-          setUploadProgress(`A analisar ${project.name}...`);
-          try {
-            const { data: fileData, error: dlErr } = await supabase.storage
-              .from('incompaticheck-files')
-              .download(project.file_path);
-
-            if (dlErr || !fileData) {
-              projectsData.push({ type: project.type, name: project.name, format: project.format, data: null });
-              continue;
-            }
-
-            const arrayBuffer = await fileData.arrayBuffer();
-            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-            let fullText = '';
-            for (let i = 1; i <= pdf.numPages; i++) {
-              const page = await pdf.getPage(i);
-              const textContent = await page.getTextContent();
-              const pageText = textContent.items.map((item: any) => item.str).join(' ');
-              fullText += pageText + '\n';
-            }
-            projectsData.push({ type: project.type, name: project.name, format: project.format, data: analyzeText(fullText) });
-          } catch (pdfErr: any) {
-            console.error('PDF parse error:', pdfErr);
-            projectsData.push({ type: project.type, name: project.name, format: project.format, data: null });
-            // Register failed PDF as an info finding later
-          }
-        } else {
-          projectsData.push({ type: project.type, name: project.name, format: project.format, data: null });
-        }
-      }
-
-      setUploadProgress('A cruzar informações entre projetos...');
-
-      // Cross-analyze
-      const newFindings = crossAnalyze(projectsData as any);
-
-      // Insert findings
-      if (newFindings.length > 0) {
-        const findingsToInsert = newFindings.map(f => ({
-          analysis_id: analysisId,
-          severity: f.severity,
-          title: f.title,
-          description: f.description,
-          location: f.location,
-          tags: f.tags,
-          resolved: false,
-        }));
-
-        await supabase.from('incompaticheck_findings').insert(findingsToInsert);
-      }
-
-      // Update analysis
-      const criticalCount = newFindings.filter(f => f.severity === 'critical').length;
-      const warningCount = newFindings.filter(f => f.severity === 'warning').length;
-      const infoCount = newFindings.filter(f => f.severity === 'info').length;
-
-      await supabase.from('incompaticheck_analyses').update({
-        status: 'completed',
-        critical_count: criticalCount,
-        warning_count: warningCount,
-        info_count: infoCount,
-        total_projects: projects.length,
-        completed_at: new Date().toISOString(),
-      }).eq('id', analysisId);
-
-      await loadLatestAnalysis(obraId);
-
-    } catch (err) {
-      console.error('Analysis error:', err);
-      await supabase.from('incompaticheck_analyses').update({ status: 'failed' }).eq('id', analysisId);
-    }
-
-    setUploadProgress(null);
-    setAnalyzing(false);
-  }, [user, projects, loadLatestAnalysis]);
-
   // ---- CHAT ----
   const loadChat = useCallback(async (obraId: string) => {
     const { data } = await supabase
@@ -520,6 +420,7 @@ export function useIncompaticheck() {
 
     const pdeDocs = pdeDocuments.filter(d => d.doc_type === 'pde');
     const desenhoDocs = pdeDocuments.filter(d => d.doc_type === 'desenho_preparacao');
+    const respostaDocs = pdeDocuments.filter(d => d.doc_type === 'resposta_pde');
 
     // Fetch knowledge data for original projects
     const { data: knowledgeData } = await supabase
@@ -556,24 +457,16 @@ export function useIncompaticheck() {
     }
 
     try {
-      const { data, error } = await supabase.functions.invoke('incompaticheck-analyze-proposal', {
-        body: {
-          obra_id: obraId,
-          pde_documents: pdeDocs.map(d => ({ file_path: d.file_path, name: d.file_name })),
-          desenho_documents: desenhoDocs.map(d => ({ file_path: d.file_path, name: d.file_name })),
-          original_projects: projects.map(p => ({ file_path: p.file_path, name: p.name, type: p.type })),
-          existing_findings: findings.map(f => ({
-            severity: f.severity,
-            title: f.title,
-            description: f.description,
-            location: f.location,
-          })),
-          knowledge_data: knowledgePayload,
-        },
+      // Findings vêm agora do motor novo, carregados pela própria edge function
+      // por obra_id — o frontend deixa de enviar existing_findings.
+      const data = await invokeNoisy('incompaticheck-analyze-proposal', {
+        obra_id: obraId,
+        pde_documents: pdeDocs.map(d => ({ file_path: d.file_path, name: d.file_name })),
+        desenho_documents: desenhoDocs.map(d => ({ file_path: d.file_path, name: d.file_name })),
+        resposta_documents: respostaDocs.map(d => ({ file_path: d.file_path, name: d.file_name })),
+        original_projects: projects.map(p => ({ file_path: p.file_path, name: p.name, type: p.type })),
+        knowledge_data: knowledgePayload,
       });
-
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
 
       await (supabase as any)
         .from('incompaticheck_pde_analyses')
@@ -593,10 +486,11 @@ export function useIncompaticheck() {
         .update({ status: 'failed' })
         .eq('id', analysisRow.id);
       await loadPdeAnalyses(obraId);
+      throw err; // ELIMINA o catch silencioso — o chamador mostra o erro real
     } finally {
       setAnalyzingProposal(false);
     }
-  }, [user, pdeDocuments, projects, findings, loadPdeAnalyses]);
+  }, [user, pdeDocuments, projects, loadPdeAnalyses]);
 
   const deletePdeAnalysis = useCallback(async (analysisId: string) => {
     await (supabase as any).from('incompaticheck_pde_analyses').delete().eq('id', analysisId);
@@ -1128,8 +1022,12 @@ export function useIncompaticheck() {
         doc.setTextColor(fa.resolved ? 34 : 239, fa.resolved ? 197 : 68, fa.resolved ? 94 : 68);
         doc.text(icon, margin, y);
         doc.setTextColor(30, 30, 30);
-        // Wrap finding title too
-        y = printWrapped(fa.finding_title, indentX, y, indentWidth, lineH);
+        // Wrap finding title too, com a origem do finding (motor novo)
+        const faTags = [
+          fa.origem ? (fa.origem === 'cruzamento' ? '[Cruzamento]' : '[Coerencia Interna]') : '',
+          fa.confirmado ? '[Confirmado]' : '',
+        ].filter(Boolean).join(' ');
+        y = printWrapped(`${fa.finding_title}${faTags ? ' ' + faTags : ''}`, indentX, y, indentWidth, lineH);
         y += 1;
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(80, 80, 80);
@@ -1434,7 +1332,6 @@ export function useIncompaticheck() {
     selectObra,
     uploadProject,
     deleteProject,
-    runAnalysis,
     deleteAnalysis,
     sendUserMessage,
     generateReport,
