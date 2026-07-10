@@ -264,8 +264,8 @@ export default function CrossAnalysisPanel({ obraId, refreshKey, selfFindings, p
                         <EvidenceImage
                           filePath={fileA}
                           page={elA.source_page}
-                          positions={[elA.position, elB!.position].filter(Boolean) as { x: number; y: number }[]}
-                          caption={!elA.position && !elB!.position ? 'Posição não capturada — re-extrair o projeto para ativar a marcação.' : undefined}
+                          positions={[elA, elB!].map((e) => ({ x: e.position?.x, y: e.position?.y, ref: e.element_ref }))}
+                          caption={(!elA.position && !elA.element_ref) && (!elB!.position && !elB!.element_ref) ? 'Posição não capturada — re-extrair o projeto para ativar a marcação.' : undefined}
                         />
                       ) : (
                         <>
@@ -273,16 +273,16 @@ export default function CrossAnalysisPanel({ obraId, refreshKey, selfFindings, p
                             <EvidenceImage
                               filePath={fileA}
                               page={elA.source_page}
-                              positions={elA.position ? [elA.position] : []}
-                              caption={elA.position ? undefined : 'Posição não capturada — re-extrair o projeto para ativar a marcação.'}
+                              positions={[{ x: elA.position?.x, y: elA.position?.y, ref: elA.element_ref }]}
+                              caption={(!elA.position && !elA.element_ref) ? 'Posição não capturada — re-extrair o projeto para ativar a marcação.' : undefined}
                             />
                           )}
                           {elB && (
                             <EvidenceImage
                               filePath={projectFiles[elB.project_id]}
                               page={elB.source_page}
-                              positions={elB.position ? [elB.position] : []}
-                              caption={elB.position ? undefined : 'Posição não capturada — re-extrair o projeto para ativar a marcação.'}
+                              positions={[{ x: elB.position?.x, y: elB.position?.y, ref: elB.element_ref }]}
+                              caption={(!elB.position && !elB.element_ref) ? 'Posição não capturada — re-extrair o projeto para ativar a marcação.' : undefined}
                             />
                           )}
                         </>

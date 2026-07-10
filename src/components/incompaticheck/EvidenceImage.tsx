@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { renderPageWithMark, type Mark } from '@/lib/evidenceImage';
+import { renderPageWithMark, type EvidenceMark } from '@/lib/evidenceImage';
 
 export default function EvidenceImage({ filePath, page, positions, caption }: {
-  filePath?: string; page?: number | null; positions: Mark[]; caption?: string;
+  filePath?: string; page?: number | null; positions: EvidenceMark[]; caption?: string;
 }) {
   const [src, setSrc] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);

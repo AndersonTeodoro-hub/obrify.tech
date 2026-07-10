@@ -114,9 +114,9 @@ export async function generateExcellenceReport(opts: ExcellenceOpts): Promise<vo
     if (!el) return null;
     const filePath = projectFiles[el.project_id];
     if (!filePath || !el.source_page) return null;
-    const positions = el.position ? [el.position] : [];
-    const dataUrl = await renderPageWithMark(filePath, el.source_page, positions);
-    return { dataUrl, caption: el.position ? undefined : 'Posicao nao capturada - re-extrair o projeto para ativar a marcacao.' };
+    const dataUrl = await renderPageWithMark(filePath, el.source_page, [{ x: el.position?.x, y: el.position?.y, ref: el.element_ref }]);
+    const noAnchor = !el.position && !el.element_ref;
+    return { dataUrl, caption: noAnchor ? 'Posicao nao capturada - re-extrair o projeto para ativar a marcacao.' : undefined };
   };
 
   const addImageFitted = (dataUrl: string, atY: number, maxH: number): number => {
@@ -161,10 +161,11 @@ export async function generateExcellenceReport(opts: ExcellenceOpts): Promise<vo
       if (elA && elB && elA.project_id === elB.project_id && elA.source_page === elB.source_page) {
         const filePath = projectFiles[elA.project_id];
         if (filePath && elA.source_page) {
-          const positions = [elA.position, elB.position].filter(Boolean) as { x: number; y: number }[];
-          const dataUrl = await renderPageWithMark(filePath, elA.source_page, positions);
+          const marks = [elA, elB].map((e) => ({ x: e.position?.x, y: e.position?.y, ref: e.element_ref }));
+          const dataUrl = await renderPageWithMark(filePath, elA.source_page, marks);
           y = addImageFitted(dataUrl, y, maxImgH) + 4;
-          if (positions.length === 0) { doc.setFontSize(7); doc.setTextColor(120, 120, 120); doc.text('Posicao nao capturada - re-extrair o projeto para ativar a marcacao.', margin, y); y += 4; }
+          const noAnchor = (!elA.position && !elA.element_ref) && (!elB.position && !elB.element_ref);
+          if (noAnchor) { doc.setFontSize(7); doc.setTextColor(120, 120, 120); doc.text('Posicao nao capturada - re-extrair o projeto para ativar a marcacao.', margin, y); y += 4; }
         }
       } else {
         for (const elId of [f.element_a_id, f.element_b_id]) {
