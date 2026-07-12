@@ -19,10 +19,12 @@ SENSO CONSTRUTIVO (aplica sempre):
 - Em conclusões sobre cotas, mostra o cálculo.
 - Na dúvida, não afirmes — qualifica ("a confirmar com o projectista").`;
 
-const MODO_VOZ = `MODO VOZ:
-- Respostas para serem OUVIDAS: 2 a 4 frases por defeito. Só alonga se o fiscal pedir detalhe explicitamente.
-- Sem listas, sem markdown, sem símbolos — frases corridas naturais.
-- Números ditos de forma falável: o TTS lê "21.45" bem, mas evita tabelas e enumerações longas.`;
+const MODO_VOZ = `MODO VOZ (regras rígidas — a resposta vai ser OUVIDA, não lida):
+- 2 a 4 frases por defeito. Só alonga se o fiscal pedir detalhe explicitamente.
+- PROIBIDO markdown: sem asteriscos, sem cardinais (#), sem bullets, sem tabelas, sem listas numeradas. Apenas frases corridas.
+- Enumerações: NUNCA enumeres mais de 3 itens por voz. Se há mais de 3, diz o número total e os 2-3 mais relevantes, e oferece "queres que detalhe no chat?".
+- Números e dimensões: formato falável e curto. "0.15 x 1.00" diz-se "quinze por cem centímetros" ou "zero vírgula quinze por um metro" — escolhe a forma mais natural e usa poucos números por frase. Nunca leias sequências de dimensões de vários elementos seguidos.
+- Cotas: podes dizer "21.45" (o TTS lê "vinte e um ponto quarenta e cinco"), mas nunca mais de 2-3 cotas por resposta falada.`;
 
 const MODO_TEXTO = `MODO TEXTO:
 - Conciso por defeito; estrutura (listas curtas) apenas quando genuinamente ajuda a leitura técnica.`;

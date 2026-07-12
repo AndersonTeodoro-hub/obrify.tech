@@ -13,6 +13,84 @@ type NivelCat = {
   tipo: string | null;
 };
 
+// Normaliza números falados pt-PT (0–99) para dígitos, APENAS em contexto
+// geométrico (cota/nível/piso/fase numa janela de 6 palavras) — evita conversões
+// agressivas fora de contexto. Usada só para retrieval e deteção de escopo; a
+// pergunta original segue intacta para o modelo. Idempotente sobre texto já numérico.
+function normalizeSpokenQuery(q: string): string {
+  const deacc = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const UNITS: Record<string, number> = {
+    zero: 0, um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5,
+    seis: 6, sete: 7, oito: 8, nove: 9,
+  };
+  const TEENS: Record<string, number> = {
+    dez: 10, onze: 11, doze: 12, treze: 13, catorze: 14, quatorze: 14, quinze: 15,
+    dezasseis: 16, dezesseis: 16, dezassete: 17, dezessete: 17, dezoito: 18,
+    dezanove: 19, dezenove: 19,
+  };
+  const TENS: Record<string, number> = {
+    vinte: 20, trinta: 30, quarenta: 40, cinquenta: 50, sessenta: 60,
+    setenta: 70, oitenta: 80, noventa: 90,
+  };
+  const SEP = new Set(["virgula", "ponto", "e"]);
+  const GEO = new Set(["cota", "cotas", "nivel", "niveis", "piso", "pisos", "fase", "fases"]);
+
+  const raw = q.split(/\s+/).filter(Boolean);
+  const key = raw.map((t) => deacc(t).replace(/[.,;:!?]+$/g, ""));
+
+  const parseNumber = (i: number): { value: number; len: number } | null => {
+    const w = key[i];
+    if (w in TENS) {
+      const u = key[i + 2];
+      if (key[i + 1] === "e" && u in UNITS && UNITS[u] >= 1 && UNITS[u] <= 9) {
+        return { value: TENS[w] + UNITS[u], len: 3 };
+      }
+      return { value: TENS[w], len: 1 };
+    }
+    if (w in TEENS) return { value: TEENS[w], len: 1 };
+    if (w in UNITS) return { value: UNITS[w], len: 1 };
+    return null;
+  };
+
+  // GEO mais próximo (±6): controla o padding (fase = sem pad; cota = 2 dígitos).
+  const controllingGeo = (i: number): string | null => {
+    for (let j = i - 1; j >= Math.max(0, i - 6); j--) if (GEO.has(key[j])) return key[j];
+    for (let j = i + 1; j <= Math.min(key.length - 1, i + 6); j++) if (GEO.has(key[j])) return key[j];
+    return null;
+  };
+
+  const out: string[] = [];
+  let i = 0;
+  while (i < raw.length) {
+    const start = i;
+    let sign = "";
+    // "menos <num>" em contexto geométrico → sinal negativo
+    if (key[i] === "menos" && controllingGeo(i) && parseNumber(i + 1)) { sign = "-"; i += 1; }
+
+    const n1 = parseNumber(i);
+    const geo = controllingGeo(start);
+    if (n1 && geo) {
+      const isFase = geo === "fase" || geo === "fases";
+      const j = i + n1.len;
+      const sepLen = SEP.has(key[j]) ? 1 : 0;
+      const n2 = parseNumber(j + sepLen);
+      if (n2) {
+        const dec = isFase ? String(n2.value) : String(n2.value).padStart(2, "0");
+        out.push(`${sign}${n1.value}.${dec}`);
+        i = j + sepLen + n2.len;
+      } else {
+        out.push(`${sign}${n1.value}`);
+        i += n1.len;
+      }
+      continue;
+    }
+    i = start; // rollback (ex.: "menos" sem número/contexto)
+    out.push(raw[i]);
+    i += 1;
+  }
+  return out.join(" ");
+}
+
 // Deteta escopo de fase/nível na pergunta, validado contra o catálogo da obra.
 // Sem match no catálogo → devolve nulls (retrieval normal, sem boost).
 function detectScope(
@@ -565,6 +643,11 @@ serve(async (req) => {
       try {
         const supabase = createClient(supabaseUrl, supabaseKey);
 
+        // Query normalizada (números falados -> dígitos) só para retrieval/escopo.
+        // A pergunta ORIGINAL (message) segue intacta para o modelo.
+        const retrievalQuery = normalizeSpokenQuery(message);
+        console.log(`[retrieval] query original: "${message}" | normalizada: "${retrievalQuery}"`);
+
         // I/O independente em paralelo: catálogo de níveis, contexto da obra e
         // embedding da pergunta. As queries do supabase resolvem sempre {data,error}
         // (não rejeitam); o embedding é envolvido em .then/.catch para o seu erro não
@@ -573,7 +656,7 @@ serve(async (req) => {
         const [niveisRes, obraRes, embedRes] = await Promise.all([
           supabase.from("eng_silva_niveis").select("id, specialty, fase, piso, cota, tipo").eq("obra_id", obra_id),
           supabase.from("incompaticheck_obras").select("analysis_context").eq("id", obra_id).maybeSingle(),
-          voyageEmbed({ input: message, inputType: "query" })
+          voyageEmbed({ input: retrievalQuery, inputType: "query" })
             .then((e: number[][]) => ({ embedding: e as number[][] | null, error: null as unknown }))
             .catch((e: unknown) => ({ embedding: null as number[][] | null, error: e })),
         ]);
@@ -584,7 +667,7 @@ serve(async (req) => {
         if (obraRes.error) console.error("ENG-SILVA-CHAT: analysis_context falhou:", obraRes.error);
         else analysisContext = (obraRes.data as any)?.analysis_context || null;
 
-        const { fase: detFase, nivelId: scopeNivelId } = detectScope(message, niveisCat);
+        const { fase: detFase, nivelId: scopeNivelId } = detectScope(retrievalQuery, niveisCat);
         scopeFase = detFase;
         console.log(`[retrieval] escopo detetado: fase=${scopeFase ?? "-"}, nivel=${scopeNivelId ?? "-"}`);
 
@@ -597,7 +680,7 @@ serve(async (req) => {
             supabase,
             obra_id,
             user_id,
-            message,
+            retrievalQuery,
             scopeFase,
             scopeNivelId,
             embedRes.embedding,
@@ -606,7 +689,7 @@ serve(async (req) => {
         } catch (semanticErr) {
           console.error(`[retrieval] semantic FAILED, falling back to legacy:`, semanticErr);
           retrievalMode = "legacy";
-          const keywords = extractKeywordsLegacy(message);
+          const keywords = extractKeywordsLegacy(retrievalQuery);
           const specialties = Array.from(inferSpecialtiesLegacy(keywords));
           relevantDocs = await searchKnowledgeLegacy(
             supabase,
@@ -633,7 +716,7 @@ serve(async (req) => {
 
         // Keywords necessárias para a heurística de elemento técnico abaixo
         // (calculadas independentemente do retrieval mode para preservar prioritização de PDF)
-        const keywords = extractKeywordsLegacy(message);
+        const keywords = extractKeywordsLegacy(retrievalQuery);
 
         // Separar top 3 com file_path para download de originais, resto usa resumos
         const docsWithFile = uniqueDocs.filter((d: any) => d.file_path);
