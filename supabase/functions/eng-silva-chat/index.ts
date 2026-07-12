@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { voyageEmbed, voyageRerank } from "../_shared/embeddings/voyage-client.ts";
+import { buildSilvaSystemPrompt, type SilvaMode } from "../_shared/silvaPersona.ts";
 
 type NivelCat = {
   id: string;
@@ -39,45 +40,17 @@ function detectScope(
   return { fase, nivelId };
 }
 
-// Bloco de contexto para o system prompt: catálogo de fases/níveis da obra +
-// analysis_context do IncompatiCheck (se existir) + regras de senso construtivo.
-function buildSilvaContextBlock(
-  niveis: NivelCat[],
-  analysisContext: string | null,
-  scopeFase: string | null,
-): string {
-  const parts: string[] = [];
-
-  parts.push(
-    "SENSO CONSTRUTIVO (aplica sempre): distinguir betão tosco de acabado é normal; " +
-    "fundações e sapatas situam-se abaixo da laje de piso — não é incompatibilidade; " +
-    "nunca especules além dos documentos — se um dado não está nos trechos, dizes que não está.",
-  );
-
-  if (niveis.length > 0) {
-    const especialidades = [...new Set(niveis.map((n) => n.specialty))];
-    const linhas = especialidades.map((esp) => {
-      const fases = [...new Set(
-        niveis.filter((n) => n.specialty === esp).map((n) => n.fase).filter(Boolean),
-      )];
-      return `- ${esp}: ${fases.length ? "fases " + fases.join(", ") : "(sem fases definidas)"}`;
-    });
-    parts.push("CATÁLOGO DE FASES/NÍVEIS DESTA OBRA:\n" + linhas.join("\n"));
-  }
-
-  if (analysisContext && analysisContext.trim()) {
-    parts.push("CONTEXTO DA OBRA (IncompatiCheck):\n" + analysisContext.trim());
-  }
-
-  if (scopeFase) {
-    parts.push(
-      `ESCOPO DA PERGUNTA: o fiscal referiu-se à Fase ${scopeFase}. Prioriza os documentos ` +
-      `dessa fase e cita o escopo; usa documentos gerais como apoio e não mistures informação ` +
-      `de outras fases.`,
-    );
-  }
-
-  return parts.length ? "\n\n" + parts.join("\n\n") : "";
+// Catálogo compacto (especialidade -> fases) para o módulo da persona.
+// (Mesmo conteúdo do antigo bloco de catálogo, agora montado no silvaPersona.)
+function buildCatalogo(niveis: NivelCat[]): string {
+  if (niveis.length === 0) return "";
+  const especialidades = [...new Set(niveis.map((n) => n.specialty))];
+  return especialidades.map((esp) => {
+    const fases = [...new Set(
+      niveis.filter((n) => n.specialty === esp).map((n) => n.fase).filter(Boolean),
+    )];
+    return `- ${esp}: ${fases.length ? "fases " + fases.join(", ") : "(sem fases definidas)"}`;
+  }).join("\n");
 }
 
 /**
@@ -100,15 +73,11 @@ async function searchKnowledgeSemantic(
   userId: string,
   query: string,
   pFase: string | null,
-  pNivelId: string | null
+  pNivelId: string | null,
+  queryEmbedding: number[][]
 ): Promise<any[]> {
-  // 1. Embed query
-  const queryEmbedding = await voyageEmbed({
-    input: query,
-    inputType: "query",
-  });
-
-  // 2. Retrieval inicial via RPC (top 30). p_fase/p_nivel_id são opcionais:
+  // Retrieval inicial via RPC (top 30). O embedding da pergunta é calculado a
+  // montante (em paralelo com o catálogo/contexto). p_fase/p_nivel_id são opcionais:
   //    funcionam como boost (escopo exato primeiro) e excluem OUTRAS fases;
   //    documentos gerais (fase NULL) continuam sempre elegíveis.
   const { data: chunks, error: rpcErr } = await supabase.rpc(
@@ -575,48 +544,55 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-    let systemPrompt = system || "";
+    // Persona única do módulo _shared/silvaPersona quando mode ∈ {texto,voz};
+    // chamadas sem esse mode (ex.: resumo de conversa) mantêm o system do cliente.
+    const clientSystem = (typeof system === "string" ? system : "").trim();
+    const useSilvaPersona = mode === "texto" || mode === "voz";
     let downloadedFiles: { document_name: string; base64: string; mimeType: string }[] = [];
     // Resumos de texto dos documentos anexados como PDF, para degradação elegante
     // caso a Anthropic recuse o pedido com os PDFs inteiros.
     let attachedPdfSummaries: { document_name: string; summary: string | null }[] = [];
+    // Contexto acumulado durante o retrieval; o system prompt é montado no fim.
+    let niveisCat: NivelCat[] = [];
+    let analysisContext: string | null = null;
+    let scopeFase: string | null = null;
+    let knowledgeContext = "";
+    let docListNote = "";
+    let noResultsNote = "";
 
     // Smart knowledge search if we have obra_id and a user message
     if (obra_id && user_id && message && supabaseUrl && supabaseKey) {
       try {
         const supabase = createClient(supabaseUrl, supabaseKey);
 
-        // Catálogo de níveis da obra (para detetar escopo e anotar o contexto).
-        // Erro ruidoso mas não fatal: o chat continua sem boost de fase.
-        let niveisCat: NivelCat[] = [];
-        {
-          const { data: niveisData, error: niveisErr } = await supabase
-            .from("eng_silva_niveis")
-            .select("id, specialty, fase, piso, cota, tipo")
-            .eq("obra_id", obra_id);
-          if (niveisErr) console.error("ENG-SILVA-CHAT: catálogo de níveis falhou:", niveisErr);
-          else niveisCat = niveisData || [];
-        }
+        // I/O independente em paralelo: catálogo de níveis, contexto da obra e
+        // embedding da pergunta. As queries do supabase resolvem sempre {data,error}
+        // (não rejeitam); o embedding é envolvido em .then/.catch para o seu erro não
+        // rejeitar o Promise.all e preservar o fallback semantic->legacy. Erros
+        // continuam ruidosos (console.error com a mensagem original).
+        const [niveisRes, obraRes, embedRes] = await Promise.all([
+          supabase.from("eng_silva_niveis").select("id, specialty, fase, piso, cota, tipo").eq("obra_id", obra_id),
+          supabase.from("incompaticheck_obras").select("analysis_context").eq("id", obra_id).maybeSingle(),
+          voyageEmbed({ input: message, inputType: "query" })
+            .then((e: number[][]) => ({ embedding: e as number[][] | null, error: null as unknown }))
+            .catch((e: unknown) => ({ embedding: null as number[][] | null, error: e })),
+        ]);
 
-        // Contexto da obra IncompatiCheck ligada (analysis_context), se existir.
-        let analysisContext: string | null = null;
-        {
-          const { data: obraRow, error: obraErr } = await supabase
-            .from("incompaticheck_obras")
-            .select("analysis_context")
-            .eq("id", obra_id)
-            .maybeSingle();
-          if (obraErr) console.error("ENG-SILVA-CHAT: analysis_context falhou:", obraErr);
-          else analysisContext = (obraRow as any)?.analysis_context || null;
-        }
+        if (niveisRes.error) console.error("ENG-SILVA-CHAT: catálogo de níveis falhou:", niveisRes.error);
+        else niveisCat = niveisRes.data || [];
 
-        const { fase: scopeFase, nivelId: scopeNivelId } = detectScope(message, niveisCat);
+        if (obraRes.error) console.error("ENG-SILVA-CHAT: analysis_context falhou:", obraRes.error);
+        else analysisContext = (obraRes.data as any)?.analysis_context || null;
+
+        const { fase: detFase, nivelId: scopeNivelId } = detectScope(message, niveisCat);
+        scopeFase = detFase;
         console.log(`[retrieval] escopo detetado: fase=${scopeFase ?? "-"}, nivel=${scopeNivelId ?? "-"}`);
 
         let relevantDocs: any[] = [];
         let retrievalMode = "semantic";
 
         try {
+          if (embedRes.error || !embedRes.embedding) throw embedRes.error || new Error("Embedding vazio");
           relevantDocs = await searchKnowledgeSemantic(
             supabase,
             obra_id,
@@ -624,6 +600,7 @@ serve(async (req) => {
             message,
             scopeFase,
             scopeNivelId,
+            embedRes.embedding,
           );
           console.log(`[retrieval] semantic OK: ${relevantDocs.length} chunks`);
         } catch (semanticErr) {
@@ -705,54 +682,37 @@ serve(async (req) => {
 
         if (relevantDocs.length > 0) {
           // Contexto de resumos para os documentos sem PDF original
-          const knowledgeContext = summaryDocs.length > 0
+          knowledgeContext = summaryDocs.length > 0
             ? buildKnowledgeContext(summaryDocs)
             : "";
 
-          if (knowledgeContext) {
-            // Remove old knowledge section if present and add new one
-            systemPrompt = systemPrompt.replace(/\n\nCONHECIMENTO DO PROJECTO[\s\S]*?(?=\n\nEXTRAÇÃO DE PERFIL:|$)/, "");
-            // Insert before EXTRAÇÃO DE PERFIL if it exists
-            const profileIdx = systemPrompt.indexOf("\n\nEXTRAÇÃO DE PERFIL:");
-            if (profileIdx > -1) {
-              systemPrompt = systemPrompt.substring(0, profileIdx) + knowledgeContext + systemPrompt.substring(profileIdx);
-            } else {
-              systemPrompt += knowledgeContext;
-            }
-          }
-
-          // Guardar ficheiros descarregados para incluir como content blocks na mensagem
+          // Ficheiros descarregados incluídos como content blocks na mensagem
           if (downloadedFiles.length > 0) {
-            const docListNote = `\n\nDOCUMENTOS ORIGINAIS ANEXADOS: ${downloadedFiles.map(d => d.document_name).join(", ")}. Estes documentos foram enviados na íntegra — usa-os para responder com o máximo de detalhe e precisão. Cita o nome do documento quando referires informação.`;
-            systemPrompt += docListNote;
+            docListNote = `\n\nDOCUMENTOS ORIGINAIS ANEXADOS: ${downloadedFiles.map(d => d.document_name).join(", ")}. Estes documentos foram enviados na íntegra — usa-os para responder com o máximo de detalhe e precisão. Cita o nome do documento quando referires informação.`;
           }
         } else if (keywords.length > 2) {
           // We searched but found nothing specific — tell Silva
-          const noResultsNote = `\n\nNOTA: O fiscal fez uma pergunta específica mas não foram encontrados documentos relevantes na Base de Conhecimento para os termos pesquisados. Se não tiveres informação suficiente para responder, diz ao fiscal que não encontraste essa informação nos documentos carregados e sugere que carregue o documento relevante na Base de Conhecimento do Projecto, ou que seja mais específico na pergunta.`;
-          const profileIdx = systemPrompt.indexOf("\n\nEXTRAÇÃO DE PERFIL:");
-          if (profileIdx > -1) {
-            systemPrompt = systemPrompt.substring(0, profileIdx) + noResultsNote + systemPrompt.substring(profileIdx);
-          } else {
-            systemPrompt += noResultsNote;
-          }
+          noResultsNote = `\n\nNOTA: O fiscal fez uma pergunta específica mas não foram encontrados documentos relevantes na Base de Conhecimento para os termos pesquisados. Se não tiveres informação suficiente para responder, diz ao fiscal que não encontraste essa informação nos documentos carregados e sugere que carregue o documento relevante na Base de Conhecimento do Projecto, ou que seja mais específico na pergunta.`;
         }
-
-        // Catálogo de fases/níveis + contexto da obra + senso construtivo.
-        // Injetado independentemente de haver documentos encontrados.
-        const contextBlock = buildSilvaContextBlock(niveisCat, analysisContext, scopeFase);
-        if (contextBlock) {
-          const profileIdx2 = systemPrompt.indexOf("\n\nEXTRAÇÃO DE PERFIL:");
-          if (profileIdx2 > -1) {
-            systemPrompt = systemPrompt.substring(0, profileIdx2) + contextBlock + systemPrompt.substring(profileIdx2);
-          } else {
-            systemPrompt += contextBlock;
-          }
-        }
+        // O catálogo/analysis_context/senso construtivo passaram para o módulo
+        // da persona (buildSilvaSystemPrompt); a nota de escopo é montada no fim.
       } catch (searchErr) {
         console.error("ENG-SILVA-CHAT: Knowledge search error:", searchErr);
         // Continue without knowledge — don't break the conversation
       }
     }
+
+    // Montagem final do system prompt. Persona única do módulo _shared/silvaPersona
+    // (mode 'texto'|'voz'); chamadas sem esse mode (ex.: resumo) mantêm o legacy.
+    const scopeNote = scopeFase
+      ? `\n\nESCOPO DA PERGUNTA: o fiscal referiu-se à Fase ${scopeFase}. Prioriza os documentos dessa fase e cita o escopo; usa documentos gerais como apoio e não mistures informação de outras fases.`
+      : "";
+    const base = useSilvaPersona
+      ? buildSilvaSystemPrompt({ mode: mode as SilvaMode, catalogo: buildCatalogo(niveisCat), analysisContext })
+      : clientSystem;
+    let systemPrompt = base + scopeNote + knowledgeContext + noResultsNote;
+    if (useSilvaPersona && clientSystem) systemPrompt += "\n\n" + clientSystem;
+    systemPrompt += docListNote;
 
     const messages = [...(conversation_history || [])];
 
@@ -805,6 +765,10 @@ serve(async (req) => {
           .join("\n\n")
       : "";
 
+    // Voz precisa de teto maior (a persona voz já limita o comprimento por instrução);
+    // texto mantém-se em 600. Evita truncagem em respostas técnicas legítimas.
+    const maxTokens = mode === "voz" ? 1200 : 600;
+
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -814,7 +778,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
-        max_tokens: 600,
+        max_tokens: maxTokens,
         temperature: 0.3,
         system: systemPrompt,
         messages,
@@ -850,7 +814,7 @@ serve(async (req) => {
           },
           body: JSON.stringify({
             model: "claude-sonnet-4-5-20250929",
-            max_tokens: 600,
+            max_tokens: maxTokens,
             temperature: 0.3,
             system: systemPrompt,
             messages: retryMessages,
@@ -880,6 +844,9 @@ serve(async (req) => {
     }
 
     const result = await response.json();
+    if (result.stop_reason === "max_tokens") {
+      console.warn(`ENG-SILVA-CHAT: resposta truncada (max_tokens=${maxTokens}, mode=${mode ?? "texto"}) — considerar pergunta mais focada.`);
+    }
     const reply = result.content?.[0]?.text;
     if (!reply) {
       // resposta 2xx mas sem content — regista o corpo real para diagnóstico

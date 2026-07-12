@@ -94,6 +94,7 @@ export function SilvaAnalysisButton({
         body: {
           message: prompt,
           image: base64,
+          mode: 'texto',
           obra_id: obraId,
           user_id: user.id,
           conversation_history: [],
