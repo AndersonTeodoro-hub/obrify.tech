@@ -19,9 +19,32 @@ import { generateMaterialApprovalPDF, generateMaterialApprovalExecutive } from '
 const CATEGORIES = [
   'Betão (classes)', 'Aço (armaduras)', 'Cofragem', 'Impermeabilização',
   'Isolamento Térmico', 'Isolamento Acústico', 'Revestimentos', 'Tubagens e Acessórios',
+  'Redes Enterradas', 'Redes Embebidas',
   'Equipamentos AVAC', 'Equipamentos Eléctricos', 'Caixilharia', 'Tintas e Acabamentos',
   'Elementos Pré-fabricados', 'Outros',
 ];
+
+// Keywords INDICATIVAS por categoria — só para o aviso heurístico "provável sem CE
+// desta especialidade" no formulário. O aviso autoritativo vem do backend (resultado).
+const CATEGORY_CE_KEYWORDS: Record<string, string[]> = {
+  'Betão (classes)': ['betao', 'betoes', 'estrutura', 'fundac'],
+  'Aço (armaduras)': ['aco', 'armadura', 'estrutura', 'fundac'],
+  'Cofragem': ['cofragem'],
+  'Impermeabilização': ['impermeabiliz', 'tela', 'membrana'],
+  'Isolamento Térmico': ['termic', 'etics', 'isolamento'],
+  'Isolamento Acústico': ['acustic', 'isolamento'],
+  'Revestimentos': ['revestimento', 'ceramic', 'pavimento'],
+  'Tubagens e Acessórios': ['tubagem', 'agua', 'esgoto', 'saneamento', 'enterrada', 'drenagem', 'rede'],
+  'Redes Enterradas': ['enterrada', 'saneamento', 'drenagem', 'pluviais', 'coletor', 'rede'],
+  'Redes Embebidas': ['embebida', 'embebido', 'roco', 'negativo', 'manga', 'courette'],
+  'Equipamentos AVAC': ['avac', 'climatiz', 'ventilac'],
+  'Equipamentos Eléctricos': ['electric', 'eletric', 'quadro'],
+  'Caixilharia': ['caixilharia', 'aluminio', 'vidro'],
+  'Tintas e Acabamentos': ['tinta', 'pintura', 'acabamento'],
+  'Elementos Pré-fabricados': ['pre-fabricado', 'prefabricado', 'pre-esforcado'],
+  'Outros': [],
+};
+const normCe = (s: string) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
 type Obra = { id: string; nome: string; cidade: string | null };
 type FiscalNote = { note: string; created_at: string };
@@ -66,6 +89,10 @@ export default function MaterialApprovals() {
 
   // Knowledge base count
   const [knowledgeCount, setKnowledgeCount] = useState(0);
+
+  // Cadernos de Encargos da obra (para o aviso heurístico no formulário)
+  const [ceDocs, setCeDocs] = useState<Array<{ document_name: string; summary: string | null }>>([]);
+  const [ceLoaded, setCeLoaded] = useState(false);
 
   // Decision
   const [decisionNotes, setDecisionNotes] = useState('');
@@ -121,6 +148,20 @@ export default function MaterialApprovals() {
       .eq('user_id', user.id)
       .eq('processed', true)
       .then(({ count }) => { setKnowledgeCount(count || 0); });
+  }, [user, selectedObra]);
+
+  // Carregar os Cadernos de Encargos processados da obra (aviso heurístico do formulário)
+  useEffect(() => {
+    if (!user || !selectedObra) { setCeDocs([]); setCeLoaded(false); return; }
+    setCeLoaded(false);
+    supabase
+      .from('eng_silva_project_knowledge')
+      .select('document_name, summary')
+      .eq('obra_id', selectedObra.id)
+      .eq('user_id', user.id)
+      .eq('processed', true)
+      .eq('specialty', 'Caderno de Encargos')
+      .then(({ data }) => { setCeDocs((data as any) || []); setCeLoaded(true); });
   }, [user, selectedObra]);
 
   // Select obra + save to Silva memory
@@ -277,6 +318,8 @@ export default function MaterialApprovals() {
         } catch { /* skip */ }
       }
 
+      const failedDownloads: string[] = [];
+
       const certificatesBase64: Array<{ name: string; base64: string; type: string }> = [];
       const certs = (approval as any).certificates || [];
       for (const cert of certs) {
@@ -285,8 +328,10 @@ export default function MaterialApprovals() {
           if (data) {
             const b64 = await blobToBase64(data);
             certificatesBase64.push({ name: cert.name, base64: b64, type: data.type });
+          } else {
+            failedDownloads.push(cert.name);
           }
-        } catch { /* skip failed downloads */ }
+        } catch { failedDownloads.push(cert.name); }
       }
 
       const mfgDocsBase64: Array<{ name: string; base64: string; type: string }> = [];
@@ -297,8 +342,15 @@ export default function MaterialApprovals() {
           if (data) {
             const b64 = await blobToBase64(data);
             mfgDocsBase64.push({ name: mdoc.name, base64: b64, type: data.type });
+          } else {
+            failedDownloads.push(mdoc.name);
           }
-        } catch { /* skip failed downloads */ }
+        } catch { failedDownloads.push(mdoc.name); }
+      }
+
+      // Downloads falhados deixam de ser silenciosos — são anexos que NÃO vão à análise.
+      if (failedDownloads.length > 0) {
+        toast.warning(`${failedDownloads.length} documento(s) não descarregado(s) e NÃO enviados à análise: ${failedDownloads.join(', ')}`);
       }
 
       console.log("PAM: Sending to edge function:", JSON.stringify({
@@ -511,6 +563,17 @@ export default function MaterialApprovals() {
       default: return <Badge variant="outline">{s}</Badge>;
     }
   };
+
+  // Aviso heurístico (indicativo): parece não haver CE para a categoria escolhida.
+  const ceLikelyMissing = (() => {
+    if (!category || !ceLoaded) return false;
+    const kws = (CATEGORY_CE_KEYWORDS[category] || []).map(normCe);
+    if (kws.length === 0) return false; // "Outros" — não afirmar
+    return !ceDocs.some((d) => {
+      const hay = normCe((d.document_name || '') + ' ' + (d.summary || ''));
+      return kws.some((k) => hay.includes(k));
+    });
+  })();
 
   // Upload box component
   const UploadBox = ({ icon: Icon, title, subtitle, accept, multiple, files, onFilesChange }: {
@@ -736,6 +799,35 @@ export default function MaterialApprovals() {
                       </div>
                     ) : (
                       <>
+                        {/* === AVISOS IMPOSSÍVEIS DE IGNORAR === */}
+                        {analysis.no_contractual_in_context && (
+                          <div className="rounded-lg border-2 border-destructive bg-destructive/10 p-3 flex items-start gap-2">
+                            <AlertTriangle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
+                            <p className="text-sm font-semibold text-destructive">ANÁLISE SEM MQT/CADERNO DE ENCARGOS — verificação contratual pendente. Nenhum documento contratual entrou nesta análise.</p>
+                          </div>
+                        )}
+                        {analysis.ce_for_category_missing && (
+                          <div className="rounded-lg border-2 border-amber-500 bg-amber-500/10 p-3 flex items-start gap-2">
+                            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                            <p className="text-sm font-medium text-amber-700 dark:text-amber-400">A Base de Conhecimento não tem Caderno de Encargos desta especialidade — análise baseada em normas gerais.</p>
+                          </div>
+                        )}
+                        {(() => {
+                          const ap = analysis.attachments_processing?.certificates;
+                          if (!ap || !ap.received) return null;
+                          const analyzed = ap.analyzed?.length ?? 0;
+                          const skipped = ap.skipped?.length ?? 0;
+                          if (skipped === 0 && analyzed === ap.received) return null;
+                          return (
+                            <div className="rounded-lg border-2 border-amber-500 bg-amber-500/10 p-3 flex items-start gap-2">
+                              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                              <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+                                Certificados: enviados {analyzed} de {ap.received} ao modelo{skipped > 0 ? ` — ${skipped} não analisado(s) por tamanho` : ''}.
+                              </p>
+                            </div>
+                          );
+                        })()}
+
                         {/* === EMAIL DE RESPOSTA AO EMPREITEIRO (em destaque) === */}
                         {analysis.email_response && (() => {
                           const draft = getEmailDraft(a);
@@ -903,6 +995,50 @@ export default function MaterialApprovals() {
                                 </div>
                               ))}
                             </div>
+                          </div>
+                        )}
+
+                        {/* Validade dos Certificados (data de hoje vs caducidade) */}
+                        {analysis.certificates_validity?.length > 0 && (
+                          <div>
+                            <h4 className="text-sm font-semibold text-foreground mb-2">Validade dos Certificados</h4>
+                            <div className="space-y-1">
+                              {analysis.certificates_validity.map((cv: any, i: number) => {
+                                const bad = cv.status === 'expirado' || cv.status === 'ilegivel';
+                                const warn = cv.status === 'sem_data';
+                                return (
+                                  <div key={i} className={`flex items-start gap-2 text-sm rounded p-2 ${bad ? 'bg-destructive/10' : warn ? 'bg-amber-500/10' : ''}`}>
+                                    {bad ? <XCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" /> : warn ? <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" /> : <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0 mt-0.5" />}
+                                    <div>
+                                      <span className="font-medium text-foreground">{cv.file}</span>
+                                      <span className="text-xs text-muted-foreground"> — {cv.type} · {String(cv.status).replace('_', ' ')}{cv.expiry_date ? ` · validade ${cv.expiry_date}` : ''}</span>
+                                      {cv.note && <p className="text-xs text-muted-foreground">{cv.note}</p>}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Documentos verificados nesta análise (fontes reais do backend) */}
+                        {(analysis.sources_consulted?.length > 0 || analysis.retrieval_path) && (
+                          <div>
+                            <h4 className="text-sm font-semibold text-foreground mb-2">Documentos verificados nesta análise</h4>
+                            {analysis.retrieval_path && (
+                              <p className="text-xs text-muted-foreground mb-1">Via de pesquisa: {analysis.retrieval_path === 'hybrid' ? 'híbrida' : 'legacy (fallback)'}</p>
+                            )}
+                            {analysis.sources_consulted?.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {analysis.sources_consulted.map((s: any, i: number) => (
+                                  <Badge key={i} variant="outline" className="text-xs">
+                                    {s.origin === 'contratual' ? 'Contratual' : s.origin === 'certificado' ? 'Certificado' : 'Semântica'}: {s.document_name}
+                                  </Badge>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-xs text-muted-foreground">Sem lista de documentos (caminho legacy).</p>
+                            )}
                           </div>
                         )}
 
@@ -1106,6 +1242,11 @@ export default function MaterialApprovals() {
                   {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                 </SelectContent>
               </Select>
+              {ceLikelyMissing && (
+                <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                  ⚠ Indicativo: a Base de Conhecimento parece não ter um Caderno de Encargos para "{category}". Considere anexar o CE desta especialidade. A análise confirmará (ou não) esta lacuna.
+                </p>
+              )}
             </div>
 
             <UploadBox

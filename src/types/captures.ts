@@ -4,6 +4,19 @@ import type { ExifData } from '@/lib/exif-parser';
 export type CaptureSource = Database['public']['Enums']['capture_source'];
 export type ProcessingStatus = Database['public']['Enums']['processing_status'];
 
+// Snapshot do contexto no MOMENTO do disparo (ligado a cada foto, não ao lote).
+export interface CaptureFileMeta {
+  especialidade: string | null;
+  fase: string | null;
+  nivelId: string | null;
+  piso: string | null;
+  cota: number | null;
+  ambiente: string | null;
+  atividade: string | null;
+  label: string;
+  contextId: string | null;
+}
+
 // File upload types
 export interface FileWithPreview {
   id: string;
@@ -14,6 +27,8 @@ export interface FileWithPreview {
   progress: number;
   statusText?: string;
   error?: string;
+  // Contexto capturado no disparo desta foto (fase/piso/etc.) — não do submit.
+  meta?: CaptureFileMeta;
 }
 
 export interface CaptureWithDetails {

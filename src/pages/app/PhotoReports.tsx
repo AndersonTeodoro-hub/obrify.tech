@@ -22,6 +22,7 @@ import {
 import { generatePhotoReportPDF, type PhotoForExport } from '@/utils/photo-report-pdf';
 import { generatePhotoReportDOCX } from '@/utils/photo-report-docx';
 import { toBase64UnderLimit } from '@/lib/capture-image';
+import { buildWatermarkLines, stampImageBase64 } from '@/lib/watermark';
 
 type Obra = { id: string; nome: string; cidade: string | null };
 // Contexto da captura de origem (para a legenda do Silva). Guardado no JSON photos.
@@ -85,6 +86,12 @@ export default function PhotoReports() {
   const [importing, setImporting] = useState(false);
   const [captioning, setCaptioning] = useState(false);
   const [captionProgress, setCaptionProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
+
+  // Edição pós-captura (data/piso/fase) — seleção por índice + campos de lote
+  const [selectedIdx, setSelectedIdx] = useState<Set<number>>(new Set());
+  const [batchFase, setBatchFase] = useState('');
+  const [batchPiso, setBatchPiso] = useState('');
+  const [batchDate, setBatchDate] = useState('');
 
   // Load obras
   useEffect(() => {
@@ -200,6 +207,7 @@ export default function PhotoReports() {
   };
 
   const removePhoto = (index: number) => {
+    setSelectedIdx(new Set()); // índices mudam após remover
     setPhotos(prev => {
       const updated = [...prev];
       if (updated[index].file) URL.revokeObjectURL(updated[index].preview);
@@ -211,6 +219,7 @@ export default function PhotoReports() {
   const movePhoto = (index: number, direction: 'up' | 'down') => {
     const newIndex = direction === 'up' ? index - 1 : index + 1;
     if (newIndex < 0 || newIndex >= photos.length) return;
+    setSelectedIdx(new Set()); // índices mudam após reordenar
     setPhotos(prev => {
       const updated = [...prev];
       [updated[index], updated[newIndex]] = [updated[newIndex], updated[index]];
@@ -220,6 +229,58 @@ export default function PhotoReports() {
 
   const updatePhotoField = (index: number, field: 'description' | 'location', value: string) => {
     setPhotos(prev => prev.map((p, i) => i === index ? { ...p, [field]: value } : p));
+  };
+
+  // Editar os metadados do carimbo de uma foto (cria o objeto capture se faltar).
+  const updatePhotoCapture = (index: number, patch: Partial<CaptureMeta>) => {
+    setPhotos(prev => prev.map((p, i) => (i === index ? { ...p, capture: { ...(p.capture || {}), ...patch } } : p)));
+  };
+
+  const toggleSelect = (index: number) => {
+    setSelectedIdx(prev => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index); else next.add(index);
+      return next;
+    });
+  };
+
+  // Aplicar correção em lote (só os campos preenchidos) às fotos selecionadas.
+  const applyBatch = () => {
+    if (selectedIdx.size === 0) return;
+    const patch: Partial<CaptureMeta> = {};
+    if (batchFase.trim()) patch.fase = batchFase.trim();
+    if (batchPiso.trim()) patch.piso = batchPiso.trim();
+    if (batchDate) patch.captured_at = new Date(batchDate + 'T12:00:00').toISOString();
+    if (Object.keys(patch).length === 0) {
+      toast.info('Preencha fase, piso ou data para aplicar.');
+      return;
+    }
+    setPhotos(prev => prev.map((p, i) => (selectedIdx.has(i) ? { ...p, capture: { ...(p.capture || {}), ...patch } } : p)));
+    toast.success(`Aplicado a ${selectedIdx.size} foto(s). Guarde o relatório para registar.`);
+    setSelectedIdx(new Set());
+    setBatchFase(''); setBatchPiso(''); setBatchDate('');
+  };
+
+  // Descarregar UMA foto com o carimbo renderizado on-the-fly (partilha avulsa).
+  const downloadStamped = async (photo: LocalPhoto, index: number) => {
+    try {
+      let blob: Blob | null = photo.file || null;
+      if (!blob && photo.file_path) {
+        const { data } = await supabase.storage.from('photo-reports').download(photo.file_path);
+        blob = data || null;
+      }
+      if (!blob) throw new Error('Sem imagem disponível');
+      const dataUrl = await blobToBase64(blob);
+      const lines = photo.capture ? buildWatermarkLines(photo.capture, format(reportDate, 'dd/MM/yyyy')) : [];
+      const stamped = lines.length ? await stampImageBase64(dataUrl, lines) : dataUrl;
+      const a = document.createElement('a');
+      a.href = stamped;
+      a.download = `foto_${index + 1}_carimbada.jpg`;
+      a.click();
+    } catch (e: any) {
+      console.error('Descarregar com carimbo:', e);
+      toast.error('Erro ao gerar foto carimbada: ' + e.message);
+    }
   };
 
   const sanitizeFilename = (name: string) => name.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -346,13 +407,23 @@ export default function PhotoReports() {
       reader.readAsDataURL(blob);
     });
 
-  const downloadPhotosAsBase64 = async (photosMeta: PhotoMeta[]): Promise<PhotoForExport[]> => {
+  const downloadPhotosAsBase64 = async (photosMeta: PhotoMeta[], fallbackDate: string): Promise<PhotoForExport[]> => {
     const results: PhotoForExport[] = [];
     for (const p of photosMeta) {
       try {
         const { data, error } = await supabase.storage.from('photo-reports').download(p.file_path);
         if (error || !data) continue;
-        const base64 = await blobToBase64(data);
+        let base64 = await blobToBase64(data);
+        // Marca d'água RENDERIZADA a partir dos metadados (só fotos com contexto de
+        // captura; o original no storage fica limpo). Falha do carimbo não bloqueia.
+        const lines = p.capture ? buildWatermarkLines(p.capture, fallbackDate) : [];
+        if (lines.length > 0) {
+          try {
+            base64 = await stampImageBase64(base64, lines);
+          } catch (e) {
+            console.error('Carimbo falhou para', p.file_path, e);
+          }
+        }
         results.push({
           base64,
           description: p.description,
@@ -371,7 +442,10 @@ export default function PhotoReports() {
     setExporting(true);
     try {
       toast.info(`A preparar ${type.toUpperCase()}...`);
-      const photoImages = await downloadPhotosAsBase64(report.photos || []);
+      const fallbackDate = new Date(report.report_date + 'T00:00:00').toLocaleDateString('pt-PT', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+      });
+      const photoImages = await downloadPhotosAsBase64(report.photos || [], fallbackDate);
       const reportData = {
         report_date: report.report_date,
         weather: report.weather,
@@ -764,32 +838,72 @@ export default function PhotoReports() {
               <input id="photo-upload" type="file" multiple accept="image/*,.heic" className="hidden" onChange={e => handlePhotoFiles(e.target.files)} />
             </div>
 
+            {/* Barra de correção em lote (data / piso / fase) */}
+            {photos.length > 0 && selectedIdx.size > 0 && (
+              <div className="rounded-lg border border-primary/40 bg-primary/5 p-3 space-y-2">
+                <p className="text-sm font-medium text-foreground">Corrigir {selectedIdx.size} foto(s) selecionada(s)</p>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                  <Input placeholder="Fase (ex: 2.1)" value={batchFase} onChange={e => setBatchFase(e.target.value)} />
+                  <Input placeholder="Piso (ex: Piso -6)" value={batchPiso} onChange={e => setBatchPiso(e.target.value)} />
+                  <Input type="date" value={batchDate} onChange={e => setBatchDate(e.target.value)} />
+                  <Button onClick={applyBatch}>Aplicar aos selecionados</Button>
+                </div>
+                <p className="text-xs text-muted-foreground">Só os campos preenchidos são aplicados. Fica registado ao guardar o relatório.</p>
+              </div>
+            )}
+
             {/* Photo grid */}
             {photos.length > 0 && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {photos.map((photo, index) => (
-                  <div key={index} className="border border-border rounded-lg overflow-hidden">
-                    <div className="relative aspect-video bg-muted">
-                      <img src={photo.preview} alt={`Foto ${index + 1}`} className="w-full h-full object-cover" />
-                      <div className="absolute top-2 right-2 flex gap-1">
-                        <Button size="icon" variant="secondary" className="h-7 w-7" onClick={() => movePhoto(index, 'up')} disabled={index === 0}>
-                          <ArrowUp className="w-3 h-3" />
-                        </Button>
-                        <Button size="icon" variant="secondary" className="h-7 w-7" onClick={() => movePhoto(index, 'down')} disabled={index === photos.length - 1}>
-                          <ArrowDown className="w-3 h-3" />
-                        </Button>
-                        <Button size="icon" variant="destructive" className="h-7 w-7" onClick={() => removePhoto(index)}>
-                          <X className="w-3 h-3" />
-                        </Button>
+                {photos.map((photo, index) => {
+                  const wmLines = photo.capture ? buildWatermarkLines(photo.capture, format(reportDate, 'dd/MM/yyyy')) : [];
+                  const capDate = photo.capture?.captured_at ? format(new Date(photo.capture.captured_at), 'yyyy-MM-dd') : '';
+                  return (
+                    <div key={index} className={cn('border rounded-lg overflow-hidden', selectedIdx.has(index) ? 'border-primary ring-1 ring-primary' : 'border-border')}>
+                      <div className="relative aspect-video bg-muted">
+                        <img src={photo.preview} alt={`Foto ${index + 1}`} className="w-full h-full object-cover" />
+                        {/* Carimbo RENDERIZADO (overlay não-destrutivo) */}
+                        {wmLines.length > 0 && (
+                          <div className="absolute bottom-0 left-0 right-0 bg-black/55 px-2 py-1">
+                            {wmLines.map((ln, i) => (
+                              <p key={i} className="text-[10px] leading-tight text-white truncate">{ln}</p>
+                            ))}
+                          </div>
+                        )}
+                        <div className="absolute top-2 right-2 flex gap-1">
+                          <Button size="icon" variant="secondary" className="h-7 w-7" onClick={() => movePhoto(index, 'up')} disabled={index === 0}>
+                            <ArrowUp className="w-3 h-3" />
+                          </Button>
+                          <Button size="icon" variant="secondary" className="h-7 w-7" onClick={() => movePhoto(index, 'down')} disabled={index === photos.length - 1}>
+                            <ArrowDown className="w-3 h-3" />
+                          </Button>
+                          <Button size="icon" variant="secondary" className="h-7 w-7" onClick={() => downloadStamped(photo, index)} title="Descarregar com carimbo">
+                            <Download className="w-3 h-3" />
+                          </Button>
+                          <Button size="icon" variant="destructive" className="h-7 w-7" onClick={() => removePhoto(index)}>
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </div>
+                        <div className="absolute top-2 left-2 flex items-center gap-2">
+                          <span className="bg-background/80 rounded p-0.5">
+                            <Checkbox checked={selectedIdx.has(index)} onCheckedChange={() => toggleSelect(index)} />
+                          </span>
+                          <Badge className="text-xs">{index + 1}</Badge>
+                        </div>
                       </div>
-                      <Badge className="absolute top-2 left-2 text-xs">{index + 1}</Badge>
+                      <div className="p-3 space-y-2">
+                        <Input placeholder="Descrição da foto" value={photo.description} onChange={e => updatePhotoField(index, 'description', e.target.value)} />
+                        <Input placeholder="Local / Elemento" value={photo.location} onChange={e => updatePhotoField(index, 'location', e.target.value)} />
+                        {/* Edição pós-captura do carimbo: fase / piso / data */}
+                        <div className="grid grid-cols-3 gap-2">
+                          <Input placeholder="Fase" value={photo.capture?.fase || ''} onChange={e => updatePhotoCapture(index, { fase: e.target.value || null })} />
+                          <Input placeholder="Piso" value={photo.capture?.piso || ''} onChange={e => updatePhotoCapture(index, { piso: e.target.value || null })} />
+                          <Input type="date" value={capDate} onChange={e => updatePhotoCapture(index, { captured_at: e.target.value ? new Date(e.target.value + 'T12:00:00').toISOString() : null })} />
+                        </div>
+                      </div>
                     </div>
-                    <div className="p-3 space-y-2">
-                      <Input placeholder="Descrição da foto" value={photo.description} onChange={e => updatePhotoField(index, 'description', e.target.value)} />
-                      <Input placeholder="Local / Elemento" value={photo.location} onChange={e => updatePhotoField(index, 'location', e.target.value)} />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </CardContent>

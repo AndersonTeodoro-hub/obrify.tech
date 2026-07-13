@@ -29,7 +29,7 @@ import { DropZone } from './DropZone';
 import { FilePreviewGrid } from './FilePreviewGrid';
 import { SmartCaptureButtons } from './SmartCaptureButtons';
 import { useIsMobile } from '@/hooks/use-mobile';
-import type { CaptureCategory, CaptureSource, FileWithPreview } from '@/types/captures';
+import type { CaptureCategory, CaptureSource, FileWithPreview, CaptureFileMeta } from '@/types/captures';
 
 // Limites de tamanho
 const WARN_SIZE_ORIGINAL = 20 * 1024 * 1024; // 20MB - aviso antes de comprimir
@@ -39,8 +39,10 @@ const JPEG_QUALITY = 0.85;
 const RETRY_ATTEMPTS = 3;
 const RETRY_BASE_DELAY = 1000; // 1s, 2s, 4s
 
-// Compressão de imagem via Canvas nativo, com carimbo opcional (rótulo do contexto + data/hora)
-function compressImage(file: File, overlayLines?: string[]): Promise<File> {
+// Compressão de imagem via Canvas nativo. NÃO queima carimbo: a marca d'água passou
+// a ser renderizada a partir dos metadados (ver src/lib/watermark.ts), pelo que o
+// original fica LIMPO no storage e permite edição/correção a posteriori.
+function compressImage(file: File): Promise<File> {
   return new Promise((resolve) => {
     // Não comprimir vídeos ou ficheiros não-imagem
     if (!file.type.startsWith('image/')) {
@@ -75,30 +77,14 @@ function compressImage(file: File, overlayLines?: string[]): Promise<File> {
 
         ctx.drawImage(img, 0, 0, width, height);
 
-        // Carimbo visível: faixa semitransparente no rodapé com contexto + data/hora
-        const lines = (overlayLines || []).filter(Boolean);
-        if (lines.length > 0) {
-          const fontSize = Math.max(14, Math.round(width * 0.028));
-          const pad = Math.round(fontSize * 0.5);
-          const lineH = Math.round(fontSize * 1.35);
-          const bandH = lineH * lines.length + pad * 2;
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
-          ctx.fillRect(0, height - bandH, width, bandH);
-          ctx.fillStyle = '#FFFFFF';
-          ctx.font = `${fontSize}px Arial, sans-serif`;
-          ctx.textBaseline = 'top';
-          lines.forEach((ln, i) => ctx.fillText(ln, pad, height - bandH + pad + i * lineH));
-        }
-
         canvas.toBlob(
           (blob) => {
             if (!blob) {
               resolve(file); // fallback: enviar original
               return;
             }
-            // Com carimbo, usar sempre o canvas (senão perdia-se o carimbo).
-            // Sem carimbo, manter o atalho "não reduziu -> original".
-            if (lines.length === 0 && blob.size >= file.size) {
+            // Não reduziu -> manter o original.
+            if (blob.size >= file.size) {
               resolve(file);
               return;
             }
@@ -164,7 +150,7 @@ const CATEGORY_TO_SOURCE: Record<CaptureCategory, CaptureSource> = {
   panorama: 'phone_360',
 };
 
-const MAX_FILES = 10;
+const MAX_FILES = 30;
 
 // Contexto pegajoso: última obra/especialidade/fase/nível escolhidos pelo fiscal.
 const STICKY_KEY = 'obrify_capture_context';
@@ -292,6 +278,46 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
     enabled: !!selectedSite,
   });
 
+  // Meta do contexto ATIVO (o que a PRÓXIMA foto vai herdar). Recalculado a cada
+  // render e guardado num ref, para o handler da câmara ler sempre o valor ACTUAL
+  // no momento do disparo — nunca um valor preso do início da sessão.
+  const resolveActiveMeta = (): CaptureFileMeta => {
+    const ctxSel = contexts.find((c: any) => c.id === contextId) || null;
+    const nivelSel = niveisFiltrados.find((n) => n.id === nivelId) || null;
+    const especialidadeV = ctxSel ? ctxSel.especialidade : (especialidade || null);
+    const faseV = ctxSel ? ctxSel.fase : (fase || null);
+    const nivelIdV = ctxSel ? ctxSel.nivel_id : (nivelId || null);
+    const pisoV = ctxSel ? ctxSel.piso : (nivelSel?.piso ?? null);
+    const cotaV = ctxSel ? ctxSel.cota : (nivelSel?.cota ?? null);
+    const ambienteV = ctxSel ? ctxSel.ambiente : null;
+    const atividadeV = ctxSel ? ctxSel.atividade : null;
+    const label = ctxSel?.label
+      || [especialidadeV, faseV ? `Fase ${faseV}` : '', pisoV ? `${pisoV}${cotaV != null ? ` (${cotaV})` : ''}` : '']
+        .filter(Boolean).join(' · ');
+    return {
+      especialidade: especialidadeV, fase: faseV, nivelId: nivelIdV,
+      piso: pisoV, cota: cotaV, ambiente: ambienteV, atividade: atividadeV,
+      label, contextId: contextId || null,
+    };
+  };
+  const activeMeta = resolveActiveMeta();
+  const metaRef = useRef<CaptureFileMeta>(activeMeta);
+  metaRef.current = activeMeta;
+  const filesLenRef = useRef(0);
+  filesLenRef.current = files.length;
+
+  // Confirmação do contexto pegajoso ao (re)abrir o modal — mata o defeito de
+  // fotografar com a fase da sessão anterior sem reparar. Enquanto não confirmar,
+  // a captura fica bloqueada.
+  const [needsStickyConfirm, setNeedsStickyConfirm] = useState(false);
+  useEffect(() => {
+    if (open) {
+      const hasContext = !!(contextId || fase || especialidade || nivelId);
+      setNeedsStickyConfirm(hasContext);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   // Escolher contexto -> abrir a câmara IMEDIATAMENTE (síncrono; Safari/iOS exige
   // que a abertura da câmara seja resposta directa ao gesto, sem setTimeout).
   const pickContext = (id: string) => {
@@ -301,12 +327,24 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
 
   // Handle file selection
   const handleFilesSelected = useCallback(async (newFiles: File[]) => {
-    const processedFiles: FileWithPreview[] = [];
+    // Snapshot do contexto ATIVO no momento do disparo (via ref: nunca stale).
+    const shotMeta = metaRef.current;
 
-    for (const file of newFiles) {
+    // Limite explícito: nunca descartar fotos em silêncio.
+    const available = Math.max(0, MAX_FILES - filesLenRef.current);
+    const accepted = newFiles.slice(0, available);
+    const dropped = newFiles.length - accepted.length;
+    if (dropped > 0) {
+      toast.warning(
+        `Limite de ${MAX_FILES} fotos por captura — ${dropped} foto(s) não foram adicionadas. Guarde estas e faça outra captura.`,
+      );
+    }
+
+    const processedFiles: FileWithPreview[] = [];
+    for (const file of accepted) {
       const id = crypto.randomUUID();
       const preview = URL.createObjectURL(file);
-      
+
       // Extract EXIF data for images
       let exifData = null;
       if (file.type.startsWith('image/')) {
@@ -324,10 +362,11 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
         exifData,
         status: 'pending',
         progress: 0,
+        meta: shotMeta,
       });
     }
 
-    setFiles((prev) => [...prev, ...processedFiles].slice(0, MAX_FILES));
+    setFiles((prev) => [...prev, ...processedFiles]);
   }, []);
 
   // Remove file from list
@@ -350,19 +389,8 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
       const site = sites.find((s) => s.id === selectedSite);
       if (!site) throw new Error('Selecione a obra');
 
-      // Metadados: do contexto escolhido, com fallback aos seletores manuais
-      const ctxSel = contexts.find((c: any) => c.id === contextId) || null;
-      const nivelSel = niveisFiltrados.find((n) => n.id === nivelId) || null;
-      const espValue = ctxSel ? ctxSel.especialidade : (especialidade || null);
-      const faseValue = ctxSel ? ctxSel.fase : (fase || null);
-      const nivelValue = ctxSel ? ctxSel.nivel_id : (nivelId || null);
-      const ambValue = ctxSel ? ctxSel.ambiente : null;
-      const atvValue = ctxSel ? ctxSel.atividade : null;
-      // Rótulo para o carimbo (do contexto, ou construído dos seletores)
-      const ctxLabel = ctxSel?.label
-        || [espValue, nivelSel?.piso ? `${nivelSel.piso}${nivelSel.cota != null ? ` (${nivelSel.cota})` : ''}` : '']
-          .filter(Boolean).join(' · ');
-
+      // Os metadados (fase/piso/etc.) são POR FOTO — capturados no disparo em
+      // fileData.meta — não resolvidos aqui ao nível do lote.
       let successCount = 0;
       let errorCount = 0;
 
@@ -391,13 +419,10 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             progress: 10,
           });
 
-          // Data/hora da captura (consistente entre carimbo e captured_at)
+          // Data/hora da captura (metadado; o carimbo é renderizado depois a partir
+          // dos metadados, não queimado nos pixels).
           const capturedAt = fileData.exifData?.dateTime || new Date();
-          const stampDate = capturedAt.toLocaleString('pt-PT', {
-            day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
-          });
-          const overlay = ctxLabel ? [ctxLabel, stampDate] : [stampDate];
-          const compressedFile = await compressImage(fileData.file, overlay);
+          const compressedFile = await compressImage(fileData.file);
 
           // Avisar se após compressão ainda for grande
           if (compressedFile.size > WARN_SIZE_COMPRESSED && compressedFile.size < fileData.file.size) {
@@ -437,12 +462,12 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             size_bytes: compressedFile.size,
             mime_type: compressedFile.type,
             notes: notes.trim() || null,
-            especialidade: espValue,
-            fase: faseValue,
-            nivel_id: nivelValue,
-            ambiente: ambValue,
-            atividade: atvValue,
-            context_id: ctxSel?.id || null,
+            especialidade: fileData.meta?.especialidade ?? null,
+            fase: fileData.meta?.fase ?? null,
+            nivel_id: fileData.meta?.nivelId ?? null,
+            ambiente: fileData.meta?.ambiente ?? null,
+            atividade: fileData.meta?.atividade ?? null,
+            context_id: fileData.meta?.contextId ?? null,
           });
 
           if (insertError) throw insertError;
@@ -548,6 +573,33 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
         </DialogHeader>
 
         <div className="space-y-4 py-4">
+          {/* Confirmação do contexto pegajoso ao reabrir — antes da 1.ª foto */}
+          {needsStickyConfirm && (
+            <div className="rounded-lg border-2 border-amber-500/60 bg-amber-500/10 p-3 space-y-2">
+              <p className="text-sm font-semibold text-foreground">Confirma o contexto antes de fotografar</p>
+              <p className="text-xs text-muted-foreground">
+                Contexto da sessão anterior:{' '}
+                <span className="font-medium text-foreground">{activeMeta.label || 'sem contexto'}</span>. Ainda estás aqui?
+              </p>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={() => setNeedsStickyConfirm(false)}>Sim, continuar</Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setEspecialidade('');
+                    setFase('');
+                    setNivelId('');
+                    setContextId('');
+                    setNeedsStickyConfirm(false);
+                  }}
+                >
+                  Mudar contexto
+                </Button>
+              </div>
+            </div>
+          )}
+
           {/* Site selection */}
           <div className="space-y-2">
             <Label>{t('captures.selectSite')} *</Label>
@@ -575,6 +627,22 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
               </SelectContent>
             </Select>
           </div>
+
+          {/* Badge grande e sempre visível: contexto/fase que a PRÓXIMA foto herda */}
+          {selectedSite && (
+            <div
+              className={`rounded-lg p-3 border-2 ${
+                activeMeta.fase || activeMeta.especialidade || activeMeta.piso
+                  ? 'border-primary/40 bg-primary/10'
+                  : 'border-destructive/40 bg-destructive/10'
+              }`}
+            >
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">A fotografar em</p>
+              <p className="text-lg font-bold text-foreground leading-tight break-words">
+                {activeMeta.label || 'Sem contexto — as fotos ficam SEM fase'}
+              </p>
+            </div>
+          )}
 
           {/* Input escondido: câmara imediata ao escolher contexto (mobile) */}
           <input
@@ -608,7 +676,7 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
                       key={c.id}
                       type="button"
                       onClick={() => pickContext(c.id)}
-                      disabled={isUploading}
+                      disabled={isUploading || needsStickyConfirm}
                       className={`w-full text-left px-3 py-2 rounded-md border text-sm transition ${
                         contextId === c.id ? 'border-primary bg-primary/10' : 'border-border hover:bg-muted/50'
                       }`}
@@ -742,7 +810,7 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
               <Label>{t('captures.captureType')}</Label>
               <SmartCaptureButtons
                 onFilesSelected={handleFilesSelected}
-                disabled={isUploading}
+                disabled={isUploading || needsStickyConfirm}
               />
             </div>
           )}
@@ -754,7 +822,7 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
               onFilesSelected={handleFilesSelected}
               maxFiles={MAX_FILES}
               currentFileCount={files.length}
-              disabled={isUploading}
+              disabled={isUploading || needsStickyConfirm}
             />
           </div>
 

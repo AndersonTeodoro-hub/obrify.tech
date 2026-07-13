@@ -5,13 +5,20 @@ import { voyageEmbed, voyageRerank } from "../_shared/embeddings/voyage-client.t
 import { runClaudeWithContinuation } from "../_shared/anthropic-loop.ts";
 
 // ── [LEGACY] Fetch knowledge from eng_silva_project_knowledge (keyword scoring) ──
-// Preservada como fallback de emergência + rollback. NÃO modificar.
+// Fallback de emergência quando o retrieval híbrido falha (ex.: Voyage/RPC em baixo).
+// Antes marcada "NÃO modificar" — snapshot de rollback do commit a3c33bc.
+// EXCEÇÃO REGISTADA (2026-07-13, ponto 4 da correção PAM): alterada de forma ADITIVA
+// para força-inclusão dos documentos contratuais por `specialty`
+// (HYBRID_CONTRACT_SPECIALTIES), garantindo que NENHUM caminho de retrieval perde o
+// MQT/Caderno de Encargos. Motivo: o filtro por `document_type` deixava cair contratuais
+// classificados sob outra especialidade. O scoring NÃO foi tocado; a função passou também
+// a devolver KnowledgeResult para os avisos e a lista de fontes funcionarem neste caminho.
 async function fetchProjectKnowledgeLegacy(
   supabase: any,
   obraId: string,
   materialCategory: string,
   userId: string | null,
-): Promise<string> {
+): Promise<KnowledgeResult> {
   try {
     // Strategy: fetch ALL docs for the obra, then score by relevance to this material category.
     // This ensures we find certificates classified under any type (e.g. "Pormenores Construtivos").
@@ -26,7 +33,7 @@ async function fetchProjectKnowledgeLegacy(
 
     if (error || !allDocs || allDocs.length === 0) {
       console.log("PAM-KNOWLEDGE: No knowledge docs found for obra", obraId);
-      return "";
+      return { context: "", sources: [], hasContractual: false, ceForCategoryFound: false };
     }
 
     console.log(`PAM-KNOWLEDGE: Total docs in obra: ${allDocs.length}`);
@@ -41,6 +48,8 @@ async function fetchProjectKnowledgeLegacy(
       "Isolamento Acústico": ["acústico", "rrae", "ruído", "lã", "resiliente"],
       "Revestimentos": ["revestimento", "cerâmico", "mosaico", "pedra", "reboco", "argamassa"],
       "Tubagens e Acessórios": ["tubagem", "tubo", "ppr", "pvc", "pead", "válvula"],
+      "Redes Enterradas": ["tubagem enterrada", "saneamento", "drenagem", "águas pluviais", "coletor", "colector", "pead", "pp corrugado", "pvc corrugado", "caixa de visita", "caixas de visita", "tampa", "grelha", "câmara de inspecção", "rede enterrada"],
+      "Redes Embebidas": ["tubagem embebida", "embebido", "embebidos", "roço", "roços", "negativo", "negativos", "manga", "mangas", "courette", "courettes", "espera", "esperas", "passagem em laje"],
       "Equipamentos AVAC": ["avac", "climatização", "ventilação", "conduta", "chiller", "vrf"],
       "Equipamentos Eléctricos": ["eléctrico", "quadro", "cabo", "disjuntor", "iluminação"],
       "Caixilharia": ["caixilharia", "alumínio", "janela", "porta", "vidro"],
@@ -57,6 +66,8 @@ async function fetchProjectKnowledgeLegacy(
       "Isolamento Térmico": ["Térmica", "Arquitectura"],
       "Isolamento Acústico": ["Acústica", "Arquitectura"],
       "Tubagens e Acessórios": ["Águas e Esgotos", "Rede Enterrada"],
+      "Redes Enterradas": ["Rede Enterrada", "Águas e Esgotos"],
+      "Redes Embebidas": ["Águas e Esgotos", "Electricidade"],
       "Equipamentos AVAC": ["AVAC"],
       "Equipamentos Eléctricos": ["Electricidade"],
     };
@@ -98,16 +109,25 @@ async function fetchProjectKnowledgeLegacy(
       return { ...doc, _score: score, _hits: keywordHits };
     });
 
-    // Filter: keep certificates ALWAYS (bypass score filter), plus other docs with score > 0
-    const relevant = scored.filter((d: any) => d._score > 0 || certTypes.has(d.document_type));
+    // Ponto 4 (aditivo): detetar contratuais por SPECIALTY, não por document_type.
+    const isContractualBySpecialty = (d: any) => HYBRID_CONTRACT_SPECIALTIES.includes(d.specialty);
+
+    // Filter: manter certificados SEMPRE (bypass score), contratuais SEMPRE por specialty,
+    // e restantes docs com score > 0. (scoring não foi alterado — só o filtro de inclusão.)
+    const relevant = scored.filter(
+      (d: any) => d._score > 0 || certTypes.has(d.document_type) || isContractualBySpecialty(d),
+    );
     relevant.sort((a: any, b: any) => b._score - a._score);
 
-    // Take top 20 documents — must include ALL certificates
-    const finalDocs = relevant.slice(0, 20);
+    // Take top 20 — mas os contratuais (CE/MQT/Contrato/Condições Técnicas) NUNCA são
+    // cortados pelo limite: força-inclusão de todos, e top-20 para os restantes.
+    const contractualDocs = relevant.filter(isContractualBySpecialty);
+    const otherDocs = relevant.filter((d: any) => !isContractualBySpecialty(d)).slice(0, 20);
+    const finalDocs = [...contractualDocs, ...otherDocs];
 
     if (finalDocs.length === 0) {
       console.log("PAM-KNOWLEDGE: No relevant docs found for", materialCategory);
-      return "";
+      return { context: "", sources: [], hasContractual: false, ceForCategoryFound: false };
     }
 
     // Diagnóstico: contagem de certificados incluídos vs existentes na obra
@@ -144,10 +164,31 @@ async function fetchProjectKnowledgeLegacy(
 
     context += `\n\nANALISA CADA UM dos ${finalDocs.length} documentos acima individualmente. Não ignores nenhum certificado. Cada fornecedor deve ter uma entrada na tabela de verificações de conformidade.`;
 
-    return context;
+    // Fontes autoritativas (o que REALMENTE entrou no contexto) + sinais de aviso.
+    const sources = finalDocs.map((d: any) => {
+      let origin: "contratual" | "certificado" | "semantica";
+      if (isContractualBySpecialty(d)) origin = "contratual";
+      else if (certTypes.has(d.document_type) || d.specialty === HYBRID_CERT_SPECIALTY) origin = "certificado";
+      else origin = "semantica";
+      return { document_name: d.document_name, origin };
+    });
+    const ceForCategoryFound = keywords.length === 0
+      ? finalDocs.some((d: any) => d.specialty === "Caderno de Encargos")
+      : finalDocs.some((d: any) => {
+          if (d.specialty !== "Caderno de Encargos") return false;
+          const hay = ((d.document_name || "") + " " + (d.summary || "")).toLowerCase();
+          return keywords.some((kw: string) => hay.includes(kw));
+        });
+
+    return {
+      context,
+      sources,
+      hasContractual: contractualDocs.length > 0,
+      ceForCategoryFound,
+    };
   } catch (err) {
     console.error("PAM-KNOWLEDGE: Error fetching knowledge:", err);
-    return "";
+    return { context: "", sources: [], hasContractual: false, ceForCategoryFound: false };
   }
 }
 
@@ -163,6 +204,8 @@ const HYBRID_CATEGORY_KEYWORDS: Record<string, string[]> = {
   "Isolamento Acústico": ["acústico", "rrae", "ruído", "lã", "resiliente"],
   "Revestimentos": ["revestimento", "cerâmico", "mosaico", "pedra", "reboco", "argamassa"],
   "Tubagens e Acessórios": ["tubagem", "tubo", "ppr", "pvc", "pead", "válvula"],
+  "Redes Enterradas": ["tubagem enterrada", "saneamento", "drenagem", "aguas pluviais", "coletor", "coletores", "pead", "pp corrugado", "pvc corrugado", "caixa de visita", "caixas de visita", "tampa", "tampas", "grelha", "grelhas", "camara de inspecao", "rede enterrada"],
+  "Redes Embebidas": ["tubagem embebida", "embebido", "embebidos", "roco", "rocos", "negativo", "negativos", "manga", "mangas", "courette", "courettes", "espera", "esperas", "passagem em laje"],
   "Equipamentos AVAC": ["avac", "climatização", "ventilação", "conduta", "chiller", "vrf"],
   "Equipamentos Eléctricos": ["eléctrico", "quadro", "cabo", "disjuntor", "iluminação"],
   "Caixilharia": ["caixilharia", "alumínio", "janela", "porta", "vidro"],
@@ -195,6 +238,14 @@ function formatDocBlock(doc: any, summaryWordLimit: number): string {
   return block;
 }
 
+// Resultado do retrieval: contexto + lista autoritativa de fontes + sinais de aviso.
+interface KnowledgeResult {
+  context: string;
+  sources: Array<{ document_name: string; origin: "contratual" | "certificado" | "semantica" }>;
+  hasContractual: boolean;      // entrou algum CE/MQT/Contrato/Condições Técnicas no contexto?
+  ceForCategoryFound: boolean;  // existe Caderno de Encargos que cobre esta categoria de material?
+}
+
 // ── Retrieval híbrido: Via A determinística (certificados + contratuais) + Via B semântica ──
 async function fetchProjectKnowledgeHybrid(
   supabase: any,
@@ -202,7 +253,7 @@ async function fetchProjectKnowledgeHybrid(
   materialCategory: string,
   userId: string | null,
   materialQuery: string,
-): Promise<string> {
+): Promise<KnowledgeResult> {
   // ═══ VIA A — DETERMINÍSTICA (sem threshold, sem score) ═══
 
   // A1. Certificados: specialty = "Certificados e Ensaios", com gate de categoria por keywords.
@@ -293,7 +344,7 @@ async function fetchProjectKnowledgeHybrid(
   // ═══ COMBINAÇÃO ═══
   if (certs.length === 0 && contracts.length === 0 && semanticDocs.length === 0) {
     console.log("PAM-HYBRID: No relevant docs found for", materialCategory);
-    return "";
+    return { context: "", sources: [], hasContractual: false, ceForCategoryFound: false };
   }
 
   console.log(`PAM-HYBRID: certs=${certs.length} contracts=${contracts.length} semantic=${semanticDocs.length} (cat="${materialCategory}", gate_keywords=${keywords.length})`);
@@ -328,11 +379,32 @@ async function fetchProjectKnowledgeHybrid(
     context += `\n\nANALISA CADA UM dos ${certs.length} certificados acima individualmente. Não ignores nenhum. Cada fornecedor deve ter uma entrada na tabela de verificações de conformidade.`;
   }
 
-  return context;
+  // Fontes autoritativas (o que REALMENTE entrou no contexto) + sinais de aviso.
+  const sources = [
+    ...certs.map((d: any) => ({ document_name: d.document_name, origin: "certificado" as const })),
+    ...contracts.map((d: any) => ({ document_name: d.document_name, origin: "contratual" as const })),
+    ...semanticDocs.map((d: any) => ({ document_name: d.document_name, origin: "semantica" as const })),
+  ];
+  const ceDocs = contracts.filter((d: any) => d.specialty === "Caderno de Encargos");
+  const ceForCategoryFound = keywords.length === 0
+    ? ceDocs.length > 0 // categoria sem keywords ("Outros"): qualquer CE conta
+    : ceDocs.some((d: any) => {
+        const hay = normalizeForMatch((d.document_name || "") + " " + (d.summary || ""));
+        return keywords.some((kw) => hay.includes(kw));
+      });
+
+  return {
+    context,
+    sources,
+    hasContractual: contracts.length > 0,
+    ceForCategoryFound,
+  };
 }
 
-function getAnalysisPrompt(material_category: string): string {
+function getAnalysisPrompt(material_category: string, today: string): string {
   return `Analisa este Pedido de Aprovação de Materiais (PAM) para a categoria "${material_category}".
+
+DATA DE HOJE: ${today}. Usa esta data para aferir a validade/caducidade de cada certificado e laudo.
 
 COMO ABORDAR ESTA ANÁLISE:
 
@@ -408,6 +480,17 @@ Responde com o JSON estruturado abaixo (sem markdown, sem backticks, sem texto a
       "detail": "Resultado da pesquisa online"
     }
   ],
+  "certificates_validity": [
+    {
+      "file": "nome exacto do ficheiro do certificado/laudo",
+      "type": "DoP" | "certificado_CE" | "laudo_ensaio" | "ficha_tecnica" | "outro",
+      "issuer": "entidade emissora",
+      "issue_date": "DD/MM/AAAA ou null",
+      "expiry_date": "DD/MM/AAAA ou null",
+      "status": "valido" | "expirado" | "sem_data" | "ilegivel",
+      "note": "observação curta (ex: caduca a meio da obra)"
+    }
+  ],
   "practical_concerns": [
     "Preocupação prática 1",
     "Preocupação prática 2"
@@ -443,7 +526,8 @@ REGRAS DE FIABILIDADE (INVIOLÁVEIS):
 - Em cada compliance_check, o campo "source_file" deve conter o nome EXACTO do ficheiro consultado.
 - Se não encontras informação sobre um fornecedor ou certificado, escreve "Sem documentação na Base de Conhecimento" — NUNCA inventes dados.
 - Na justificação, refere os documentos consultados pelos nomes exactos dos ficheiros.
-- Se o caderno de encargos não foi fornecido, indica isso em "missing_information".`;
+- Se o caderno de encargos não foi fornecido, indica isso em "missing_information".
+- Preenche "certificates_validity" para CADA certificado/laudo que consigas ler (anexado ou da Base de Conhecimento). Compara a data de validade com a DATA DE HOJE (${today}): já passou → status "expirado"; sem data de validade legível → "sem_data"; documento ilegível/incompleto → "ilegivel"; caso contrário → "valido".`;
 }
 
 serve(async (req) => {
@@ -518,6 +602,9 @@ serve(async (req) => {
       .update({ status: "analyzing", updated_at: new Date().toISOString() })
       .eq("id", approval_id);
 
+    // Data de hoje (para o modelo aferir validade/caducidade dos certificados).
+    const todayISO = new Date().toISOString().slice(0, 10);
+
     const content: any[] = [];
 
     // 0. Email do empreiteiro (print/screenshot) — OBRIGATÓRIO, primeiro bloco visual
@@ -583,54 +670,75 @@ serve(async (req) => {
       });
     }
 
-    // 4. Certificates (max 5)
-    if (certificates_base64 && certificates_base64.length > 0) {
-      for (const cert of certificates_base64.slice(0, 5)) {
-        const isImage = cert.type && cert.type.startsWith('image/');
-        content.push({
-          type: isImage ? "image" : "document",
-          source: { type: "base64", media_type: isImage ? cert.type : "application/pdf", data: cert.base64 },
-        });
-        content.push({
-          type: "text",
-          text: `[CERTIFICADO/LAUDO: ${cert.name}]`,
-        });
+    // 4 + 5. Certificados e documentos de fabricante — SEM corte fixo (era slice(0,5)).
+    // Orçamento de tamanho (~20 MB de base64) para não exceder o limite do pedido
+    // Anthropic (~32 MB). O que ficar de fora é REPORTADO, nunca descartado em silêncio.
+    const ATTACH_BUDGET = 20 * 1024 * 1024; // chars de base64 no corpo do pedido
+    let attachBytes = 0;
+    const analyzedCerts: string[] = [];
+    const skippedCerts: Array<{ name: string; reason: string }> = [];
+    const analyzedMfg: string[] = [];
+    const skippedMfg: Array<{ name: string; reason: string }> = [];
+
+    for (const cert of (certificates_base64 || [])) {
+      const size = (cert.base64 || "").length;
+      if (attachBytes + size > ATTACH_BUDGET) {
+        skippedCerts.push({ name: cert.name, reason: "orçamento de tamanho do pedido" });
+        continue;
       }
+      attachBytes += size;
+      const isImage = cert.type && cert.type.startsWith('image/');
+      content.push({
+        type: isImage ? "image" : "document",
+        source: { type: "base64", media_type: isImage ? cert.type : "application/pdf", data: cert.base64 },
+      });
+      content.push({ type: "text", text: `[CERTIFICADO/LAUDO: ${cert.name}]` });
+      analyzedCerts.push(cert.name);
     }
 
-    // 5. Manufacturer docs (max 5)
-    if (manufacturer_docs_base64 && manufacturer_docs_base64.length > 0) {
-      for (const mdoc of manufacturer_docs_base64.slice(0, 5)) {
-        const isImage = mdoc.type && mdoc.type.startsWith('image/');
-        content.push({
-          type: isImage ? "image" : "document",
-          source: { type: "base64", media_type: isImage ? mdoc.type : "application/pdf", data: mdoc.base64 },
-        });
-        content.push({
-          type: "text",
-          text: `[DOCUMENTO DO FABRICANTE: ${mdoc.name}]`,
-        });
+    for (const mdoc of (manufacturer_docs_base64 || [])) {
+      const size = (mdoc.base64 || "").length;
+      if (attachBytes + size > ATTACH_BUDGET) {
+        skippedMfg.push({ name: mdoc.name, reason: "orçamento de tamanho do pedido" });
+        continue;
       }
+      attachBytes += size;
+      const isImage = mdoc.type && mdoc.type.startsWith('image/');
+      content.push({
+        type: isImage ? "image" : "document",
+        source: { type: "base64", media_type: isImage ? mdoc.type : "application/pdf", data: mdoc.base64 },
+      });
+      content.push({ type: "text", text: `[DOCUMENTO DO FABRICANTE: ${mdoc.name}]` });
+      analyzedMfg.push(mdoc.name);
     }
+
+    if (skippedCerts.length > 0 || skippedMfg.length > 0) {
+      console.warn(`PAM: anexos fora do orçamento — certs=${skippedCerts.length}, mfg=${skippedMfg.length}`);
+    }
+    console.log(`PAM: certs analisados ${analyzedCerts.length}/${certificates_base64?.length || 0}, mfg ${analyzedMfg.length}/${manufacturer_docs_base64?.length || 0}`);
 
     // 6. Fetch knowledge from Eng. Silva's project knowledge base (retrieval híbrido + fallback legacy)
-    let knowledgeContext = "";
+    let knowledge: KnowledgeResult = { context: "", sources: [], hasContractual: false, ceForCategoryFound: false };
     let retrievalMode = "hybrid";
     try {
       // materialQuery: sem dados de material extraídos antes da análise, usamos a categoria.
       const materialQuery = material_category;
-      knowledgeContext = await fetchProjectKnowledgeHybrid(
+      knowledge = await fetchProjectKnowledgeHybrid(
         supabase, obra_id, material_category, user_id, materialQuery,
       );
-      console.log(`[PAM retrieval] hybrid OK, context length: ${knowledgeContext.length}`);
+      console.log(`[PAM retrieval] hybrid OK, context length: ${knowledge.context.length}, sources: ${knowledge.sources.length}`);
     } catch (hybridErr) {
       console.error(`[PAM retrieval] hybrid FAILED, fallback to legacy:`, hybridErr);
       retrievalMode = "legacy";
-      knowledgeContext = await fetchProjectKnowledgeLegacy(
+      // Legacy agora devolve KnowledgeResult (ver ponto 4): força-inclui contratuais por
+      // specialty e traz a lista de fontes + sinais de aviso — logo os banners de
+      // contratual/CE também funcionam neste caminho de fallback.
+      knowledge = await fetchProjectKnowledgeLegacy(
         supabase, obra_id, material_category, user_id,
       );
-      console.log(`[PAM retrieval] legacy fallback, context length: ${knowledgeContext.length}`);
+      console.log(`[PAM retrieval] legacy fallback, context length: ${knowledge.context.length}, sources: ${knowledge.sources.length}`);
     }
+    const knowledgeContext = knowledge.context;
     const hasKnowledge = knowledgeContext.length > 0;
 
     console.log(`PAM: Knowledge context (${retrievalMode}): ${hasKnowledge ? `${knowledgeContext.length} chars` : "none"}`);
@@ -671,7 +779,7 @@ DOIS OUTPUTS OBRIGATÓRIOS:
 1. O JSON técnico completo (para relatório interno da fiscalização)
 2. Dentro do JSON, o campo "email_response" com o corpo do email de resposta ao empreiteiro (curto, directo, humano — o fiscal copia e envia)
 
-${getAnalysisPrompt(material_category)}`,
+${getAnalysisPrompt(material_category, todayISO)}`,
     });
 
     // 8. Build system prompt with knowledge context
@@ -792,6 +900,16 @@ Responde SEMPRE em português europeu.`;
         conditions: ["Revisão manual obrigatória"],
       };
     }
+
+    // Metadados AUTORITATIVOS (do NOSSO código, não do modelo) — transparência + avisos.
+    analysis.sources_consulted = knowledge.sources;
+    analysis.retrieval_path = retrievalMode;
+    analysis.no_contractual_in_context = !knowledge.hasContractual && !mqt_base64 && !ce_base64 && !contract_base64;
+    analysis.ce_for_category_missing = !knowledge.ceForCategoryFound && !ce_base64;
+    analysis.attachments_processing = {
+      certificates: { received: (certificates_base64?.length || 0), analyzed: analyzedCerts, skipped: skippedCerts },
+      manufacturer_docs: { received: (manufacturer_docs_base64?.length || 0), analyzed: analyzedMfg, skipped: skippedMfg },
+    };
 
     // Update the approval record
     await supabase
