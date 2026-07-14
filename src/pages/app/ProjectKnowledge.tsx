@@ -18,11 +18,11 @@ import {
   Collapsible, CollapsibleContent, CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import {
-  BookOpen, Upload, FileText, Loader2, Building2, Trash2, CheckCircle2, RotateCcw, ChevronDown, ChevronRight, Brain,
+  BookOpen, Upload, FileText, Loader2, Building2, Trash2, CheckCircle2, RotateCcw, ChevronDown, ChevronRight, Brain, Share2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { pt } from 'date-fns/locale';
-import { bridgeToIncompaticheck } from '@/lib/incompaticheckBridge';
+import { bridgeToIncompaticheck, specialtyToIcType, rebridgeKnowledgeDoc } from '@/lib/incompaticheckBridge';
 
 const PROJECT_SPECIALTIES = [
   'Topografia', 'Arquitectura', 'Estrutural', 'Fundações', 'Rede Enterrada',
@@ -91,6 +91,7 @@ export default function ProjectKnowledge() {
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [rebridgingSpecialty, setRebridgingSpecialty] = useState<string | null>(null);
   const [expandedDocs, setExpandedDocs] = useState<Set<string>>(new Set());
   const [batchProcessing, setBatchProcessing] = useState(false);
 
@@ -159,6 +160,35 @@ export default function ProjectKnowledge() {
     syncObraToSilva(obra);
   };
 
+  // Re-bridge em lote: disponibiliza no IncompatiCheck os documentos JÁ na KB
+  // desta especialidade. Idempotente; erros por documento por extenso, sem abortar.
+  const handleRebridgeSpecialty = async (specialty: string, docs: KnowledgeDoc[]) => {
+    if (!selectedObra || !user) return;
+    if (!specialtyToIcType(specialty)) {
+      toast.info(`A especialidade "${specialty}" não tem correspondência no IncompatiCheck.`);
+      return;
+    }
+    setRebridgingSpecialty(specialty);
+    let ok = 0, existiam = 0, falhas = 0;
+    for (const doc of docs) {
+      try {
+        const r = await rebridgeKnowledgeDoc(doc, selectedObra.id, user.id);
+        if (r.status === 'ok') ok++;
+        else if (r.status === 'skipped-exists') existiam++;
+        else if (r.status === 'error') {
+          falhas++;
+          toast.error(`"${doc.document_name}" não foi para o IncompatiCheck: ${r.error}`);
+        }
+      } catch (err: any) {
+        falhas++;
+        console.error('REBRIDGE: erro inesperado em', doc.document_name, err);
+        toast.error(`"${doc.document_name}" falhou: ${err.message}`);
+      }
+    }
+    setRebridgingSpecialty(null);
+    toast.success(`IncompatiCheck: ${ok} disponibilizado(s), ${existiam} já existia(m), ${falhas} falha(s).`);
+  };
+
   // Upload
   const handleUpload = async () => {
     if (!selectedObra || !user || !uploadSpecialty || uploadFiles.length === 0) return;
@@ -200,12 +230,17 @@ export default function ProjectKnowledge() {
           processDocument(insertData.id, file, file.name, uploadSpecialty);
         }
 
-        // Ponte de upload único: só peças desenhadas (especialidades de projeto).
+        // Ponte de upload único: só especialidades com correspondência no IncompatiCheck.
         // Falha aqui NÃO desfaz o upload da KB — reporta por extenso.
-        if (bridgeToIncompati && PROJECT_SPECIALTIES.includes(uploadSpecialty)) {
-          const bridge = await bridgeToIncompaticheck(file, uploadSpecialty, selectedObra.id, user.id);
-          if (!bridge.ok) {
-            toast.error(`"${file.name}" ficou na Base de Conhecimento mas NÃO no IncompatiCheck: ${bridge.error}`);
+        if (bridgeToIncompati) {
+          const icType = specialtyToIcType(uploadSpecialty);
+          if (!icType) {
+            toast.info(`"${file.name}" ficou na Base de Conhecimento. A especialidade "${uploadSpecialty}" não tem correspondência no IncompatiCheck, por isso não foi disponibilizada lá.`);
+          } else {
+            const bridge = await bridgeToIncompaticheck(file, icType, selectedObra.id, user.id);
+            if (!bridge.ok) {
+              toast.error(`"${file.name}" ficou na Base de Conhecimento mas NÃO no IncompatiCheck: ${bridge.error}`);
+            }
           }
         }
       }
@@ -470,6 +505,19 @@ export default function ProjectKnowledge() {
                       <BookOpen className="w-4 h-4 text-amber-500" />
                       {specialty}
                       <Badge variant="secondary" className="ml-auto">{docs.length}</Badge>
+                      {specialtyToIcType(specialty) && (
+                        <Button
+                          variant="outline" size="sm" className="h-7 gap-1"
+                          onClick={() => handleRebridgeSpecialty(specialty, docs)}
+                          disabled={rebridgingSpecialty === specialty}
+                          title="Disponibilizar estes documentos para o IncompatiCheck (idempotente)"
+                        >
+                          {rebridgingSpecialty === specialty
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : <Share2 className="w-3.5 h-3.5" />}
+                          IncompatiCheck
+                        </Button>
+                      )}
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2">
