@@ -179,12 +179,16 @@ async function fetchProjectKnowledgeLegacy(
           const hay = ((d.document_name || "") + " " + (d.summary || "")).toLowerCase();
           return keywords.some((kw: string) => hay.includes(kw));
         });
+    const mqtConsulted = finalDocs
+      .filter((d: any) => d.specialty === "Mapa de Quantidades (MQT)")
+      .map((d: any) => d.document_name);
 
     return {
       context,
       sources,
       hasContractual: contractualDocs.length > 0,
       ceForCategoryFound,
+      mqt_consulted: mqtConsulted,
     };
   } catch (err) {
     console.error("PAM-KNOWLEDGE: Error fetching knowledge:", err);
@@ -244,6 +248,7 @@ interface KnowledgeResult {
   sources: Array<{ document_name: string; origin: "contratual" | "certificado" | "semantica" }>;
   hasContractual: boolean;      // entrou algum CE/MQT/Contrato/Condições Técnicas no contexto?
   ceForCategoryFound: boolean;  // existe Caderno de Encargos que cobre esta categoria de material?
+  mqt_consulted?: string[];     // nomes dos MQT (specialty "Mapa de Quantidades (MQT)") no contexto
 }
 
 // ── Retrieval híbrido: Via A determinística (certificados + contratuais) + Via B semântica ──
@@ -392,12 +397,16 @@ async function fetchProjectKnowledgeHybrid(
         const hay = normalizeForMatch((d.document_name || "") + " " + (d.summary || ""));
         return keywords.some((kw) => hay.includes(kw));
       });
+  const mqtConsulted = contracts
+    .filter((d: any) => d.specialty === "Mapa de Quantidades (MQT)")
+    .map((d: any) => d.document_name);
 
   return {
     context,
     sources,
     hasContractual: contracts.length > 0,
     ceForCategoryFound,
+    mqt_consulted: mqtConsulted,
   };
 }
 
@@ -491,6 +500,14 @@ Responde com o JSON estruturado abaixo (sem markdown, sem backticks, sem texto a
       "note": "observação curta (ex: caduca a meio da obra)"
     }
   ],
+  "mqt_confrontation": [
+    {
+      "article": "artigo do MQT/CE citado no PAM (ex: 1.3.4)",
+      "mqt_specifies": "o que o MQT/CE exige, se disponível no contexto; senão null",
+      "proposed": "o que o empreiteiro propõe para esse artigo",
+      "verdict": "cumpre" | "nao_cumpre" | "mqt_nao_consultado"
+    }
+  ],
   "practical_concerns": [
     "Preocupação prática 1",
     "Preocupação prática 2"
@@ -519,6 +536,11 @@ REGRAS PARA O EMAIL DE RESPOSTA:
 - Fecha com algo como "Ficamos ao dispor" ou "Aguardamos" — natural, não robótico
 - NUNCA incluas: números de DC, referências de norma, códigos PSG, percentagens de confiança, ou linguagem técnica que o empreiteiro não precisa. Isso fica no relatório interno.
 - O empreiteiro quer ACÇÃO, não informação: "enviem certificado renovado da Sevillana antes de encomendar" em vez de "o PSG-004/2021 referente ao DC 391 LNEC caduca em 06/04/2026 conforme E 460-2017"
+
+CONFRONTO CONTRATUAL (OBRIGATÓRIO quando o PAM cita o MQT/CE):
+- Identifica no PAM os artigos do MQT/Caderno de Encargos citados (ex.: "Art.º 1.3.4-1.3.6", "1.4.5-1.4.9", "1.4.11", "Conforme MQT").
+- Para CADA artigo citado, confronta o que o MQT/CE especifica (do contexto disponível) com o que o empreiteiro propõe → preenche "mqt_confrontation".
+- HONESTIDADE (inviolável): se o conteúdo do artigo do MQT/CE NÃO estiver no contexto (só tens o nome/resumo do documento, não a especificação do artigo), NÃO escrevas "conforme MQT" nem finjas o confronto — DECLARA "MQT não consultado ao nível do artigo <X>" em "missing_information", e uma rejeição não pode assentar num confronto que não fizeste.
 
 REGRAS DE FIABILIDADE (INVIOLÁVEIS):
 - NUNCA inventes nomes de fornecedores, números de certificados PSG, números de DC, ou datas. Usa APENAS dados que encontras nos documentos da Base de Conhecimento.
@@ -768,7 +790,7 @@ FONTES DISPONÍVEIS (usa TODAS as que existirem):
 2. O Pedido de Aprovação de Materiais do empreiteiro (PDF acima)
 3. Caderno de Encargos, MQT, Contrato (PDFs acima, se existirem)
 4. Certificados e documentos de fabricante anexados directamente (se existirem)
-5. Base de Conhecimento do Projecto (no system prompt) — certificados PSG, DCs LNEC, fichas técnicas já processados
+5. Base de Conhecimento do Projecto (no system prompt) — inclui certificados PSG, DCs LNEC e fichas técnicas, MAS TAMBÉM os documentos contratuais processados: Caderno de Encargos, Mapa de Quantidades (MQT) e Contrato (como resumos). Se o PAM cita artigos do MQT/CE, procura-os nestes resumos.
 
 REGRA FUNDAMENTAL: Quando o PAM refere "certificados em anexo" ou "conforme certificados", os certificados podem não estar no PDF do PAM mas sim na Base de Conhecimento. O fiscal carregou-os separadamente. Cruza SEMPRE o PAM com os certificados da Base de Conhecimento.
 
@@ -904,6 +926,7 @@ Responde SEMPRE em português europeu.`;
     // Metadados AUTORITATIVOS (do NOSSO código, não do modelo) — transparência + avisos.
     analysis.sources_consulted = knowledge.sources;
     analysis.retrieval_path = retrievalMode;
+    analysis.mqt_consulted = knowledge.mqt_consulted || [];
     analysis.no_contractual_in_context = !knowledge.hasContractual && !mqt_base64 && !ce_base64 && !contract_base64;
     analysis.ce_for_category_missing = !knowledge.ceForCategoryFound && !ce_base64;
     analysis.attachments_processing = {
