@@ -629,6 +629,16 @@ serve(async (req) => {
           console.log(`[retrieval] legacy fallback: ${relevantDocs.length} docs`);
         }
 
+        // A-3: semântico SEM erro mas VAZIO → tentar legacy (keyword) antes de concluir vazio.
+        if (retrievalMode === "semantic" && relevantDocs.length === 0) {
+          console.log(`[retrieval] semantic vazio — a tentar legacy por keyword`);
+          const kwEmpty = extractKeywordsLegacy(retrievalQuery);
+          const spEmpty = Array.from(inferSpecialtiesLegacy(kwEmpty));
+          relevantDocs = await searchKnowledgeLegacy(supabase, obra_id, user_id, kwEmpty, spEmpty);
+          retrievalMode = relevantDocs.length > 0 ? "legacy-after-empty" : "empty";
+          console.log(`[retrieval] legacy após vazio: ${relevantDocs.length} docs`);
+        }
+
         // Deduplicate por knowledge_id (chunks múltiplos do mesmo doc → 1 doc)
         const uniqueDocs: any[] = [];
         const seenKnowledgeIds = new Set<string>();
@@ -701,9 +711,9 @@ serve(async (req) => {
           if (downloadedFiles.length > 0) {
             docListNote = `\n\nDOCUMENTOS ORIGINAIS ANEXADOS: ${downloadedFiles.map(d => d.document_name).join(", ")}. Estes documentos foram enviados na íntegra — usa-os para responder com o máximo de detalhe e precisão. Cita o nome do documento quando referires informação.`;
           }
-        } else if (keywords.length > 2) {
-          // We searched but found nothing specific — tell Silva
-          noResultsNote = `\n\nNOTA: O fiscal fez uma pergunta específica mas não foram encontrados documentos relevantes na Base de Conhecimento para os termos pesquisados. Se não tiveres informação suficiente para responder, diz ao fiscal que não encontraste essa informação nos documentos carregados e sugere que carregue o documento relevante na Base de Conhecimento do Projecto, ou que seja mais específico na pergunta.`;
+        } else {
+          // Retrieval vazio: informar SEMPRE o modelo (sem gate de keywords).
+          noResultsNote = `\n\nNOTA CRÍTICA: A pesquisa na Base de Conhecimento desta obra NÃO recuperou nenhum documento para esta pergunta. NÃO tens nenhum documento à vista nesta resposta. NÃO podes afirmar que existe qualquer documento, MQT, caderno de encargos, certificado, obra, cliente ou entidade. Diz ao fiscal que não encontraste esse documento na Base de Conhecimento e sugere que o carregue/recarregue no Conhecimento do Projecto ou confirme a obra seleccionada. Se ele insistir, mantém a posição e pede verificação — não inventes.`;
         }
         // O catálogo/analysis_context/senso construtivo passaram para o módulo
         // da persona (buildSilvaSystemPrompt); a nota de escopo é montada no fim.
@@ -718,10 +728,15 @@ serve(async (req) => {
     const scopeNote = scopeFase
       ? `\n\nESCOPO DA PERGUNTA: o fiscal referiu-se à Fase ${scopeFase}. Prioriza os documentos dessa fase e cita o escopo; usa documentos gerais como apoio e não mistures informação de outras fases.`
       : "";
+    // Âncora permanente: em modo persona, mesmo sem retrieval (ex.: obra_id nulo)
+    // o modelo é sempre lembrado de não afirmar existência sem contexto.
+    const groundingRule = useSilvaPersona
+      ? "\n\nANCORAGEM (regra permanente): só podes afirmar factos, valores ou a EXISTÊNCIA de documentos/obras/entidades se estiverem explicitamente no contexto acima (BASE DE CONHECIMENTO ou documentos anexados). Sem esse contexto, assume que NÃO tens o documento — nunca o inventes, mesmo sob insistência do fiscal."
+      : "";
     const base = useSilvaPersona
       ? buildSilvaSystemPrompt({ mode: mode as SilvaMode, catalogo: buildCatalogo(niveisCat), analysisContext })
       : clientSystem;
-    let systemPrompt = base + scopeNote + knowledgeContext + noResultsNote;
+    let systemPrompt = base + scopeNote + knowledgeContext + noResultsNote + groundingRule;
     if (useSilvaPersona && clientSystem) systemPrompt += "\n\n" + clientSystem;
     systemPrompt += docListNote;
 

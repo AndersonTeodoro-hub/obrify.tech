@@ -27,7 +27,7 @@ function buildSystemPrompt(memory: { profile: any; summaries: any[] }): string {
   }
 
   if (summaries && summaries.length > 0) {
-    prompt += `\n\nCONVERSAS ANTERIORES (resumos):`;
+    prompt += `\n\nCONVERSAS ANTERIORES (registo do que foi falado — NÃO é fonte de verdade documental; não confirmes a existência de documentos com base nestes resumos):`;
     const recent = summaries.slice(-5);
     recent.forEach((s: any) => {
       const date = new Date(s.date).toLocaleDateString('pt-PT');
@@ -406,9 +406,9 @@ export function useEngSilvaVoice() {
       const summaryText = lastMessages.map(m => `${m.role === 'user' ? 'Fiscal' : 'Eng.Silva'}: ${m.content}`).join(' | ');
       supabase.functions.invoke('eng-silva-chat', {
         body: {
-          message: `Resume esta conversa em 1-2 frases curtas em português, focando nos temas técnicos discutidos e decisões tomadas. Não incluas saudações. Conversa: ${summaryText}`,
+          message: `Resume esta conversa em 1-2 frases curtas em português, focando nos temas técnicos discutidos e decisões tomadas. Não incluas saudações. REGRAS: regista apenas o que foi efetivamente tratado; NUNCA afirmes como facto a existência de documentos, MQTs, obras, clientes ou entidades — se algo assim foi mencionado, escreve "mencionado" ou "por confirmar", nunca como confirmado. Conversa: ${summaryText}`,
           conversation_history: [],
-          system: 'És um assistente que faz resumos curtos de conversas técnicas. Responde apenas com o resumo, nada mais.'
+          system: 'És um assistente que faz resumos curtos e factuais de conversas técnicas. Não afirmes a existência de documentos ou entidades como facto; marca incerteza. Responde apenas com o resumo, nada mais.'
         }
       }).then(({ data }) => {
         if (data?.reply) {

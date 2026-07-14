@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders } from "../_shared/cors.ts";
+import { toSpeakablePt } from "../_shared/speakableNumbers.ts";
 
 serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
@@ -27,6 +28,8 @@ serve(async (req) => {
     if (text.length > 5000) {
       return new Response(JSON.stringify({ error: "text exceeds max length 5000" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+    // Normaliza números para fala pt-PT APENAS no texto enviado ao TTS.
+    const speakText = toSpeakablePt(text);
     const apiKey = Deno.env.get("ELEVENLABS_API_KEY");
     const voiceId = Deno.env.get("ELEVENLABS_VOICE_ID");
 
@@ -39,7 +42,7 @@ serve(async (req) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          text,
+          text: speakText,
           model_id: "eleven_flash_v2_5",
           voice_settings: {
             stability: 0.5,
