@@ -267,7 +267,8 @@ async function fetchProjectKnowledgeHybrid(
     .select("id, document_name, document_type, specialty, summary, key_elements")
     .eq("obra_id", obraId)
     .eq("processed", true)
-    .eq("specialty", HYBRID_CERT_SPECIALTY);
+    .eq("specialty", HYBRID_CERT_SPECIALTY)
+    .order("document_name", { ascending: true });
   if (userId) certQuery = certQuery.eq("user_id", userId);
   const { data: allCerts, error: certErr } = await certQuery;
   if (certErr) throw new Error(`Via A certs failed: ${certErr.message}`);
@@ -287,7 +288,8 @@ async function fetchProjectKnowledgeHybrid(
     .select("id, document_name, document_type, specialty, summary, key_elements")
     .eq("obra_id", obraId)
     .eq("processed", true)
-    .in("specialty", HYBRID_CONTRACT_SPECIALTIES);
+    .in("specialty", HYBRID_CONTRACT_SPECIALTIES)
+    .order("document_name", { ascending: true });
   if (userId) contractQuery = contractQuery.eq("user_id", userId);
   const { data: contractDocs, error: contractErr } = await contractQuery;
   if (contractErr) throw new Error(`Via A contracts failed: ${contractErr.message}`);
@@ -410,7 +412,10 @@ async function fetchProjectKnowledgeHybrid(
   };
 }
 
-function getAnalysisPrompt(material_category: string, today: string): string {
+function getAnalysisPrompt(material_category: string, today: string, fiscalName: string | null, fiscalCompany: string | null): string {
+  const assinaturaRegra = fiscalName
+    ? `- ASSINATURA: assina EXACTAMENTE com "${fiscalName}"${fiscalCompany ? `, ${fiscalCompany}` : ""}. NUNCA inventes outro nome, cargo ou empresa.`
+    : `- ASSINATURA: NÃO tens o nome do fiscal. NUNCA inventes um nome próprio. Fecha com fórmula neutra ("A Fiscalização") — nenhuma identidade fabricada.`;
   return `Analisa este Pedido de Aprovação de Materiais (PAM) para a categoria "${material_category}".
 
 DATA DE HOJE: ${today}. Usa esta data para aferir a validade/caducidade de cada certificado e laudo.
@@ -446,6 +451,13 @@ Faz pelo menos uma pesquisa por cada DC diferente. Depois de completares as pesq
 
 Passo 6 — Gerar o email de resposta.
 Olha para o print do email do empreiteiro. Nota quem escreveu, como se dirige, e o tom. Agora escreve o corpo do email de resposta como se fosses o fiscal — curto, directo, humano. O empreiteiro quer saber TRÊS coisas: (1) está aprovado? (2) se não, porquê? (3) o que precisa de fazer? Não precisa de saber normas, números de DC, ou detalhes técnicos — isso fica no relatório interno.
+
+CRITÉRIOS DE VEREDITO (o veredito DERIVA destas regras, não do estilo):
+- "rejected" SE qualquer: material NÃO adequado (adequacy_assessment.is_adequate=false); DC LNEC revogado/substituído confirmado por web_search; certificado expirado para o produto a fornecer; ausência total de documentação do(s) fornecedor(es) proposto(s).
+- "approved_with_reservations" SE, não havendo motivo de rejeição, qualquer: certificado/DoP/DC caduca dentro do período previsível da obra; dúvida de adequação ao ambiente (classes de exposição, agressividade, solo/mar) por esclarecer; MQT/CE citado no PAM mas NÃO consultado ao nível do artigo (mqt_confrontation "mqt_nao_consultado" ou missing_information sobre o CE); ensaios de recepção exigidos e não previstos no PAM; rastreabilidade entre múltiplos fornecedores não garantida; qualquer compliance_check "a_verificar".
+- "approved" (liso) SÓ SE: adequação confirmada, TODOS os fornecedores com documentação válida e vigente para o produto específico, DCs LNEC confirmados em vigor por web_search, e nenhuma reserva acima.
+- REGRA DE OURO: na dúvida entre "approved" e "approved_with_reservations", escolhe SEMPRE "approved_with_reservations" e escreve a condição em "conditions". Um parecer técnico nunca aprova liso o que não confirmou.
+- COERÊNCIA: is_adequate=false ⇒ "rejected". Se "conditions" não estiver vazio ⇒ NÃO pode ser "approved" liso.
 
 FORMATO DA RESPOSTA:
 Responde com o JSON estruturado abaixo (sem markdown, sem backticks, sem texto antes ou depois):
@@ -536,6 +548,7 @@ REGRAS PARA O EMAIL DE RESPOSTA:
 - Fecha com algo como "Ficamos ao dispor" ou "Aguardamos" — natural, não robótico
 - NUNCA incluas: números de DC, referências de norma, códigos PSG, percentagens de confiança, ou linguagem técnica que o empreiteiro não precisa. Isso fica no relatório interno.
 - O empreiteiro quer ACÇÃO, não informação: "enviem certificado renovado da Sevillana antes de encomendar" em vez de "o PSG-004/2021 referente ao DC 391 LNEC caduca em 06/04/2026 conforme E 460-2017"
+${assinaturaRegra}
 
 CONFRONTO CONTRATUAL (OBRIGATÓRIO quando o PAM cita o MQT/CE):
 - Identifica no PAM os artigos do MQT/Caderno de Encargos citados (ex.: "Art.º 1.3.4-1.3.6", "1.4.5-1.4.9", "1.4.11", "Conforme MQT").
@@ -558,11 +571,16 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Refs para o catch repor 'pending' se algo rebentar DEPOIS de adquirir o lock.
+  let supabaseRef: any = null;
+  let lockedApprovalId: string | null = null;
+
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
+    supabaseRef = supabase;
 
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
@@ -601,6 +619,9 @@ serve(async (req) => {
     const material_category = body.material_category;
     const obra_id = body.obra_id;
     const user_id = body.user_id || null;
+    // Identidade REAL do fiscal (do cliente) para assinar o email — nunca inventada pelo modelo.
+    const fiscal_name = (typeof body.fiscal_name === "string" && body.fiscal_name.trim()) ? body.fiscal_name.trim() : null;
+    const fiscal_company = (typeof body.fiscal_company === "string" && body.fiscal_company.trim()) ? body.fiscal_company.trim() : null;
     const empreiteiro_email_image = body.empreiteiro_email_image;
     const empreiteiro_email_mime = body.empreiteiro_email_mime;
 
@@ -618,11 +639,26 @@ serve(async (req) => {
       throw new Error("Missing required fields: approval_id, pdm_base64, material_category, obra_id");
     }
 
-    // Update status to analyzing
-    await supabase
+    // Lock atómico: só adquire se NÃO estiver já 'analyzing'. UPDATE único (atómico à
+    // linha) → duas invocações simultâneas não passam ambas; a 2ª afecta 0 linhas → 409.
+    const { data: locked, error: lockErr } = await supabase
       .from("material_approvals")
       .update({ status: "analyzing", updated_at: new Date().toISOString() })
-      .eq("id", approval_id);
+      .eq("id", approval_id)
+      .neq("status", "analyzing")
+      .select("id");
+    if (lockErr) {
+      // Erro ruidoso — falha ao adquirir o lock nunca é mascarada.
+      throw new Error(`Falha ao adquirir lock de análise: ${lockErr.message}`);
+    }
+    if (!locked || locked.length === 0) {
+      console.warn(`PAM: análise JÁ em curso para ${approval_id} — invocação paralela rejeitada (409).`);
+      return new Response(
+        JSON.stringify({ error: "Já existe uma análise em curso para este PAM. Aguarde a conclusão." }),
+        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    lockedApprovalId = approval_id; // a partir daqui o catch externo deve repor 'pending'
 
     // Data de hoje (para o modelo aferir validade/caducidade dos certificados).
     const todayISO = new Date().toISOString().slice(0, 10);
@@ -801,7 +837,7 @@ DOIS OUTPUTS OBRIGATÓRIOS:
 1. O JSON técnico completo (para relatório interno da fiscalização)
 2. Dentro do JSON, o campo "email_response" com o corpo do email de resposta ao empreiteiro (curto, directo, humano — o fiscal copia e envia)
 
-${getAnalysisPrompt(material_category, todayISO)}`,
+${getAnalysisPrompt(material_category, todayISO, fiscal_name, fiscal_company)}`,
     });
 
     // 8. Build system prompt with knowledge context
@@ -876,6 +912,7 @@ Responde SEMPRE em português europeu.`;
       apiKey: anthropicKey,
       model: "claude-sonnet-4-5-20250929",
       maxTokens: 16000,
+      temperature: 0, // parecer técnico é reprodutível, não escrita criativa (era default 1.0)
       system: systemPrompt,
       messages: [{ role: "user", content }],
       tools: [{ type: "web_search_20250305", name: "web_search" }],
@@ -993,6 +1030,16 @@ Responde SEMPRE em português europeu.`;
 
   } catch (error: any) {
     console.error("PAM ERROR:", error);
+    // Orphan-guard: se o lock 'analyzing' já era nosso, repõe 'pending' — nunca deixa preso.
+    if (supabaseRef && lockedApprovalId) {
+      try {
+        await supabaseRef.from("material_approvals")
+          .update({ status: "pending", updated_at: new Date().toISOString() })
+          .eq("id", lockedApprovalId);
+      } catch (resetErr) {
+        console.error("PAM: falha ao repor 'pending' no catch:", resetErr);
+      }
+    }
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

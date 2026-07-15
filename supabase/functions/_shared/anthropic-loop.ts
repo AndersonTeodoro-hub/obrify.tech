@@ -19,6 +19,7 @@ export interface ClaudeLoopOptions {
   toolChoice?: any; // ex.: {type:"auto"}, {type:"tool", name:"web_search"}
   maxIterations?: number; // default 5
   logPrefix?: string; // default "[Claude loop]"
+  temperature?: number; // omitido → default da API (1.0). Parecer técnico deve passar 0.
 }
 
 export interface ClaudeLoopResult {
@@ -60,6 +61,7 @@ export async function runClaudeWithContinuation(
           max_tokens: options.maxTokens,
           messages,
           system: options.system,
+          ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
           ...(options.tools ? { tools: options.tools } : {}),
           ...(options.toolChoice ? { tool_choice: options.toolChoice } : {}),
         }),
