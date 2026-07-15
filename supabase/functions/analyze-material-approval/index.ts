@@ -450,7 +450,7 @@ Olha para o print do email do empreiteiro. Nota quem escreveu, como se dirige, e
 FORMATO DA RESPOSTA:
 Responde com o JSON estruturado abaixo (sem markdown, sem backticks, sem texto antes ou depois):
 {
-  "recommendation": "approved" | "approved_with_reservations" | "rejected",
+  "recommendation": "um de: approved, approved_with_reservations, rejected",
   "confidence": numero 0-100,
   "material_proposed": {
     "name": "nome completo do material proposto",
@@ -492,11 +492,11 @@ Responde com o JSON estruturado abaixo (sem markdown, sem backticks, sem texto a
   "certificates_validity": [
     {
       "file": "nome exacto do ficheiro do certificado/laudo",
-      "type": "DoP" | "certificado_CE" | "laudo_ensaio" | "ficha_tecnica" | "outro",
+      "type": "um de: DoP, certificado_CE, laudo_ensaio, ficha_tecnica, outro",
       "issuer": "entidade emissora",
       "issue_date": "DD/MM/AAAA ou null",
       "expiry_date": "DD/MM/AAAA ou null",
-      "status": "valido" | "expirado" | "sem_data" | "ilegivel",
+      "status": "um de: valido, expirado, sem_data, ilegivel",
       "note": "observação curta (ex: caduca a meio da obra)"
     }
   ],
@@ -505,7 +505,7 @@ Responde com o JSON estruturado abaixo (sem markdown, sem backticks, sem texto a
       "article": "artigo do MQT/CE citado no PAM (ex: 1.3.4)",
       "mqt_specifies": "o que o MQT/CE exige, se disponível no contexto; senão null",
       "proposed": "o que o empreiteiro propõe para esse artigo",
-      "verdict": "cumpre" | "nao_cumpre" | "mqt_nao_consultado"
+      "verdict": "um de: cumpre, nao_cumpre, mqt_nao_consultado"
     }
   ],
   "practical_concerns": [
@@ -875,7 +875,7 @@ Responde SEMPRE em português europeu.`;
     const loopResult = await runClaudeWithContinuation({
       apiKey: anthropicKey,
       model: "claude-sonnet-4-5-20250929",
-      maxTokens: 8000,
+      maxTokens: 16000,
       system: systemPrompt,
       messages: [{ role: "user", content }],
       tools: [{ type: "web_search_20250305", name: "web_search" }],
@@ -892,6 +892,20 @@ Responde SEMPRE em português europeu.`;
     }
 
     const replyText = accumulatedText || "{}";
+
+    // Guarda de truncação: resposta incompleta (max_tokens / cap de iterações) NUNCA vira parecer.
+    if (loopResult.finalStopReason === "max_tokens" || loopResult.hitIterationCap) {
+      console.error("PAM: resposta INCOMPLETA — sem parecer:", JSON.stringify({
+        stop_reason: loopResult.finalStopReason,
+        hit_iteration_cap: loopResult.hitIterationCap,
+        reply_length: replyText.length,
+        reply_tail: replyText.slice(-600),
+      }));
+      await supabase.from("material_approvals")
+        .update({ status: "pending", updated_at: new Date().toISOString() }).eq("id", approval_id);
+      return new Response(JSON.stringify({ error: "Análise falhou: resposta truncada (limite de tokens). Nenhum parecer foi gerado — repita a análise." }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     let analysis;
     try {
@@ -913,14 +927,18 @@ Responde SEMPRE em português europeu.`;
       analysis = JSON.parse(cleaned);
       console.log("PAM: JSON parsed successfully, recommendation:", analysis.recommendation);
     } catch (parseErr) {
-      console.error("PAM: Parse error:", replyText.substring(0, 300));
-      analysis = {
-        recommendation: "approved_with_reservations",
-        justification: "Não foi possível processar a análise automaticamente. Revisão manual necessária.",
-        compliance_checks: [],
-        issues: ["Erro no processamento automático"],
-        conditions: ["Revisão manual obrigatória"],
-      };
+      // Fail-loud: NÃO fabricar veredito. Log completo (head+tail+stop_reason) + erro explícito.
+      console.error("PAM: PARSE FALHOU — sem parecer:", JSON.stringify({
+        message: (parseErr as any)?.message,
+        stop_reason: loopResult.finalStopReason,
+        reply_length: replyText.length,
+        reply_head: replyText.slice(0, 600),
+        reply_tail: replyText.slice(-600),
+      }));
+      await supabase.from("material_approvals")
+        .update({ status: "pending", updated_at: new Date().toISOString() }).eq("id", approval_id);
+      return new Response(JSON.stringify({ error: "Análise falhou: resposta do modelo inválida (JSON não interpretável). Nenhum parecer foi gerado — repita a análise." }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // Metadados AUTORITATIVOS (do NOSSO código, não do modelo) — transparência + avisos.
