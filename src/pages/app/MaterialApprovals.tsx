@@ -102,6 +102,8 @@ export default function MaterialApprovals() {
   // Fiscal notes — isolated per card
   const [fiscalNote, setFiscalNote] = useState<Record<string, string>>({});
   const [savingNote, setSavingNote] = useState(false);
+  // Guarda anti-duplo-disparo por approval id (cliques repetidos sem feedback).
+  const [processing, setProcessing] = useState<Record<string, boolean>>({});
 
   // Email de resposta editável (por approval id)
   const [emailDraft, setEmailDraft] = useState<Record<string, { subject: string; body: string }>>({});
@@ -137,6 +139,14 @@ export default function MaterialApprovals() {
   }, [user, selectedObra]);
 
   useEffect(() => { loadApprovals(); }, [loadApprovals]);
+
+  // Refresh periódico enquanto alguma análise estiver em curso — apanha a conclusão
+  // mesmo sem realtime e faz o badge 'A analisar...' aparecer de facto.
+  useEffect(() => {
+    if (!approvals.some(a => a.status === 'analyzing')) return;
+    const t = setInterval(() => { loadApprovals(); }, 15000);
+    return () => clearInterval(t);
+  }, [approvals, loadApprovals]);
 
   // Load knowledge count for selected obra
   useEffect(() => {
@@ -282,6 +292,10 @@ export default function MaterialApprovals() {
       toast.error('Esta aprovação não tem print do email do empreiteiro. Re-submeta o pedido com o email.');
       return;
     }
+    if (processing[approval.id]) return; // já em curso neste cliente — bloqueia duplo disparo
+    setProcessing(prev => ({ ...prev, [approval.id]: true }));
+    // Optimista: mostra 'A analisar...' já, sem esperar refetch (a UI deixa de parecer parada).
+    setApprovals(prev => prev.map(a => a.id === approval.id ? { ...a, status: 'analyzing' } : a));
     try {
       const { data: pdmData } = await supabase.storage.from('material-approvals').download(approval.pdm_file_path);
       if (!pdmData) throw new Error('Failed to download PAM');
@@ -376,23 +390,24 @@ export default function MaterialApprovals() {
           material_category: approval.material_category,
           obra_id: approval.obra_id,
           user_id: user?.id,
+          fiscal_name: (localStorage.getItem('pam_fiscal_name') || '').trim() || null,
+          fiscal_company: (localStorage.getItem('pam_fiscal_company') || '').trim() || null,
           empreiteiro_email_image: emailBase64,
           empreiteiro_email_mime: empreiteiroEmailMime,
         },
       });
 
       if (invokeError) {
-        // Fail-loud do backend (HTTP 500, outage, erro): o invoke do supabase-js v2
-        // resolve com { error } em vez de rejeitar, por isso tratamos aqui — senão
-        // mostrávamos "Análise concluída!" e o registo ficava preso em "analyzing".
         console.error('PAM analyse error:', invokeError);
-        toast.error('Erro na análise. Tenta novamente em alguns minutos.');
-        // A edge function pôs "analyzing" antes do throw — reverter para pending.
-        await supabase
-          .from('material_approvals')
-          .update({ status: 'pending', updated_at: new Date().toISOString() })
-          .eq('id', approval.id);
-        await loadApprovals();
+        // O backend agora repõe 'pending' em toda a falha (502 + catch externo). Não
+        // forçamos status no cliente para não pisar uma análise paralela legítima (409).
+        const httpStatus = (invokeError as any)?.context?.status;
+        if (httpStatus === 409) {
+          toast.info('Já existe uma análise em curso para este PAM.');
+        } else {
+          toast.error('Erro na análise. Tenta novamente em alguns minutos.');
+        }
+        await loadApprovals(); // fonte de verdade = DB
         return;
       }
 
@@ -402,7 +417,18 @@ export default function MaterialApprovals() {
       toast.error('Erro na análise: ' + err.message);
       await supabase.from('material_approvals').update({ status: 'pending', updated_at: new Date().toISOString() }).eq('id', approval.id);
       await loadApprovals();
+    } finally {
+      setProcessing(prev => { const { [approval.id]: _, ...rest } = prev; return rest; });
     }
+  };
+
+  // Órfão preso em 'analyzing': repõe 'pending' e recarrega. NÃO re-corre — o fiscal
+  // clica "Analisar agora" a seguir se quiser (evita janela de escrita da corrida zombie).
+  const resetStuckAnalysis = async (approval: Approval) => {
+    await supabase.from('material_approvals')
+      .update({ status: 'pending', updated_at: new Date().toISOString() })
+      .eq('id', approval.id);
+    await loadApprovals();
   };
 
   const blobToBase64 = (blob: Blob): Promise<string> =>
@@ -776,14 +802,27 @@ export default function MaterialApprovals() {
                     {(!analysis || a.status === 'pending' || a.status === 'analyzing') ? (
                       <div className="text-center py-4 text-muted-foreground">
                         {a.status === 'analyzing' ? (
-                          <div className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> A analisar documento...</div>
+                          (() => {
+                            const stale = !processing[a.id] && a.updated_at &&
+                              (Date.now() - new Date(a.updated_at).getTime() > 15 * 60 * 1000);
+                            return stale ? (
+                              <div className="space-y-2">
+                                <p className="text-amber-600 dark:text-amber-400">Análise parada há mais de 15 min (provável falha).</p>
+                                <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); resetStuckAnalysis(a); }}>
+                                  Repor
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> A analisar documento...</div>
+                            );
+                          })()
                         ) : (
                           <div className="space-y-2">
                             <p>Análise pendente</p>
                             <Button
                               size="sm"
                               variant="outline"
-                              disabled={!a.email_file_path}
+                              disabled={!a.email_file_path || !!processing[a.id]}
                               title={!a.email_file_path ? 'Falta print do email — re-submeta o pedido com o email do empreiteiro' : undefined}
                               onClick={(e) => { e.stopPropagation(); processApproval(a); }}
                             >
