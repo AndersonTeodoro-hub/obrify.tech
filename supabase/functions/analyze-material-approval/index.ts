@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { voyageEmbed, voyageRerank } from "../_shared/embeddings/voyage-client.ts";
 import { runClaudeWithContinuation } from "../_shared/anthropic-loop.ts";
+import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
 // ── [LEGACY] Fetch knowledge from eng_silva_project_knowledge (keyword scoring) ──
 // Fallback de emergência quando o retrieval híbrido falha (ex.: Voyage/RPC em baixo).
@@ -565,6 +566,26 @@ REGRAS DE FIABILIDADE (INVIOLÁVEIS):
 - Preenche "certificates_validity" para CADA certificado/laudo que consigas ler (anexado ou da Base de Conhecimento). Compara a data de validade com a DATA DE HOJE (${today}): já passou → status "expirado"; sem data de validade legível → "sem_data"; documento ilegível/incompleto → "ilegivel"; caso contrário → "valido".`;
 }
 
+// Descarrega um objecto do bucket material-approvals e devolve base64 (sem newlines) + mime.
+// Erro ruidoso; devolve null e o caller decide (fail-loud nos obrigatórios, skip nos opcionais).
+async function downloadB64(
+  supabase: any,
+  path: string,
+): Promise<{ base64: string; mime: string } | null> {
+  try {
+    const { data, error } = await supabase.storage.from("material-approvals").download(path);
+    if (error || !data) {
+      console.error(`PAM: download FALHOU (${path}):`, error?.message || "sem dados");
+      return null;
+    }
+    const ab = await data.arrayBuffer();
+    return { base64: encodeBase64(ab), mime: data.type || "application/pdf" };
+  } catch (e) {
+    console.error(`PAM: download EXCEPÇÃO (${path}):`, (e as any)?.message || e);
+    return null;
+  }
+}
+
 serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
@@ -596,48 +617,45 @@ serve(async (req) => {
     if (!body.approval_id || typeof body.approval_id !== "string") {
       return new Response(JSON.stringify({ error: "approval_id is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
-    if (!body.material_category || typeof body.material_category !== "string") {
-      return new Response(JSON.stringify({ error: "material_category is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-    if (!body.obra_id || typeof body.obra_id !== "string") {
-      return new Response(JSON.stringify({ error: "obra_id is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-    if (!body.empreiteiro_email_image || typeof body.empreiteiro_email_image !== "string") {
-      return new Response(JSON.stringify({ error: "empreiteiro_email_image is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-    const ALLOWED_EMAIL_MIMES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
-    if (!body.empreiteiro_email_mime || !ALLOWED_EMAIL_MIMES.includes(body.empreiteiro_email_mime)) {
-      return new Response(JSON.stringify({ error: "empreiteiro_email_mime must be image/jpeg|png|webp or application/pdf" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
     const approval_id = body.approval_id;
-    const pdm_base64 = body.pdm_base64;
-    const mqt_base64 = body.mqt_base64 || null;
-    const ce_base64 = body.ce_base64 || null;
-    const contract_base64 = body.contract_base64 || null;
-    const certificates_base64 = body.certificates_base64 || [];
-    const manufacturer_docs_base64 = body.manufacturer_docs_base64 || [];
-    const material_category = body.material_category;
-    const obra_id = body.obra_id;
-    const user_id = body.user_id || null;
     // Identidade REAL do fiscal (do cliente) para assinar o email — nunca inventada pelo modelo.
     const fiscal_name = (typeof body.fiscal_name === "string" && body.fiscal_name.trim()) ? body.fiscal_name.trim() : null;
     const fiscal_company = (typeof body.fiscal_company === "string" && body.fiscal_company.trim()) ? body.fiscal_company.trim() : null;
-    const empreiteiro_email_image = body.empreiteiro_email_image;
-    const empreiteiro_email_mime = body.empreiteiro_email_mime;
+
+    // Registo = fonte única de verdade (paths + metadados). RLS aplicativo: só o DONO analisa.
+    const { data: rec, error: recErr } = await supabase
+      .from("material_approvals")
+      .select("obra_id, user_id, material_category, pdm_file_path, email_file_path, email_file_mime, mqt_file_path, ce_file_path, contract_file_path, certificates, manufacturer_docs")
+      .eq("id", approval_id)
+      .eq("user_id", user.id)
+      .single();
+    if (recErr || !rec) {
+      console.warn(`PAM: registo não encontrado ou sem permissão (approval_id=${approval_id}, user=${user.id}): ${recErr?.message || "vazio"}`);
+      return new Response(JSON.stringify({ error: "Aprovação não encontrada ou sem permissão." }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const obra_id = rec.obra_id;
+    const user_id = rec.user_id;
+    const material_category = rec.material_category;
+    if (!rec.pdm_file_path) {
+      return new Response(JSON.stringify({ error: "PAM em falta no registo." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (!rec.email_file_path) {
+      return new Response(JSON.stringify({ error: "Print do email do empreiteiro em falta no registo." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const certificates: Array<{ name: string; path: string; size?: number }> = Array.isArray(rec.certificates) ? rec.certificates : [];
+    const manufacturer_docs: Array<{ name: string; path: string; size?: number }> = Array.isArray(rec.manufacturer_docs) ? rec.manufacturer_docs : [];
 
     console.log("PAM: Request received:", JSON.stringify({
       approval_id, obra_id, material_category, user_id,
-      has_pdm: !!pdm_base64,
-      has_mqt: !!mqt_base64,
-      has_ce: !!ce_base64,
-      has_contract: !!contract_base64,
-      certs: certificates_base64?.length || 0,
-      mfg_docs: manufacturer_docs_base64?.length || 0,
+      has_mqt: !!rec.mqt_file_path,
+      has_ce: !!rec.ce_file_path,
+      has_contract: !!rec.contract_file_path,
+      certs: certificates.length,
+      mfg_docs: manufacturer_docs.length,
     }));
-
-    if (!approval_id || !pdm_base64 || !material_category || !obra_id) {
-      throw new Error("Missing required fields: approval_id, pdm_base64, material_category, obra_id");
-    }
 
     // Lock atómico: só adquire se NÃO estiver já 'analyzing'. UPDATE único (atómico à
     // linha) → duas invocações simultâneas não passam ambas; a 2ª afecta 0 linhas → 409.
@@ -665,16 +683,26 @@ serve(async (req) => {
 
     const content: any[] = [];
 
-    // 0. Email do empreiteiro (print/screenshot) — OBRIGATÓRIO, primeiro bloco visual
+    // 0. Email do empreiteiro (print/screenshot) — OBRIGATÓRIO. Download do storage (fail-loud).
+    const emailDl = await downloadB64(supabase, rec.email_file_path);
+    if (!emailDl) {
+      return new Response(JSON.stringify({ error: "Falha ao descarregar o print do email do storage." }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const ALLOWED_EMAIL_MIMES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+    const recMime = rec.email_file_mime || "";
+    const empreiteiro_email_mime = ALLOWED_EMAIL_MIMES.includes(recMime)
+      ? recMime
+      : (ALLOWED_EMAIL_MIMES.includes(emailDl.mime) ? emailDl.mime : "image/jpeg");
     if (empreiteiro_email_mime === "application/pdf") {
       content.push({
         type: "document",
-        source: { type: "base64", media_type: "application/pdf", data: empreiteiro_email_image },
+        source: { type: "base64", media_type: "application/pdf", data: emailDl.base64 },
       });
     } else {
       content.push({
         type: "image",
-        source: { type: "base64", media_type: empreiteiro_email_mime, data: empreiteiro_email_image },
+        source: { type: "base64", media_type: empreiteiro_email_mime, data: emailDl.base64 },
       });
     }
     content.push({
@@ -682,50 +710,64 @@ serve(async (req) => {
       text: "[EMAIL DO EMPREITEIRO — print/screenshot do email que acompanha o PAM. Lê o remetente, o tom, como se dirige ao fiscal, e usa esta informação para adaptar a tua resposta. Se ele é formal, sê formal. Se é mais directo, sê directo. Adapta-te.]",
     });
 
-    // 1. PAM document (always)
+    // 1. PAM document (always) — download do storage (fail-loud).
+    const pamDl = await downloadB64(supabase, rec.pdm_file_path);
+    if (!pamDl) {
+      return new Response(JSON.stringify({ error: "Falha ao descarregar o PAM do storage." }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     content.push({
       type: "document",
-      source: { type: "base64", media_type: "application/pdf", data: pdm_base64 },
+      source: { type: "base64", media_type: "application/pdf", data: pamDl.base64 },
     });
     content.push({
       type: "text",
       text: "[PEDIDO DE APROVAÇÃO DE MATERIAIS (PAM) — documento do empreiteiro acima]",
     });
 
-    // 2. MQT document (if provided)
-    if (mqt_base64) {
-      content.push({
-        type: "document",
-        source: { type: "base64", media_type: "application/pdf", data: mqt_base64 },
-      });
-      content.push({
-        type: "text",
-        text: "[MQT / MAPA DE QUANTIDADES — mapa de quantidades e trabalhos do projecto]",
-      });
+    // 2. MQT document (if provided) — download (degradação graciosa).
+    if (rec.mqt_file_path) {
+      const d = await downloadB64(supabase, rec.mqt_file_path);
+      if (d) {
+        content.push({
+          type: "document",
+          source: { type: "base64", media_type: "application/pdf", data: d.base64 },
+        });
+        content.push({
+          type: "text",
+          text: "[MQT / MAPA DE QUANTIDADES — mapa de quantidades e trabalhos do projecto]",
+        });
+      }
     }
 
-    // 2b. Caderno de Encargos (if provided)
-    if (ce_base64) {
-      content.push({
-        type: "document",
-        source: { type: "base64", media_type: "application/pdf", data: ce_base64 },
-      });
-      content.push({
-        type: "text",
-        text: "[CADERNO DE ENCARGOS — condições técnicas, especificações de materiais, ensaios exigidos]",
-      });
+    // 2b. Caderno de Encargos (if provided) — download (degradação graciosa).
+    if (rec.ce_file_path) {
+      const d = await downloadB64(supabase, rec.ce_file_path);
+      if (d) {
+        content.push({
+          type: "document",
+          source: { type: "base64", media_type: "application/pdf", data: d.base64 },
+        });
+        content.push({
+          type: "text",
+          text: "[CADERNO DE ENCARGOS — condições técnicas, especificações de materiais, ensaios exigidos]",
+        });
+      }
     }
 
-    // 3. Contract document (if provided)
-    if (contract_base64) {
-      content.push({
-        type: "document",
-        source: { type: "base64", media_type: "application/pdf", data: contract_base64 },
-      });
-      content.push({
-        type: "text",
-        text: "[CONTRATO DA OBRA — contrato de empreitada]",
-      });
+    // 3. Contract document (if provided) — download (degradação graciosa).
+    if (rec.contract_file_path) {
+      const d = await downloadB64(supabase, rec.contract_file_path);
+      if (d) {
+        content.push({
+          type: "document",
+          source: { type: "base64", media_type: "application/pdf", data: d.base64 },
+        });
+        content.push({
+          type: "text",
+          text: "[CONTRATO DA OBRA — contrato de empreitada]",
+        });
+      }
     }
 
     // 4 + 5. Certificados e documentos de fabricante — SEM corte fixo (era slice(0,5)).
@@ -738,33 +780,37 @@ serve(async (req) => {
     const analyzedMfg: string[] = [];
     const skippedMfg: Array<{ name: string; reason: string }> = [];
 
-    for (const cert of (certificates_base64 || [])) {
-      const size = (cert.base64 || "").length;
+    for (const cert of certificates) {
+      const dl = await downloadB64(supabase, cert.path);
+      if (!dl) { skippedCerts.push({ name: cert.name, reason: "download do storage falhou" }); continue; }
+      const size = dl.base64.length;
       if (attachBytes + size > ATTACH_BUDGET) {
         skippedCerts.push({ name: cert.name, reason: "orçamento de tamanho do pedido" });
         continue;
       }
       attachBytes += size;
-      const isImage = cert.type && cert.type.startsWith('image/');
+      const isImage = dl.mime.startsWith('image/');
       content.push({
         type: isImage ? "image" : "document",
-        source: { type: "base64", media_type: isImage ? cert.type : "application/pdf", data: cert.base64 },
+        source: { type: "base64", media_type: isImage ? dl.mime : "application/pdf", data: dl.base64 },
       });
       content.push({ type: "text", text: `[CERTIFICADO/LAUDO: ${cert.name}]` });
       analyzedCerts.push(cert.name);
     }
 
-    for (const mdoc of (manufacturer_docs_base64 || [])) {
-      const size = (mdoc.base64 || "").length;
+    for (const mdoc of manufacturer_docs) {
+      const dl = await downloadB64(supabase, mdoc.path);
+      if (!dl) { skippedMfg.push({ name: mdoc.name, reason: "download do storage falhou" }); continue; }
+      const size = dl.base64.length;
       if (attachBytes + size > ATTACH_BUDGET) {
         skippedMfg.push({ name: mdoc.name, reason: "orçamento de tamanho do pedido" });
         continue;
       }
       attachBytes += size;
-      const isImage = mdoc.type && mdoc.type.startsWith('image/');
+      const isImage = dl.mime.startsWith('image/');
       content.push({
         type: isImage ? "image" : "document",
-        source: { type: "base64", media_type: isImage ? mdoc.type : "application/pdf", data: mdoc.base64 },
+        source: { type: "base64", media_type: isImage ? dl.mime : "application/pdf", data: dl.base64 },
       });
       content.push({ type: "text", text: `[DOCUMENTO DO FABRICANTE: ${mdoc.name}]` });
       analyzedMfg.push(mdoc.name);
@@ -773,7 +819,7 @@ serve(async (req) => {
     if (skippedCerts.length > 0 || skippedMfg.length > 0) {
       console.warn(`PAM: anexos fora do orçamento — certs=${skippedCerts.length}, mfg=${skippedMfg.length}`);
     }
-    console.log(`PAM: certs analisados ${analyzedCerts.length}/${certificates_base64?.length || 0}, mfg ${analyzedMfg.length}/${manufacturer_docs_base64?.length || 0}`);
+    console.log(`PAM: certs analisados ${analyzedCerts.length}/${certificates.length}, mfg ${analyzedMfg.length}/${manufacturer_docs.length}`);
 
     // 6. Fetch knowledge from Eng. Silva's project knowledge base (retrieval híbrido + fallback legacy)
     let knowledge: KnowledgeResult = { context: "", sources: [], hasContractual: false, ceForCategoryFound: false };
@@ -803,9 +849,9 @@ serve(async (req) => {
 
     // 7. Build context note based on available documents
     const docParts: string[] = [];
-    if (mqt_base64) docParts.push("o MQT/Mapa de Quantidades (PDF em anexo)");
-    if (ce_base64) docParts.push("o Caderno de Encargos (PDF em anexo)");
-    if (contract_base64) docParts.push("o Contrato da Obra (PDF em anexo)");
+    if (rec.mqt_file_path) docParts.push("o MQT/Mapa de Quantidades (PDF em anexo)");
+    if (rec.ce_file_path) docParts.push("o Caderno de Encargos (PDF em anexo)");
+    if (rec.contract_file_path) docParts.push("o Contrato da Obra (PDF em anexo)");
     if (hasKnowledge) docParts.push("a Base de Conhecimento do Projecto (resumos de documentos processados pelo Eng. Silva, incluídos no system prompt)");
 
     let contextNote = "";
@@ -982,11 +1028,11 @@ Responde SEMPRE em português europeu.`;
     analysis.sources_consulted = knowledge.sources;
     analysis.retrieval_path = retrievalMode;
     analysis.mqt_consulted = knowledge.mqt_consulted || [];
-    analysis.no_contractual_in_context = !knowledge.hasContractual && !mqt_base64 && !ce_base64 && !contract_base64;
-    analysis.ce_for_category_missing = !knowledge.ceForCategoryFound && !ce_base64;
+    analysis.no_contractual_in_context = !knowledge.hasContractual && !rec.mqt_file_path && !rec.ce_file_path && !rec.contract_file_path;
+    analysis.ce_for_category_missing = !knowledge.ceForCategoryFound && !rec.ce_file_path;
     analysis.attachments_processing = {
-      certificates: { received: (certificates_base64?.length || 0), analyzed: analyzedCerts, skipped: skippedCerts },
-      manufacturer_docs: { received: (manufacturer_docs_base64?.length || 0), analyzed: analyzedMfg, skipped: skippedMfg },
+      certificates: { received: certificates.length, analyzed: analyzedCerts, skipped: skippedCerts },
+      manufacturer_docs: { received: manufacturer_docs.length, analyzed: analyzedMfg, skipped: skippedMfg },
     };
 
     // Update the approval record

@@ -297,103 +297,13 @@ export default function MaterialApprovals() {
     // Optimista: mostra 'A analisar...' já, sem esperar refetch (a UI deixa de parecer parada).
     setApprovals(prev => prev.map(a => a.id === approval.id ? { ...a, status: 'analyzing' } : a));
     try {
-      const { data: pdmData } = await supabase.storage.from('material-approvals').download(approval.pdm_file_path);
-      if (!pdmData) throw new Error('Failed to download PAM');
-      const pdmBase64 = await blobToBase64(pdmData);
-
-      const { data: emailData, error: emailDlErr } = await supabase.storage
-        .from('material-approvals')
-        .download(approval.email_file_path);
-      if (emailDlErr || !emailData) throw new Error('Erro ao descarregar print do email: ' + (emailDlErr?.message || ''));
-      const emailBase64 = await blobToBase64(emailData);
-      const empreiteiroEmailMime = approval.email_file_mime || emailData.type || 'image/jpeg';
-
-      let mqtBase64: string | null = null;
-      if (approval.mqt_file_path) {
-        try {
-          const { data } = await supabase.storage.from('material-approvals').download(approval.mqt_file_path);
-          if (data) mqtBase64 = await blobToBase64(data);
-        } catch { /* skip */ }
-      }
-
-      let contractBase64: string | null = null;
-      if (approval.contract_file_path) {
-        try {
-          const { data } = await supabase.storage.from('material-approvals').download(approval.contract_file_path);
-          if (data) contractBase64 = await blobToBase64(data);
-        } catch { /* skip */ }
-      }
-
-      let ceBase64: string | null = null;
-      if ((approval as any).ce_file_path) {
-        try {
-          const { data } = await supabase.storage.from('material-approvals').download((approval as any).ce_file_path);
-          if (data) ceBase64 = await blobToBase64(data);
-        } catch { /* skip */ }
-      }
-
-      const failedDownloads: string[] = [];
-
-      const certificatesBase64: Array<{ name: string; base64: string; type: string }> = [];
-      const certs = (approval as any).certificates || [];
-      for (const cert of certs) {
-        try {
-          const { data } = await supabase.storage.from('material-approvals').download(cert.path);
-          if (data) {
-            const b64 = await blobToBase64(data);
-            certificatesBase64.push({ name: cert.name, base64: b64, type: data.type });
-          } else {
-            failedDownloads.push(cert.name);
-          }
-        } catch { failedDownloads.push(cert.name); }
-      }
-
-      const mfgDocsBase64: Array<{ name: string; base64: string; type: string }> = [];
-      const mfgDocs = (approval as any).manufacturer_docs || [];
-      for (const mdoc of mfgDocs) {
-        try {
-          const { data } = await supabase.storage.from('material-approvals').download(mdoc.path);
-          if (data) {
-            const b64 = await blobToBase64(data);
-            mfgDocsBase64.push({ name: mdoc.name, base64: b64, type: data.type });
-          } else {
-            failedDownloads.push(mdoc.name);
-          }
-        } catch { failedDownloads.push(mdoc.name); }
-      }
-
-      // Downloads falhados deixam de ser silenciosos — são anexos que NÃO vão à análise.
-      if (failedDownloads.length > 0) {
-        toast.warning(`${failedDownloads.length} documento(s) não descarregado(s) e NÃO enviados à análise: ${failedDownloads.join(', ')}`);
-      }
-
-      console.log("PAM: Sending to edge function:", JSON.stringify({
-        has_pdm: !!pdmBase64,
-        has_email: !!emailBase64,
-        email_mime: empreiteiroEmailMime,
-        has_mqt: !!mqtBase64,
-        has_ce: !!ceBase64,
-        has_contract: !!contractBase64,
-        certs: certificatesBase64.length,
-        mfg_docs: mfgDocsBase64.length,
-      }));
-
+      // F1: a ingestão já persistiu os anexos no storage; a function descarrega-os
+      // por path. O cliente envia só o approval_id (+ identidade do fiscal).
       const { error: invokeError } = await supabase.functions.invoke('analyze-material-approval', {
         body: {
           approval_id: approval.id,
-          pdm_base64: pdmBase64,
-          mqt_base64: mqtBase64,
-          ce_base64: ceBase64,
-          contract_base64: contractBase64,
-          certificates_base64: certificatesBase64,
-          manufacturer_docs_base64: mfgDocsBase64,
-          material_category: approval.material_category,
-          obra_id: approval.obra_id,
-          user_id: user?.id,
           fiscal_name: (localStorage.getItem('pam_fiscal_name') || '').trim() || null,
           fiscal_company: (localStorage.getItem('pam_fiscal_company') || '').trim() || null,
-          empreiteiro_email_image: emailBase64,
-          empreiteiro_email_mime: empreiteiroEmailMime,
         },
       });
 
@@ -430,17 +340,6 @@ export default function MaterialApprovals() {
       .eq('id', approval.id);
     await loadApprovals();
   };
-
-  const blobToBase64 = (blob: Blob): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        resolve(result.split(',')[1]);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
 
   const getEmailDraft = (a: Approval) => {
     const er = a.ai_analysis?.email_response;
