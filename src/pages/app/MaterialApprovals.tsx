@@ -321,7 +321,8 @@ export default function MaterialApprovals() {
         return;
       }
 
-      toast.success('Análise concluída!');
+      // Respond-early (F3): 202 = análise iniciada; o polling (15s) apanha a conclusão pelo status.
+      toast.success('Análise iniciada — a processar em segundo plano…');
       await loadApprovals();
     } catch (err: any) {
       toast.error('Erro na análise: ' + err.message);
@@ -712,12 +713,15 @@ export default function MaterialApprovals() {
                                 </Button>
                               </div>
                             ) : (
-                              <div className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> A analisar documento...</div>
+                              <div className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> {a.ai_analysis?._progress?.label || 'A analisar documento...'}</div>
                             );
                           })()
                         ) : (
                           <div className="space-y-2">
                             <p>Análise pendente</p>
+                            {a.ai_analysis?._error?.message && (
+                              <p className="text-xs text-destructive">⚠ Falha anterior: {a.ai_analysis._error.message}</p>
+                            )}
                             <Button
                               size="sm"
                               variant="outline"

@@ -25,7 +25,7 @@ async function fetchProjectKnowledgeLegacy(
     // This ensures we find certificates classified under any type (e.g. "Pormenores Construtivos").
     let query = supabase
       .from("eng_silva_project_knowledge")
-      .select("document_name, document_type, specialty, summary, key_elements")
+      .select("document_name, document_type, specialty, summary, key_elements, file_path")
       .eq("obra_id", obraId)
       .eq("processed", true);
     if (userId) query = query.eq("user_id", userId);
@@ -184,12 +184,27 @@ async function fetchProjectKnowledgeLegacy(
       .filter((d: any) => d.specialty === "Mapa de Quantidades (MQT)")
       .map((d: any) => d.document_name);
 
+    // Via 2 (caminho legacy): contratuais com file_path, gated por categoria (fallback = todos).
+    const legacyContractsWithFile = contractualDocs.filter((d: any) => d.file_path);
+    const legacyMatched = keywords.length === 0
+      ? legacyContractsWithFile
+      : legacyContractsWithFile.filter((d: any) => {
+          const hay = ((d.document_name || "") + " " + (d.summary || "")).toLowerCase();
+          return keywords.some((kw: string) => hay.includes(kw));
+        });
+    if (keywords.length > 0 && legacyMatched.length === 0 && legacyContractsWithFile.length > 0) {
+      console.log(`F2: sem match de categoria — a incluir todos os ${legacyContractsWithFile.length} contratuais como PDF (fallback).`);
+    }
+    const contractualFiles = (legacyMatched.length > 0 ? legacyMatched : legacyContractsWithFile)
+      .map((d: any) => ({ document_name: d.document_name, file_path: d.file_path }));
+
     return {
       context,
       sources,
       hasContractual: contractualDocs.length > 0,
       ceForCategoryFound,
       mqt_consulted: mqtConsulted,
+      contractualFiles,
     };
   } catch (err) {
     console.error("PAM-KNOWLEDGE: Error fetching knowledge:", err);
@@ -250,6 +265,7 @@ interface KnowledgeResult {
   hasContractual: boolean;      // entrou algum CE/MQT/Contrato/Condições Técnicas no contexto?
   ceForCategoryFound: boolean;  // existe Caderno de Encargos que cobre esta categoria de material?
   mqt_consulted?: string[];     // nomes dos MQT (specialty "Mapa de Quantidades (MQT)") no contexto
+  contractualFiles?: Array<{ document_name: string; file_path: string }>; // Via 2: contratuais da KB para anexar como PDF (gated por categoria)
 }
 
 // ── Retrieval híbrido: Via A determinística (certificados + contratuais) + Via B semântica ──
@@ -286,7 +302,7 @@ async function fetchProjectKnowledgeHybrid(
   // A2. Contratuais e normativos: sempre incluídos, sem gate.
   let contractQuery = supabase
     .from("eng_silva_project_knowledge")
-    .select("id, document_name, document_type, specialty, summary, key_elements")
+    .select("id, document_name, document_type, specialty, summary, key_elements, file_path")
     .eq("obra_id", obraId)
     .eq("processed", true)
     .in("specialty", HYBRID_CONTRACT_SPECIALTIES)
@@ -404,12 +420,27 @@ async function fetchProjectKnowledgeHybrid(
     .filter((d: any) => d.specialty === "Mapa de Quantidades (MQT)")
     .map((d: any) => d.document_name);
 
+  // Via 2: contratuais com file_path, gated por categoria (fallback = todos se nenhum match).
+  const contractsWithFile = contracts.filter((d: any) => d.file_path);
+  const contractMatched = keywords.length === 0
+    ? contractsWithFile
+    : contractsWithFile.filter((d: any) => {
+        const hay = normalizeForMatch((d.document_name || "") + " " + (d.summary || ""));
+        return keywords.some((kw) => hay.includes(kw));
+      });
+  if (keywords.length > 0 && contractMatched.length === 0 && contractsWithFile.length > 0) {
+    console.log(`F2: sem match de categoria — a incluir todos os ${contractsWithFile.length} contratuais como PDF (fallback).`);
+  }
+  const contractualFiles = (contractMatched.length > 0 ? contractMatched : contractsWithFile)
+    .map((d: any) => ({ document_name: d.document_name, file_path: d.file_path }));
+
   return {
     context,
     sources,
     hasContractual: contracts.length > 0,
     ceForCategoryFound,
     mqt_consulted: mqtConsulted,
+    contractualFiles,
   };
 }
 
@@ -521,6 +552,44 @@ Responde com o JSON estruturado abaixo (sem markdown, sem backticks, sem texto a
       "verdict": "um de: cumpre, nao_cumpre, mqt_nao_consultado"
     }
   ],
+  "header_sintese": {
+    "veredito": "rótulo que resume o parecer (ex: APROVADO CONDICIONADO, APROVADO, APROVADO COM RESERVAS, REJEITADO)",
+    "base_analise": "1-2 frases: em que assenta o parecer. Ex: 'confirmado após cruzamento com o MQT Fases 1.1/1.2 + CTE Esgotos Domésticos + CTE Esgotos Pluviais'. Se NÃO houve MQT/CTE no contexto: 'sem confronto contratual — baseado em normas gerais'.",
+    "material": "material + fabricante + marca em obra (1 frase)"
+  },
+  "mqt_articles_by_phase": [
+    {
+      "fase": "fase da obra (ex: Fase 1.1 — Pisos -5/-6) ou null",
+      "revisao": "revisão do documento (ex: Rev.02, Dez 2025) ou null",
+      "article": "artigo do MQT (ex: 1.3.3.1–.3)",
+      "description": "descrição do artigo",
+      "diameter": "diâmetro(s) (ex: 125 / 160 / 200) ou null",
+      "quantity": "quantidade(s) com unidade (ex: 74,05 / 30,25 m) ou null",
+      "norm": "norma (ex: EN ISO 1452 – PN10) ou null"
+    }
+  ],
+  "cte_sections": [
+    {
+      "section": "documento/secção do CTE (ex: Domésticos — 3.4.1 Tubagens e Acessórios)",
+      "requirement": "requisito de projeto",
+      "verification": "verificação da fiscalização",
+      "verdict": "um de: CONFORME, CONFORME_POR_EXCESSO, NAO_CONFORME, A_ACAUTELAR_EM_EXECUCAO"
+    }
+  ],
+  "supporting_documents": [
+    {
+      "number": "nº do documento/certificado (ex: AENOR 001/006265)",
+      "norm": "norma (ex: EN ISO 1452-2)",
+      "scope": "âmbito/produto coberto (ex: saneamento c/ pressão, PN10 Ø110–630)",
+      "validity": "validade (ex: 02/2031) ou null"
+    }
+  ],
+  "documents_without_application": [
+    {
+      "document": "documento entregue mas SEM aplicação a este PAM",
+      "reason": "porquê não se aplica (ex: EN 1329 — evacuação interior; MQT fixa PN10 enterrado)"
+    }
+  ],
   "practical_concerns": [
     "Preocupação prática 1",
     "Preocupação prática 2"
@@ -549,12 +618,18 @@ REGRAS PARA O EMAIL DE RESPOSTA:
 - Fecha com algo como "Ficamos ao dispor" ou "Aguardamos" — natural, não robótico
 - NUNCA incluas: números de DC, referências de norma, códigos PSG, percentagens de confiança, ou linguagem técnica que o empreiteiro não precisa. Isso fica no relatório interno.
 - O empreiteiro quer ACÇÃO, não informação: "enviem certificado renovado da Sevillana antes de encomendar" em vez de "o PSG-004/2021 referente ao DC 391 LNEC caduca em 06/04/2026 conforme E 460-2017"
+- Escreve como uma pessoa escreve, não como um relatório: frases curtas, sem "venho por este meio", sem bullet points no email, sem repetir o nome do material em todas as frases. Uma saudação, o essencial, o passo seguinte, um fecho.
 ${assinaturaRegra}
 
 CONFRONTO CONTRATUAL (OBRIGATÓRIO quando o PAM cita o MQT/CE):
 - Identifica no PAM os artigos do MQT/Caderno de Encargos citados (ex.: "Art.º 1.3.4-1.3.6", "1.4.5-1.4.9", "1.4.11", "Conforme MQT").
 - Para CADA artigo citado, confronta o que o MQT/CE especifica (do contexto disponível) com o que o empreiteiro propõe → preenche "mqt_confrontation".
 - HONESTIDADE (inviolável): se o conteúdo do artigo do MQT/CE NÃO estiver no contexto (só tens o nome/resumo do documento, não a especificação do artigo), NÃO escrevas "conforme MQT" nem finjas o confronto — DECLARA "MQT não consultado ao nível do artigo <X>" em "missing_information", e uma rejeição não pode assentar num confronto que não fizeste.
+
+TABELAS DA REFERÊNCIA (5 blocos — preenche com dados REAIS, nunca inventados):
+- "header_sintese": veredito + base da análise + material. A base_analise diz explicitamente com que MQT/CTE se cruzou; se não houve nenhum no contexto, escreve "sem confronto contratual — baseado em normas gerais".
+- "mqt_articles_by_phase" e "cte_sections" (tabelas 1 e 2): SÓ preenche se tiveres o MQT/CTE no contexto (PDF anexado, contratual da Base de Conhecimento, ou resumo com o artigo/secção). Se NÃO houver MQT/CTE ao nível do artigo/secção, devolve ARRAY VAZIO [] e declara em "missing_information" que "as tabelas de MQT/CTE não foram preenchidas — documento não consultado". NUNCA inventes artigos, fases, diâmetros, quantidades ou secções. Coerência total com a regra do mqt_confrontation.
+- "supporting_documents" e "documents_without_application" (tabelas 3 e 4): constrói a partir dos certificados/documentos de fabricante ANALISADOS — sejam os PDFs anexados OU as EXTRAÇÕES ESTRUTURADAS fornecidas no contexto (quando a análise foi feita por grupos). Usa nº, norma, âmbito e validade REAIS. Em "documents_without_application" explica porque cada documento entregue não se aplica a este PAM.
 
 REGRAS DE FIABILIDADE (INVIOLÁVEIS):
 - NUNCA inventes nomes de fornecedores, números de certificados PSG, números de DC, ou datas. Usa APENAS dados que encontras nos documentos da Base de Conhecimento.
@@ -571,9 +646,10 @@ REGRAS DE FIABILIDADE (INVIOLÁVEIS):
 async function downloadB64(
   supabase: any,
   path: string,
+  bucket = "material-approvals",
 ): Promise<{ base64: string; mime: string } | null> {
   try {
-    const { data, error } = await supabase.storage.from("material-approvals").download(path);
+    const { data, error } = await supabase.storage.from(bucket).download(path);
     if (error || !data) {
       console.error(`PAM: download FALHOU (${path}):`, error?.message || "sem dados");
       return null;
@@ -584,6 +660,83 @@ async function downloadB64(
     console.error(`PAM: download EXCEPÇÃO (${path}):`, (e as any)?.message || e);
     return null;
   }
+}
+
+// Background tasks do Supabase (Pro+: até 400s). Declarado para o deno check; guardado em runtime.
+declare const EdgeRuntime: { waitUntil: (p: Promise<unknown>) => void } | undefined;
+
+// Orçamento por passagem (base64). Conservador sob os 32MB/request e ~200K tokens do Sonnet 4.5.
+const SINGLE_PASS_BUDGET = 14 * 1024 * 1024;
+
+interface DocBlock { name: string; base64: string; mime: string; kind: "cert" | "mfg"; }
+
+// Blocos de conteúdo Anthropic para um conjunto de docs (PDF→document, imagem→image).
+function docContentBlocks(docs: DocBlock[]): any[] {
+  const blocks: any[] = [];
+  for (const d of docs) {
+    const isImage = d.mime.startsWith("image/");
+    blocks.push({ type: isImage ? "image" : "document", source: { type: "base64", media_type: isImage ? d.mime : "application/pdf", data: d.base64 } });
+    blocks.push({ type: "text", text: `[${d.kind === "cert" ? "CERTIFICADO/LAUDO" : "DOCUMENTO DO FABRICANTE"}: ${d.name}]` });
+  }
+  return blocks;
+}
+
+// Empacota docs em grupos cujo base64 ≤ budget. Um doc maior que o budget vai sozinho (best-effort).
+function packGroups(docs: DocBlock[], budget: number): DocBlock[][] {
+  const groups: DocBlock[][] = [];
+  let cur: DocBlock[] = [], curBytes = 0;
+  for (const d of docs) {
+    const b = d.base64.length;
+    if (b > budget) { if (cur.length) { groups.push(cur); cur = []; curBytes = 0; } groups.push([d]); continue; }
+    if (curBytes + b > budget && cur.length) { groups.push(cur); cur = []; curBytes = 0; }
+    cur.push(d); curBytes += b;
+  }
+  if (cur.length) groups.push(cur);
+  return groups;
+}
+
+// Persiste progresso em ai_analysis._progress SEM destruir o resto (lê→merge→escreve). Sem migração.
+async function writeProgress(supabase: any, approvalId: string, progress: { current: number; total: number; label: string }): Promise<void> {
+  try {
+    const { data } = await supabase.from("material_approvals").select("ai_analysis").eq("id", approvalId).single();
+    const prev = (data?.ai_analysis && typeof data.ai_analysis === "object") ? data.ai_analysis : {};
+    await supabase.from("material_approvals")
+      .update({ ai_analysis: { ...prev, _progress: { ...progress, at: new Date().toISOString() } }, updated_at: new Date().toISOString() })
+      .eq("id", approvalId);
+  } catch (e) { console.error("PAM: falha ao escrever progresso:", (e as any)?.message || e); }
+}
+
+// Extração robusta de JSON (objecto ou array).
+function extractJson(text: string): any {
+  let cleaned = (text || "").replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+  const firstObj = cleaned.indexOf("{"), firstArr = cleaned.indexOf("[");
+  const start = (firstArr !== -1 && (firstArr < firstObj || firstObj === -1)) ? firstArr : firstObj;
+  const last = Math.max(cleaned.lastIndexOf("}"), cleaned.lastIndexOf("]"));
+  if (start !== -1 && last > start) cleaned = cleaned.substring(start, last + 1);
+  return JSON.parse(cleaned);
+}
+
+const EXTRACTION_SYSTEM = `És o Eng. Silva a fazer TRIAGEM DOCUMENTAL (não é o parecer final). Recebes o PAM, o email, os contratuais e um GRUPO de certificados/documentos de fabricante. Extrai, para CADA documento do grupo, os dados estruturados — sem dar veredito, sem pesquisar online. Cita o nome EXACTO do ficheiro. Se um dado não estiver no documento, usa null. NUNCA inventes. Responde SÓ com um ARRAY JSON (sem markdown), cada item:
+{"supplier": "fornecedor/fabricante", "document": "nome exacto do ficheiro", "doc_type": "um de: DoP, certificado_CE, laudo_ensaio, ficha_tecnica, outro", "certificate_number": "PSG/Certif/nº ou null", "dc_lnec": "DC xxx ou null", "norm": "norma(s) ou null", "scope": "âmbito/produto coberto (classe, diâmetros, pressão) ou null", "issue_date": "DD/MM/AAAA ou null", "expiry_date": "DD/MM/AAAA ou null", "adequacy": "1 frase: adequação ao material do PAM", "notes": "o que falta/preocupa ou null"}
+Responde SEMPRE em português europeu.`;
+
+const EXTRACTION_INSTRUCTION = "Extrai os dados estruturados dos certificados/documentos de fabricante ACIMA (só deste grupo), como ARRAY JSON conforme o teu system prompt. Não dês parecer nem pesquises online.";
+
+// Uma passagem de extração de um grupo. Erro RUIDOSO com o nº do grupo.
+async function runExtractionPass(apiKey: string, content: any[], groupNum: number, groupTotal: number): Promise<any[]> {
+  const loop = await runClaudeWithContinuation({
+    apiKey, model: "claude-sonnet-4-5-20250929", maxTokens: 6000, temperature: 0,
+    system: EXTRACTION_SYSTEM, messages: [{ role: "user", content }],
+    maxIterations: 2, logPrefix: `[PAM extract ${groupNum}/${groupTotal}]`,
+  });
+  if (loop.finalStopReason === "max_tokens" || loop.hitIterationCap) {
+    throw new Error(`Extração do grupo ${groupNum}/${groupTotal} truncada (stop_reason=${loop.finalStopReason}). Reduzir dimensão do grupo.`);
+  }
+  let arr: any;
+  try { arr = extractJson(loop.accumulatedText || "[]"); } catch (e) {
+    throw new Error(`Extração do grupo ${groupNum}/${groupTotal}: JSON inválido — ${(e as any)?.message}`);
+  }
+  return Array.isArray(arr) ? arr : [arr];
 }
 
 serve(async (req) => {
@@ -625,7 +778,7 @@ serve(async (req) => {
     // Registo = fonte única de verdade (paths + metadados). RLS aplicativo: só o DONO analisa.
     const { data: rec, error: recErr } = await supabase
       .from("material_approvals")
-      .select("obra_id, user_id, material_category, pdm_file_path, email_file_path, email_file_mime, mqt_file_path, ce_file_path, contract_file_path, certificates, manufacturer_docs")
+      .select("obra_id, user_id, material_category, pdm_file_path, email_file_path, email_file_mime, mqt_file_path, mqt_name, ce_file_path, ce_file_name, contract_file_path, contract_file_name, certificates, manufacturer_docs")
       .eq("id", approval_id)
       .eq("user_id", user.id)
       .single();
@@ -678,8 +831,40 @@ serve(async (req) => {
     }
     lockedApprovalId = approval_id; // a partir daqui o catch externo deve repor 'pending'
 
+    // Respond-early (F3): a análise corre em background (Pro+: até 400s), sem tocar no idle de 150s.
+    // O corpo do pipeline abaixo corre dentro desta closure.
+    const runInBackground = async () => {
+    try {
+
     // Data de hoje (para o modelo aferir validade/caducidade dos certificados).
     const todayISO = new Date().toISOString().slice(0, 10);
+
+    // 6. Retrieval MOVIDO para antes da montagem: contratuais da KB (Via 2) têm de ser
+    // anexados ANTES dos certificados (prioridade de orçamento).
+    let knowledge: KnowledgeResult = { context: "", sources: [], hasContractual: false, ceForCategoryFound: false };
+    let retrievalMode = "hybrid";
+    try {
+      const materialQuery = material_category;
+      knowledge = await fetchProjectKnowledgeHybrid(supabase, obra_id, material_category, user_id, materialQuery);
+      console.log(`[PAM retrieval] hybrid OK, context length: ${knowledge.context.length}, sources: ${knowledge.sources.length}`);
+    } catch (hybridErr) {
+      console.error(`[PAM retrieval] hybrid FAILED, fallback to legacy:`, hybridErr);
+      retrievalMode = "legacy";
+      knowledge = await fetchProjectKnowledgeLegacy(supabase, obra_id, material_category, user_id);
+      console.log(`[PAM retrieval] legacy fallback, context length: ${knowledge.context.length}, sources: ${knowledge.sources.length}`);
+    }
+    const knowledgeContext = knowledge.context;
+    const hasKnowledge = knowledgeContext.length > 0;
+    console.log(`PAM: Knowledge context (${retrievalMode}): ${hasKnowledge ? `${knowledgeContext.length} chars` : "none"}`);
+
+    // Orçamento partilhado: contratuais consomem PRIMEIRO (prioridade); certs/mfg ficam com o resto.
+    const ATTACH_BUDGET = 20 * 1024 * 1024;
+    let attachBytes = 0;
+    const analyzedCerts: string[] = [];
+    const skippedCerts: Array<{ name: string; reason: string }> = [];
+    const analyzedMfg: string[] = [];
+    const skippedMfg: Array<{ name: string; reason: string }> = [];
+    const attachedContractuais: string[] = [];
 
     const content: any[] = [];
 
@@ -725,133 +910,84 @@ serve(async (req) => {
       text: "[PEDIDO DE APROVAÇÃO DE MATERIAIS (PAM) — documento do empreiteiro acima]",
     });
 
-    // 2. MQT document (if provided) — download (degradação graciosa).
-    if (rec.mqt_file_path) {
-      const d = await downloadB64(supabase, rec.mqt_file_path);
-      if (d) {
-        content.push({
-          type: "document",
-          source: { type: "base64", media_type: "application/pdf", data: d.base64 },
-        });
-        content.push({
-          type: "text",
-          text: "[MQT / MAPA DE QUANTIDADES — mapa de quantidades e trabalhos do projecto]",
-        });
-      }
+    // 2. CONTRATUAIS (Via 1 manual + Via 2 KB) como PDFs — prioridade de orçamento sobre certs.
+    // Dedup por nome normalizado; manual precede KB. Contratuais nunca são cortados (têm prioridade).
+    const normName = (s: string) => (s || "").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "").trim();
+    const contractualQueue: Array<{ name: string; path: string; bucket: string; label: string }> = [];
+    if (rec.mqt_file_path) contractualQueue.push({ name: rec.mqt_name || "MQT", path: rec.mqt_file_path, bucket: "material-approvals", label: "MQT / MAPA DE QUANTIDADES — mapa de quantidades e trabalhos do projecto" });
+    if (rec.ce_file_path) contractualQueue.push({ name: rec.ce_file_name || "Caderno de Encargos", path: rec.ce_file_path, bucket: "material-approvals", label: "CADERNO DE ENCARGOS — condições técnicas, especificações de materiais, ensaios exigidos" });
+    if (rec.contract_file_path) contractualQueue.push({ name: rec.contract_file_name || "Contrato", path: rec.contract_file_path, bucket: "material-approvals", label: "CONTRATO DA OBRA — contrato de empreitada" });
+    for (const kb of (knowledge.contractualFiles || [])) {
+      contractualQueue.push({ name: kb.document_name, path: kb.file_path, bucket: "project-knowledge", label: `CONTRATUAL DA BASE DE CONHECIMENTO: ${kb.document_name}` });
     }
-
-    // 2b. Caderno de Encargos (if provided) — download (degradação graciosa).
-    if (rec.ce_file_path) {
-      const d = await downloadB64(supabase, rec.ce_file_path);
-      if (d) {
-        content.push({
-          type: "document",
-          source: { type: "base64", media_type: "application/pdf", data: d.base64 },
-        });
-        content.push({
-          type: "text",
-          text: "[CADERNO DE ENCARGOS — condições técnicas, especificações de materiais, ensaios exigidos]",
-        });
-      }
+    const seenContractual = new Set<string>();
+    for (const c of contractualQueue) {
+      const key = normName(c.name);
+      if (key && seenContractual.has(key)) continue; // dedup: manual precede KB
+      const dl = await downloadB64(supabase, c.path, c.bucket);
+      if (!dl) { console.warn(`PAM: contratual NÃO descarregado (${c.bucket}/${c.path}) — ${c.name}`); continue; }
+      if (key) seenContractual.add(key);
+      attachBytes += dl.base64.length; // conta para o orçamento, mas nunca é cortado
+      const isImage = dl.mime.startsWith("image/");
+      content.push({ type: isImage ? "image" : "document", source: { type: "base64", media_type: isImage ? dl.mime : "application/pdf", data: dl.base64 } });
+      content.push({ type: "text", text: `[${c.label}]` });
+      attachedContractuais.push(c.name);
     }
-
-    // 3. Contract document (if provided) — download (degradação graciosa).
-    if (rec.contract_file_path) {
-      const d = await downloadB64(supabase, rec.contract_file_path);
-      if (d) {
-        content.push({
-          type: "document",
-          source: { type: "base64", media_type: "application/pdf", data: d.base64 },
-        });
-        content.push({
-          type: "text",
-          text: "[CONTRATO DA OBRA — contrato de empreitada]",
-        });
-      }
+    if (attachBytes > ATTACH_BUDGET) {
+      console.warn(`PAM: contratuais (${attachedContractuais.length}) excedem o orçamento (${attachBytes} > ${ATTACH_BUDGET}) — F3 resolverá; certs serão cortados nesta passagem.`);
     }
+    console.log(`PAM: contratuais anexados: ${attachedContractuais.length} (${attachedContractuais.join("; ")})`);
 
-    // 4 + 5. Certificados e documentos de fabricante — SEM corte fixo (era slice(0,5)).
-    // Orçamento de tamanho (~20 MB de base64) para não exceder o limite do pedido
-    // Anthropic (~32 MB). O que ficar de fora é REPORTADO, nunca descartado em silêncio.
-    const ATTACH_BUDGET = 20 * 1024 * 1024; // chars de base64 no corpo do pedido
-    let attachBytes = 0;
-    const analyzedCerts: string[] = [];
-    const skippedCerts: Array<{ name: string; reason: string }> = [];
-    const analyzedMfg: string[] = [];
-    const skippedMfg: Array<{ name: string; reason: string }> = [];
-
+    // 4 + 5. Certificados e documentos de fabricante — orçamento partilhado (declarado acima).
+    // O que ficar de fora é REPORTADO (F3 elimina o "skipped por orçamento").
+    // F3: recolher TODOS os certs/mfg (sem corte por orçamento — o single/multi-pass trata do tamanho).
+    // Só resta "download do storage falhou" como falha declarada com causa.
+    const docBlocks: DocBlock[] = [];
     for (const cert of certificates) {
       const dl = await downloadB64(supabase, cert.path);
       if (!dl) { skippedCerts.push({ name: cert.name, reason: "download do storage falhou" }); continue; }
-      const size = dl.base64.length;
-      if (attachBytes + size > ATTACH_BUDGET) {
-        skippedCerts.push({ name: cert.name, reason: "orçamento de tamanho do pedido" });
-        continue;
-      }
-      attachBytes += size;
-      const isImage = dl.mime.startsWith('image/');
-      content.push({
-        type: isImage ? "image" : "document",
-        source: { type: "base64", media_type: isImage ? dl.mime : "application/pdf", data: dl.base64 },
-      });
-      content.push({ type: "text", text: `[CERTIFICADO/LAUDO: ${cert.name}]` });
-      analyzedCerts.push(cert.name);
+      docBlocks.push({ name: cert.name, base64: dl.base64, mime: dl.mime, kind: "cert" });
     }
-
     for (const mdoc of manufacturer_docs) {
       const dl = await downloadB64(supabase, mdoc.path);
       if (!dl) { skippedMfg.push({ name: mdoc.name, reason: "download do storage falhou" }); continue; }
-      const size = dl.base64.length;
-      if (attachBytes + size > ATTACH_BUDGET) {
-        skippedMfg.push({ name: mdoc.name, reason: "orçamento de tamanho do pedido" });
-        continue;
+      docBlocks.push({ name: mdoc.name, base64: dl.base64, mime: dl.mime, kind: "mfg" });
+    }
+
+    // F3 — decisão single vs multi-passagem. Prefixo = email + PAM + contratuais.
+    const prefixBytes = emailDl.base64.length + pamDl.base64.length + attachBytes;
+    const totalDocBytes = docBlocks.reduce((s, d) => s + d.base64.length, 0);
+    if (docBlocks.length === 0 || prefixBytes + totalDocBytes <= SINGLE_PASS_BUDGET) {
+      // SINGLE PASS: todos os docs entram no content; segue a passagem final normal.
+      for (const b of docContentBlocks(docBlocks)) content.push(b);
+      for (const d of docBlocks) (d.kind === "cert" ? analyzedCerts : analyzedMfg).push(d.name);
+      await writeProgress(supabase, approval_id, { current: 1, total: 1, label: docBlocks.length ? "A analisar todos os documentos numa passagem…" : "A analisar…" });
+    } else {
+      // MULTI-PASS: extrai por grupo (sem web_search), consolida na passagem final.
+      if (prefixBytes >= SINGLE_PASS_BUDGET) {
+        throw new Error(`Prefixo (PAM+email+contratuais) sozinho excede o orçamento de uma passagem (${prefixBytes} ≥ ${SINGLE_PASS_BUDGET}). Reduzir contratuais anexados.`);
       }
-      attachBytes += size;
-      const isImage = dl.mime.startsWith('image/');
-      content.push({
-        type: isImage ? "image" : "document",
-        source: { type: "base64", media_type: isImage ? dl.mime : "application/pdf", data: dl.base64 },
-      });
-      content.push({ type: "text", text: `[DOCUMENTO DO FABRICANTE: ${mdoc.name}]` });
-      analyzedMfg.push(mdoc.name);
+      const groups = packGroups(docBlocks, SINGLE_PASS_BUDGET - prefixBytes);
+      const extractions: any[] = [];
+      for (let gi = 0; gi < groups.length; gi++) {
+        await writeProgress(supabase, approval_id, { current: gi + 1, total: groups.length + 1, label: `A analisar grupo ${gi + 1} de ${groups.length}…` });
+        const groupContent = [...content, ...docContentBlocks(groups[gi]), { type: "text", text: EXTRACTION_INSTRUCTION }];
+        const ex = await runExtractionPass(anthropicKey, groupContent, gi + 1, groups.length); // throw ruidoso por grupo
+        extractions.push(...ex);
+        for (const d of groups[gi]) (d.kind === "cert" ? analyzedCerts : analyzedMfg).push(d.name);
+        console.log(`PAM: grupo ${gi + 1}/${groups.length} extraído (${ex.length} docs; acumulado ${extractions.length}).`);
+      }
+      await writeProgress(supabase, approval_id, { current: groups.length + 1, total: groups.length + 1, label: "A consolidar o parecer final…" });
+      content.push({ type: "text", text: `CERTIFICADOS/DOCS DE FABRICANTE — EXTRAÇÕES ESTRUTURADAS (analisados em ${groups.length} grupos; TRATA-AS COMO SE FOSSEM OS PRÓPRIOS CERTIFICADOS — uma entrada de conformidade por fornecedor):\n${JSON.stringify(extractions, null, 2)}` });
     }
-
     if (skippedCerts.length > 0 || skippedMfg.length > 0) {
-      console.warn(`PAM: anexos fora do orçamento — certs=${skippedCerts.length}, mfg=${skippedMfg.length}`);
+      console.warn(`PAM: downloads falhados — certs=${skippedCerts.length}, mfg=${skippedMfg.length}`);
     }
-    console.log(`PAM: certs analisados ${analyzedCerts.length}/${certificates.length}, mfg ${analyzedMfg.length}/${manufacturer_docs.length}`);
-
-    // 6. Fetch knowledge from Eng. Silva's project knowledge base (retrieval híbrido + fallback legacy)
-    let knowledge: KnowledgeResult = { context: "", sources: [], hasContractual: false, ceForCategoryFound: false };
-    let retrievalMode = "hybrid";
-    try {
-      // materialQuery: sem dados de material extraídos antes da análise, usamos a categoria.
-      const materialQuery = material_category;
-      knowledge = await fetchProjectKnowledgeHybrid(
-        supabase, obra_id, material_category, user_id, materialQuery,
-      );
-      console.log(`[PAM retrieval] hybrid OK, context length: ${knowledge.context.length}, sources: ${knowledge.sources.length}`);
-    } catch (hybridErr) {
-      console.error(`[PAM retrieval] hybrid FAILED, fallback to legacy:`, hybridErr);
-      retrievalMode = "legacy";
-      // Legacy agora devolve KnowledgeResult (ver ponto 4): força-inclui contratuais por
-      // specialty e traz a lista de fontes + sinais de aviso — logo os banners de
-      // contratual/CE também funcionam neste caminho de fallback.
-      knowledge = await fetchProjectKnowledgeLegacy(
-        supabase, obra_id, material_category, user_id,
-      );
-      console.log(`[PAM retrieval] legacy fallback, context length: ${knowledge.context.length}, sources: ${knowledge.sources.length}`);
-    }
-    const knowledgeContext = knowledge.context;
-    const hasKnowledge = knowledgeContext.length > 0;
-
-    console.log(`PAM: Knowledge context (${retrievalMode}): ${hasKnowledge ? `${knowledgeContext.length} chars` : "none"}`);
+    console.log(`PAM: docs analisados certs=${analyzedCerts.length}/${certificates.length}, mfg=${analyzedMfg.length}/${manufacturer_docs.length}`);
 
     // 7. Build context note based on available documents
     const docParts: string[] = [];
-    if (rec.mqt_file_path) docParts.push("o MQT/Mapa de Quantidades (PDF em anexo)");
-    if (rec.ce_file_path) docParts.push("o Caderno de Encargos (PDF em anexo)");
-    if (rec.contract_file_path) docParts.push("o Contrato da Obra (PDF em anexo)");
+    if (attachedContractuais.length > 0) docParts.push(`os documentos contratuais em anexo (${attachedContractuais.length}: ${attachedContractuais.join("; ")})`);
     if (hasKnowledge) docParts.push("a Base de Conhecimento do Projecto (resumos de documentos processados pelo Eng. Silva, incluídos no system prompt)");
 
     let contextNote = "";
@@ -957,7 +1093,7 @@ Responde SEMPRE em português europeu.`;
     const loopResult = await runClaudeWithContinuation({
       apiKey: anthropicKey,
       model: "claude-sonnet-4-5-20250929",
-      maxTokens: 16000,
+      maxTokens: 32000, // 5 blocos novos no output; margem sobre 16000 (o 009 rebentou 8000). Cabe nos 400s de background.
       temperature: 0, // parecer técnico é reprodutível, não escrita criativa (era default 1.0)
       system: systemPrompt,
       messages: [{ role: "user", content }],
@@ -984,10 +1120,7 @@ Responde SEMPRE em português europeu.`;
         reply_length: replyText.length,
         reply_tail: replyText.slice(-600),
       }));
-      await supabase.from("material_approvals")
-        .update({ status: "pending", updated_at: new Date().toISOString() }).eq("id", approval_id);
-      return new Response(JSON.stringify({ error: "Análise falhou: resposta truncada (limite de tokens). Nenhum parecer foi gerado — repita a análise." }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      throw new Error("Resposta truncada (limite de tokens) — nenhum parecer gerado.");
     }
 
     let analysis;
@@ -1018,10 +1151,7 @@ Responde SEMPRE em português europeu.`;
         reply_head: replyText.slice(0, 600),
         reply_tail: replyText.slice(-600),
       }));
-      await supabase.from("material_approvals")
-        .update({ status: "pending", updated_at: new Date().toISOString() }).eq("id", approval_id);
-      return new Response(JSON.stringify({ error: "Análise falhou: resposta do modelo inválida (JSON não interpretável). Nenhum parecer foi gerado — repita a análise." }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      throw new Error("Resposta do modelo inválida (JSON não interpretável) — nenhum parecer gerado.");
     }
 
     // Metadados AUTORITATIVOS (do NOSSO código, não do modelo) — transparência + avisos.
@@ -1069,13 +1199,26 @@ Responde SEMPRE em português europeu.`;
     }
 
     console.log(`PAM: Analysis complete — ${analysis.recommendation}`);
-
-    return new Response(JSON.stringify({ ok: true, analysis }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    } catch (bgErr: any) {
+      // Falha em background: repõe 'pending' e regista a causa em ai_analysis._error (preserva o resto).
+      console.error("PAM BG ERROR:", bgErr);
+      try {
+        const { data: cur } = await supabaseRef.from("material_approvals").select("ai_analysis").eq("id", lockedApprovalId).single();
+        const prev = (cur?.ai_analysis && typeof cur.ai_analysis === "object") ? cur.ai_analysis : {};
+        const { _progress: _drop, ...rest } = prev;
+        await supabaseRef.from("material_approvals")
+          .update({ status: "pending", ai_analysis: { ...rest, _error: { message: bgErr?.message || String(bgErr), at: new Date().toISOString() } }, updated_at: new Date().toISOString() })
+          .eq("id", lockedApprovalId);
+      } catch (e) { console.error("PAM: falha ao repor pending no BG catch:", e); }
+    }
+    };
+    if (typeof EdgeRuntime !== "undefined" && EdgeRuntime) EdgeRuntime.waitUntil(runInBackground());
+    else await runInBackground();
+    return new Response(JSON.stringify({ ok: true, started: true }),
+      { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (error: any) {
-    console.error("PAM ERROR:", error);
+    console.error("PAM ERROR (pré-background):", error);
     // Orphan-guard: se o lock 'analyzing' já era nosso, repõe 'pending' — nunca deixa preso.
     if (supabaseRef && lockedApprovalId) {
       try {
