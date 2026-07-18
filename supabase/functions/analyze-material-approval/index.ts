@@ -3,7 +3,6 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { voyageEmbed, voyageRerank } from "../_shared/embeddings/voyage-client.ts";
 import { runClaudeWithContinuation } from "../_shared/anthropic-loop.ts";
-import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
 // ── [LEGACY] Fetch knowledge from eng_silva_project_knowledge (keyword scoring) ──
 // Fallback de emergência quando o retrieval híbrido falha (ex.: Voyage/RPC em baixo).
@@ -641,57 +640,46 @@ REGRAS DE FIABILIDADE (INVIOLÁVEIS):
 - Preenche "certificates_validity" para CADA certificado/laudo que consigas ler (anexado ou da Base de Conhecimento). Compara a data de validade com a DATA DE HOJE (${today}): já passou → status "expirado"; sem data de validade legível → "sem_data"; documento ilegível/incompleto → "ilegivel"; caso contrário → "valido".`;
 }
 
-// Descarrega um objecto do bucket material-approvals e devolve base64 (sem newlines) + mime.
-// Erro ruidoso; devolve null e o caller decide (fail-loud nos obrigatórios, skip nos opcionais).
-async function downloadB64(
-  supabase: any,
-  path: string,
-  bucket = "material-approvals",
-): Promise<{ base64: string; mime: string } | null> {
+// Signed URL de um objecto do storage (a Anthropic vai buscar por url) — ZERO bytes de PDF na memória.
+// TTL cobre a análise (400s background) + fetch da Anthropic, em todas as passagens. Erro ruidoso; null → caller decide.
+const SIGNED_URL_TTL = 1800; // 30 min
+async function signedUrl(supabase: any, path: string, bucket = "material-approvals"): Promise<string | null> {
   try {
-    const { data, error } = await supabase.storage.from(bucket).download(path);
-    if (error || !data) {
-      console.error(`PAM: download FALHOU (${path}):`, error?.message || "sem dados");
+    const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, SIGNED_URL_TTL);
+    if (error || !data?.signedUrl) {
+      console.error(`PAM: signed URL FALHOU (${bucket}/${path}):`, error?.message || "sem url");
       return null;
     }
-    const ab = await data.arrayBuffer();
-    return { base64: encodeBase64(ab), mime: data.type || "application/pdf" };
+    return data.signedUrl;
   } catch (e) {
-    console.error(`PAM: download EXCEPÇÃO (${path}):`, (e as any)?.message || e);
+    console.error(`PAM: signed URL EXCEPÇÃO (${bucket}/${path}):`, (e as any)?.message || e);
     return null;
   }
 }
+const isImageName = (name: string) => /\.(jpe?g|png|webp|gif)$/i.test(name || "");
 
 // Background tasks do Supabase (Pro+: até 400s). Declarado para o deno check; guardado em runtime.
 declare const EdgeRuntime: { waitUntil: (p: Promise<unknown>) => void } | undefined;
 
-// Orçamento por passagem (base64). Conservador sob os 32MB/request e ~200K tokens do Sonnet 4.5.
-const SINGLE_PASS_BUDGET = 14 * 1024 * 1024;
+// Docs/grupo por CONTAGEM (com url source o request é minúsculo; o tecto passa a ser o contexto/tokens). Tunable.
+const MAX_DOCS_PER_PASS = 5;
 
-interface DocBlock { name: string; base64: string; mime: string; kind: "cert" | "mfg"; }
+interface DocBlock { name: string; url: string; isImage: boolean; kind: "cert" | "mfg"; }
 
-// Blocos de conteúdo Anthropic para um conjunto de docs (PDF→document, imagem→image).
+// Blocos de conteúdo Anthropic (source url) para um conjunto de docs.
 function docContentBlocks(docs: DocBlock[]): any[] {
   const blocks: any[] = [];
   for (const d of docs) {
-    const isImage = d.mime.startsWith("image/");
-    blocks.push({ type: isImage ? "image" : "document", source: { type: "base64", media_type: isImage ? d.mime : "application/pdf", data: d.base64 } });
+    blocks.push({ type: d.isImage ? "image" : "document", source: { type: "url", url: d.url } });
     blocks.push({ type: "text", text: `[${d.kind === "cert" ? "CERTIFICADO/LAUDO" : "DOCUMENTO DO FABRICANTE"}: ${d.name}]` });
   }
   return blocks;
 }
 
-// Empacota docs em grupos cujo base64 ≤ budget. Um doc maior que o budget vai sozinho (best-effort).
-function packGroups(docs: DocBlock[], budget: number): DocBlock[][] {
+// Agrupa docs por CONTAGEM (o request é minúsculo com url source). Overflow de tokens → 400 Anthropic → BG catch.
+function packGroups(docs: DocBlock[], maxPerGroup: number): DocBlock[][] {
   const groups: DocBlock[][] = [];
-  let cur: DocBlock[] = [], curBytes = 0;
-  for (const d of docs) {
-    const b = d.base64.length;
-    if (b > budget) { if (cur.length) { groups.push(cur); cur = []; curBytes = 0; } groups.push([d]); continue; }
-    if (curBytes + b > budget && cur.length) { groups.push(cur); cur = []; curBytes = 0; }
-    cur.push(d); curBytes += b;
-  }
-  if (cur.length) groups.push(cur);
+  for (let i = 0; i < docs.length; i += maxPerGroup) groups.push(docs.slice(i, i + maxPerGroup));
   return groups;
 }
 
@@ -838,6 +826,7 @@ serve(async (req) => {
 
     // Data de hoje (para o modelo aferir validade/caducidade dos certificados).
     const todayISO = new Date().toISOString().slice(0, 10);
+    const t0 = Date.now(); // checkpoints de observabilidade (dão a timeline de cada etapa nos logs)
 
     // 6. Retrieval MOVIDO para antes da montagem: contratuais da KB (Via 2) têm de ser
     // anexados ANTES dos certificados (prioridade de orçamento).
@@ -856,10 +845,8 @@ serve(async (req) => {
     const knowledgeContext = knowledge.context;
     const hasKnowledge = knowledgeContext.length > 0;
     console.log(`PAM: Knowledge context (${retrievalMode}): ${hasKnowledge ? `${knowledgeContext.length} chars` : "none"}`);
+    console.log(`PAM CK: retrieval feito (+${Date.now() - t0}ms)`);
 
-    // Orçamento partilhado: contratuais consomem PRIMEIRO (prioridade); certs/mfg ficam com o resto.
-    const ATTACH_BUDGET = 20 * 1024 * 1024;
-    let attachBytes = 0;
     const analyzedCerts: string[] = [];
     const skippedCerts: Array<{ name: string; reason: string }> = [];
     const analyzedMfg: string[] = [];
@@ -868,47 +855,28 @@ serve(async (req) => {
 
     const content: any[] = [];
 
-    // 0. Email do empreiteiro (print/screenshot) — OBRIGATÓRIO. Download do storage (fail-loud).
-    const emailDl = await downloadB64(supabase, rec.email_file_path);
-    if (!emailDl) {
-      return new Response(JSON.stringify({ error: "Falha ao descarregar o print do email do storage." }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-    const ALLOWED_EMAIL_MIMES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
-    const recMime = rec.email_file_mime || "";
-    const empreiteiro_email_mime = ALLOWED_EMAIL_MIMES.includes(recMime)
-      ? recMime
-      : (ALLOWED_EMAIL_MIMES.includes(emailDl.mime) ? emailDl.mime : "image/jpeg");
-    if (empreiteiro_email_mime === "application/pdf") {
-      content.push({
-        type: "document",
-        source: { type: "base64", media_type: "application/pdf", data: emailDl.base64 },
-      });
-    } else {
-      content.push({
-        type: "image",
-        source: { type: "base64", media_type: empreiteiro_email_mime, data: emailDl.base64 },
-      });
-    }
+    // 0. Email do empreiteiro — OBRIGATÓRIO. Signed URL (a Anthropic vai buscar). Fail-loud → throw (BG catch escreve _error).
+    const emailUrl = await signedUrl(supabase, rec.email_file_path);
+    if (!emailUrl) throw new Error("Falha ao gerar signed URL do print do email.");
+    const emailIsPdf = rec.email_file_mime === "application/pdf" || /\.pdf$/i.test(rec.email_file_path);
+    content.push(emailIsPdf
+      ? { type: "document", source: { type: "url", url: emailUrl } }
+      : { type: "image", source: { type: "url", url: emailUrl } });
     content.push({
       type: "text",
       text: "[EMAIL DO EMPREITEIRO — print/screenshot do email que acompanha o PAM. Lê o remetente, o tom, como se dirige ao fiscal, e usa esta informação para adaptar a tua resposta. Se ele é formal, sê formal. Se é mais directo, sê directo. Adapta-te.]",
     });
+    console.log(`PAM CK: email pronto (+${Date.now() - t0}ms)`);
 
-    // 1. PAM document (always) — download do storage (fail-loud).
-    const pamDl = await downloadB64(supabase, rec.pdm_file_path);
-    if (!pamDl) {
-      return new Response(JSON.stringify({ error: "Falha ao descarregar o PAM do storage." }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-    content.push({
-      type: "document",
-      source: { type: "base64", media_type: "application/pdf", data: pamDl.base64 },
-    });
+    // 1. PAM (sempre) — signed URL. Fail-loud → throw.
+    const pamUrl = await signedUrl(supabase, rec.pdm_file_path);
+    if (!pamUrl) throw new Error("Falha ao gerar signed URL do PAM.");
+    content.push({ type: "document", source: { type: "url", url: pamUrl } });
     content.push({
       type: "text",
       text: "[PEDIDO DE APROVAÇÃO DE MATERIAIS (PAM) — documento do empreiteiro acima]",
     });
+    console.log(`PAM CK: PAM pronto (+${Date.now() - t0}ms)`);
 
     // 2. CONTRATUAIS (Via 1 manual + Via 2 KB) como PDFs — prioridade de orçamento sobre certs.
     // Dedup por nome normalizado; manual precede KB. Contratuais nunca são cortados (têm prioridade).
@@ -924,53 +892,43 @@ serve(async (req) => {
     for (const c of contractualQueue) {
       const key = normName(c.name);
       if (key && seenContractual.has(key)) continue; // dedup: manual precede KB
-      const dl = await downloadB64(supabase, c.path, c.bucket);
-      if (!dl) { console.warn(`PAM: contratual NÃO descarregado (${c.bucket}/${c.path}) — ${c.name}`); continue; }
+      const url = await signedUrl(supabase, c.path, c.bucket);
+      if (!url) { console.warn(`PAM: contratual sem signed URL (${c.bucket}/${c.path}) — ${c.name}`); continue; }
       if (key) seenContractual.add(key);
-      attachBytes += dl.base64.length; // conta para o orçamento, mas nunca é cortado
-      const isImage = dl.mime.startsWith("image/");
-      content.push({ type: isImage ? "image" : "document", source: { type: "base64", media_type: isImage ? dl.mime : "application/pdf", data: dl.base64 } });
+      content.push({ type: isImageName(c.name) ? "image" : "document", source: { type: "url", url } });
       content.push({ type: "text", text: `[${c.label}]` });
       attachedContractuais.push(c.name);
     }
-    if (attachBytes > ATTACH_BUDGET) {
-      console.warn(`PAM: contratuais (${attachedContractuais.length}) excedem o orçamento (${attachBytes} > ${ATTACH_BUDGET}) — F3 resolverá; certs serão cortados nesta passagem.`);
-    }
-    console.log(`PAM: contratuais anexados: ${attachedContractuais.length} (${attachedContractuais.join("; ")})`);
+    console.log(`PAM CK: contratuais prontos: ${attachedContractuais.length} (+${Date.now() - t0}ms) — ${attachedContractuais.join("; ")}`);
 
-    // 4 + 5. Certificados e documentos de fabricante — orçamento partilhado (declarado acima).
-    // O que ficar de fora é REPORTADO (F3 elimina o "skipped por orçamento").
-    // F3: recolher TODOS os certs/mfg (sem corte por orçamento — o single/multi-pass trata do tamanho).
-    // Só resta "download do storage falhou" como falha declarada com causa.
+    // 4 + 5. Certificados e docs de fabricante — signed URL cada (ZERO bytes na memória; F5 corrige o OOM).
+    // Só resta "signed URL falhou" como falha declarada com causa.
     const docBlocks: DocBlock[] = [];
     for (const cert of certificates) {
-      const dl = await downloadB64(supabase, cert.path);
-      if (!dl) { skippedCerts.push({ name: cert.name, reason: "download do storage falhou" }); continue; }
-      docBlocks.push({ name: cert.name, base64: dl.base64, mime: dl.mime, kind: "cert" });
+      const url = await signedUrl(supabase, cert.path);
+      if (!url) { skippedCerts.push({ name: cert.name, reason: "signed URL falhou" }); continue; }
+      docBlocks.push({ name: cert.name, url, isImage: isImageName(cert.name), kind: "cert" });
     }
     for (const mdoc of manufacturer_docs) {
-      const dl = await downloadB64(supabase, mdoc.path);
-      if (!dl) { skippedMfg.push({ name: mdoc.name, reason: "download do storage falhou" }); continue; }
-      docBlocks.push({ name: mdoc.name, base64: dl.base64, mime: dl.mime, kind: "mfg" });
+      const url = await signedUrl(supabase, mdoc.path);
+      if (!url) { skippedMfg.push({ name: mdoc.name, reason: "signed URL falhou" }); continue; }
+      docBlocks.push({ name: mdoc.name, url, isImage: isImageName(mdoc.name), kind: "mfg" });
     }
+    console.log(`PAM CK: ${docBlocks.length} docs (cert+mfg) com signed URL (+${Date.now() - t0}ms)`);
 
-    // F3 — decisão single vs multi-passagem. Prefixo = email + PAM + contratuais.
-    const prefixBytes = emailDl.base64.length + pamDl.base64.length + attachBytes;
-    const totalDocBytes = docBlocks.reduce((s, d) => s + d.base64.length, 0);
-    if (docBlocks.length === 0 || prefixBytes + totalDocBytes <= SINGLE_PASS_BUDGET) {
+    // F3+F5 — decisão single vs multi por CONTAGEM. Overflow de tokens → 400 Anthropic → BG catch (_error).
+    if (docBlocks.length <= MAX_DOCS_PER_PASS) {
       // SINGLE PASS: todos os docs entram no content; segue a passagem final normal.
       for (const b of docContentBlocks(docBlocks)) content.push(b);
       for (const d of docBlocks) (d.kind === "cert" ? analyzedCerts : analyzedMfg).push(d.name);
       await writeProgress(supabase, approval_id, { current: 1, total: 1, label: docBlocks.length ? "A analisar todos os documentos numa passagem…" : "A analisar…" });
     } else {
       // MULTI-PASS: extrai por grupo (sem web_search), consolida na passagem final.
-      if (prefixBytes >= SINGLE_PASS_BUDGET) {
-        throw new Error(`Prefixo (PAM+email+contratuais) sozinho excede o orçamento de uma passagem (${prefixBytes} ≥ ${SINGLE_PASS_BUDGET}). Reduzir contratuais anexados.`);
-      }
-      const groups = packGroups(docBlocks, SINGLE_PASS_BUDGET - prefixBytes);
+      const groups = packGroups(docBlocks, MAX_DOCS_PER_PASS);
       const extractions: any[] = [];
       for (let gi = 0; gi < groups.length; gi++) {
         await writeProgress(supabase, approval_id, { current: gi + 1, total: groups.length + 1, label: `A analisar grupo ${gi + 1} de ${groups.length}…` });
+        console.log(`PAM CK: extração grupo ${gi + 1}/${groups.length} (+${Date.now() - t0}ms)`);
         const groupContent = [...content, ...docContentBlocks(groups[gi]), { type: "text", text: EXTRACTION_INSTRUCTION }];
         const ex = await runExtractionPass(anthropicKey, groupContent, gi + 1, groups.length); // throw ruidoso por grupo
         extractions.push(...ex);
