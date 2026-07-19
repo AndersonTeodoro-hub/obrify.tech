@@ -199,40 +199,41 @@ export default function MaterialApprovals() {
     try {
       const ts = Date.now();
       const basePath = `${user.id}/${selectedObra.id}/${ts}`;
+      const uid = () => crypto.randomUUID(); // sufixo único POR FICHEIRO — paths nunca colidem (nomes iguais são válidos)
 
-      const pdmPath = `${basePath}_pam_${sanitizeFilename(pdmFile.name)}`;
+      const pdmPath = `${basePath}_pam_${uid()}_${sanitizeFilename(pdmFile.name)}`;
       const { error: upErr } = await supabase.storage.from('material-approvals').upload(pdmPath, pdmFile);
       if (upErr) throw upErr;
 
-      const emailPath = `${basePath}_email_${sanitizeFilename(emailFile.name)}`;
+      const emailPath = `${basePath}_email_${uid()}_${sanitizeFilename(emailFile.name)}`;
       const { error: emailErr } = await supabase.storage.from('material-approvals').upload(emailPath, emailFile);
       if (emailErr) throw emailErr;
       const emailMime = emailFile.type || (emailFile.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
 
       let mqtPath: string | null = null;
       if (mqtFile) {
-        mqtPath = `${basePath}_mqt_${sanitizeFilename(mqtFile.name)}`;
+        mqtPath = `${basePath}_mqt_${uid()}_${sanitizeFilename(mqtFile.name)}`;
         const { error } = await supabase.storage.from('material-approvals').upload(mqtPath, mqtFile);
         if (error) throw error;
       }
 
       let cePath: string | null = null;
       if (ceFile) {
-        cePath = `${basePath}_ce_${sanitizeFilename(ceFile.name)}`;
+        cePath = `${basePath}_ce_${uid()}_${sanitizeFilename(ceFile.name)}`;
         const { error } = await supabase.storage.from('material-approvals').upload(cePath, ceFile);
         if (error) throw error;
       }
 
       let contractPath: string | null = null;
       if (contractFile) {
-        contractPath = `${basePath}_contract_${sanitizeFilename(contractFile.name)}`;
+        contractPath = `${basePath}_contract_${uid()}_${sanitizeFilename(contractFile.name)}`;
         const { error } = await supabase.storage.from('material-approvals').upload(contractPath, contractFile);
         if (error) throw error;
       }
 
       const certificatesJson: Array<{ name: string; path: string; size: number; pages: number | null }> = [];
       for (const cf of certFiles) {
-        const cfPath = `${basePath}_cert_${sanitizeFilename(cf.name)}`;
+        const cfPath = `${basePath}_cert_${uid()}_${sanitizeFilename(cf.name)}`;
         const { error } = await supabase.storage.from('material-approvals').upload(cfPath, cf);
         if (error) throw error;
         certificatesJson.push({ name: cf.name, path: cfPath, size: cf.size, pages: await countPdfPages(cf) });
@@ -240,7 +241,7 @@ export default function MaterialApprovals() {
 
       const mfgDocsJson: Array<{ name: string; path: string; size: number; pages: number | null }> = [];
       for (const mf of mfgFiles) {
-        const mfPath = `${basePath}_mfg_${sanitizeFilename(mf.name)}`;
+        const mfPath = `${basePath}_mfg_${uid()}_${sanitizeFilename(mf.name)}`;
         const { error } = await supabase.storage.from('material-approvals').upload(mfPath, mf);
         if (error) throw error;
         mfgDocsJson.push({ name: mf.name, path: mfPath, size: mf.size, pages: await countPdfPages(mf) });
