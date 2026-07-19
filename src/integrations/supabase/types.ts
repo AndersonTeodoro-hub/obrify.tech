@@ -1272,6 +1272,7 @@ export type Database = {
           id: string
           key_elements: Json | null
           nivel_id: string | null
+          num_pages: number | null
           obra_id: string
           processed: boolean | null
           specialty: string
@@ -1289,6 +1290,7 @@ export type Database = {
           id?: string
           key_elements?: Json | null
           nivel_id?: string | null
+          num_pages?: number | null
           obra_id: string
           processed?: boolean | null
           specialty: string
@@ -1306,6 +1308,7 @@ export type Database = {
           id?: string
           key_elements?: Json | null
           nivel_id?: string | null
+          num_pages?: number | null
           obra_id?: string
           processed?: boolean | null
           specialty?: string
@@ -2124,14 +2127,17 @@ export type Database = {
           ai_recommendation: string | null
           ce_file_name: string | null
           ce_file_path: string | null
+          ce_page_count: number | null
           certificates: Json | null
           contract_file_name: string | null
           contract_file_path: string | null
+          contract_page_count: number | null
           created_at: string | null
           decided_at: string | null
           decided_by: string | null
           email_file_mime: string | null
           email_file_path: string | null
+          email_page_count: number | null
           final_decision: string | null
           fiscal_name: string | null
           fiscal_notes: Json | null
@@ -2141,10 +2147,12 @@ export type Database = {
           mqt_file_path: string | null
           mqt_file_size: number | null
           mqt_name: string | null
+          mqt_page_count: number | null
           obra_id: string
           pdm_file_path: string
           pdm_file_size: number | null
           pdm_name: string
+          pdm_page_count: number | null
           reviewer_notes: string | null
           status: string | null
           updated_at: string | null
@@ -2155,14 +2163,17 @@ export type Database = {
           ai_recommendation?: string | null
           ce_file_name?: string | null
           ce_file_path?: string | null
+          ce_page_count?: number | null
           certificates?: Json | null
           contract_file_name?: string | null
           contract_file_path?: string | null
+          contract_page_count?: number | null
           created_at?: string | null
           decided_at?: string | null
           decided_by?: string | null
           email_file_mime?: string | null
           email_file_path?: string | null
+          email_page_count?: number | null
           final_decision?: string | null
           fiscal_name?: string | null
           fiscal_notes?: Json | null
@@ -2172,10 +2183,12 @@ export type Database = {
           mqt_file_path?: string | null
           mqt_file_size?: number | null
           mqt_name?: string | null
+          mqt_page_count?: number | null
           obra_id: string
           pdm_file_path: string
           pdm_file_size?: number | null
           pdm_name: string
+          pdm_page_count?: number | null
           reviewer_notes?: string | null
           status?: string | null
           updated_at?: string | null
@@ -2186,14 +2199,17 @@ export type Database = {
           ai_recommendation?: string | null
           ce_file_name?: string | null
           ce_file_path?: string | null
+          ce_page_count?: number | null
           certificates?: Json | null
           contract_file_name?: string | null
           contract_file_path?: string | null
+          contract_page_count?: number | null
           created_at?: string | null
           decided_at?: string | null
           decided_by?: string | null
           email_file_mime?: string | null
           email_file_path?: string | null
+          email_page_count?: number | null
           final_decision?: string | null
           fiscal_name?: string | null
           fiscal_notes?: Json | null
@@ -2203,10 +2219,12 @@ export type Database = {
           mqt_file_path?: string | null
           mqt_file_size?: number | null
           mqt_name?: string | null
+          mqt_page_count?: number | null
           obra_id?: string
           pdm_file_path?: string
           pdm_file_size?: number | null
           pdm_name?: string
+          pdm_page_count?: number | null
           reviewer_notes?: string | null
           status?: string | null
           updated_at?: string | null

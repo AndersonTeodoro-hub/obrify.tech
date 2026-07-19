@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
+import { countPdfPages } from '@/utils/pdf-page-count';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -204,6 +205,7 @@ export default function ProjectKnowledge() {
 
         const mimeType = getFileMimeType(file.name);
         const docType = mimeType.startsWith('image/') ? mimeType.split('/')[1] : 'pdf';
+        const numPages = await countPdfPages(file); // null se imagem/falha
 
         const { data: insertData, error: insertError } = await supabase
           .from('eng_silva_project_knowledge')
@@ -218,6 +220,7 @@ export default function ProjectKnowledge() {
             summary: '',
             file_path: filePath,
             file_size: file.size,
+            num_pages: numPages,
             processed: false,
           })
           .select('id')

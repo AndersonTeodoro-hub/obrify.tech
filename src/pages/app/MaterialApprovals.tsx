@@ -15,6 +15,7 @@ import {
   FileCheck, Plus, Upload, ChevronDown, ChevronUp, Trash2, CheckCircle2, AlertTriangle, XCircle, Clock, Loader2, Building2, ArrowLeft, FileText, Award, Factory, X, Download, ScrollText, FileSignature, ImageIcon, BookOpen, Brain, Mail, Copy, RotateCcw,
 } from 'lucide-react';
 import { generateMaterialApprovalPDF, generateMaterialApprovalExecutive } from '@/utils/material-approval-pdf';
+import { countPdfPages } from '@/utils/pdf-page-count';
 
 const CATEGORIES = [
   'Betão (classes)', 'Aço (armaduras)', 'Cofragem', 'Impermeabilização',
@@ -58,8 +59,8 @@ type Approval = {
   decided_at: string | null; created_at: string; updated_at: string;
   email_file_path?: string | null;
   email_file_mime?: string | null;
-  certificates?: Array<{ name: string; path: string; size: number }>;
-  manufacturer_docs?: Array<{ name: string; path: string; size: number }>;
+  certificates?: Array<{ name: string; path: string; size: number; pages?: number | null }>;
+  manufacturer_docs?: Array<{ name: string; path: string; size: number; pages?: number | null }>;
   fiscal_notes?: FiscalNote[] | null;
   fiscal_name?: string | null;
 };
@@ -229,21 +230,28 @@ export default function MaterialApprovals() {
         if (error) throw error;
       }
 
-      const certificatesJson: Array<{ name: string; path: string; size: number }> = [];
+      const certificatesJson: Array<{ name: string; path: string; size: number; pages: number | null }> = [];
       for (const cf of certFiles) {
         const cfPath = `${basePath}_cert_${sanitizeFilename(cf.name)}`;
         const { error } = await supabase.storage.from('material-approvals').upload(cfPath, cf);
         if (error) throw error;
-        certificatesJson.push({ name: cf.name, path: cfPath, size: cf.size });
+        certificatesJson.push({ name: cf.name, path: cfPath, size: cf.size, pages: await countPdfPages(cf) });
       }
 
-      const mfgDocsJson: Array<{ name: string; path: string; size: number }> = [];
+      const mfgDocsJson: Array<{ name: string; path: string; size: number; pages: number | null }> = [];
       for (const mf of mfgFiles) {
         const mfPath = `${basePath}_mfg_${sanitizeFilename(mf.name)}`;
         const { error } = await supabase.storage.from('material-approvals').upload(mfPath, mf);
         if (error) throw error;
-        mfgDocsJson.push({ name: mf.name, path: mfPath, size: mf.size });
+        mfgDocsJson.push({ name: mf.name, path: mfPath, size: mf.size, pages: await countPdfPages(mf) });
       }
+
+      // Páginas dos PDFs escalares (PAM, email, contratuais manuais). null = imagem/falha.
+      const pamPages = await countPdfPages(pdmFile);
+      const emailPages = await countPdfPages(emailFile);
+      const mqtPages = mqtFile ? await countPdfPages(mqtFile) : null;
+      const cePages = ceFile ? await countPdfPages(ceFile) : null;
+      const contractPages = contractFile ? await countPdfPages(contractFile) : null;
 
       const { data: record, error: insErr } = await supabase.from('material_approvals').insert({
         obra_id: selectedObra.id,
@@ -254,12 +262,17 @@ export default function MaterialApprovals() {
         mqt_name: mqtFile?.name || null,
         mqt_file_path: mqtPath,
         mqt_file_size: mqtFile?.size || null,
+        mqt_page_count: mqtPages,
         contract_file_path: contractPath,
         contract_file_name: contractFile?.name || null,
+        contract_page_count: contractPages,
         ce_file_path: cePath,
         ce_file_name: ceFile?.name || null,
+        ce_page_count: cePages,
         material_category: category,
         status: 'pending',
+        pdm_page_count: pamPages,
+        email_page_count: emailPages,
         certificates: certificatesJson as any,
         manufacturer_docs: mfgDocsJson as any,
         email_file_path: emailPath,

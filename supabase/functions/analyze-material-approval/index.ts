@@ -24,7 +24,7 @@ async function fetchProjectKnowledgeLegacy(
     // This ensures we find certificates classified under any type (e.g. "Pormenores Construtivos").
     let query = supabase
       .from("eng_silva_project_knowledge")
-      .select("document_name, document_type, specialty, summary, key_elements, file_path")
+      .select("document_name, document_type, specialty, summary, key_elements, file_path, num_pages")
       .eq("obra_id", obraId)
       .eq("processed", true);
     if (userId) query = query.eq("user_id", userId);
@@ -195,7 +195,7 @@ async function fetchProjectKnowledgeLegacy(
       console.log(`F2: sem match de categoria — a incluir todos os ${legacyContractsWithFile.length} contratuais como PDF (fallback).`);
     }
     const contractualFiles = (legacyMatched.length > 0 ? legacyMatched : legacyContractsWithFile)
-      .map((d: any) => ({ document_name: d.document_name, file_path: d.file_path }));
+      .map((d: any) => ({ document_name: d.document_name, file_path: d.file_path, pages: d.num_pages ?? null }));
 
     return {
       context,
@@ -264,7 +264,7 @@ interface KnowledgeResult {
   hasContractual: boolean;      // entrou algum CE/MQT/Contrato/Condições Técnicas no contexto?
   ceForCategoryFound: boolean;  // existe Caderno de Encargos que cobre esta categoria de material?
   mqt_consulted?: string[];     // nomes dos MQT (specialty "Mapa de Quantidades (MQT)") no contexto
-  contractualFiles?: Array<{ document_name: string; file_path: string }>; // Via 2: contratuais da KB para anexar como PDF (gated por categoria)
+  contractualFiles?: Array<{ document_name: string; file_path: string; pages?: number | null }>; // Via 2: contratuais da KB para anexar como PDF (gated por categoria)
 }
 
 // ── Retrieval híbrido: Via A determinística (certificados + contratuais) + Via B semântica ──
@@ -301,7 +301,7 @@ async function fetchProjectKnowledgeHybrid(
   // A2. Contratuais e normativos: sempre incluídos, sem gate.
   let contractQuery = supabase
     .from("eng_silva_project_knowledge")
-    .select("id, document_name, document_type, specialty, summary, key_elements, file_path")
+    .select("id, document_name, document_type, specialty, summary, key_elements, file_path, num_pages")
     .eq("obra_id", obraId)
     .eq("processed", true)
     .in("specialty", HYBRID_CONTRACT_SPECIALTIES)
@@ -431,7 +431,7 @@ async function fetchProjectKnowledgeHybrid(
     console.log(`F2: sem match de categoria — a incluir todos os ${contractsWithFile.length} contratuais como PDF (fallback).`);
   }
   const contractualFiles = (contractMatched.length > 0 ? contractMatched : contractsWithFile)
-    .map((d: any) => ({ document_name: d.document_name, file_path: d.file_path }));
+    .map((d: any) => ({ document_name: d.document_name, file_path: d.file_path, pages: d.num_pages ?? null }));
 
   return {
     context,
@@ -661,12 +661,23 @@ const isImageName = (name: string) => /\.(jpe?g|png|webp|gif)$/i.test(name || ""
 // Background tasks do Supabase (Pro+: até 400s). Declarado para o deno check; guardado em runtime.
 declare const EdgeRuntime: { waitUntil: (p: Promise<unknown>) => void } | undefined;
 
-// Docs/grupo por CONTAGEM (com url source o request é minúsculo; o tecto passa a ser o contexto/tokens). Tunable.
-const MAX_DOCS_PER_PASS = 5;
+// Orçamento de PÁGINAS de PDF por request. Anthropic: 100pp/request em modelos 200k
+// (Sonnet 4.5). Margem para overhead → 85. Imagens NÃO contam para este limite.
+const MAX_PAGES_PER_PASS = 85;
+// Custo assumido para um PDF sem contagem conhecida (legado/medição falhada): ocupa o
+// orçamento inteiro → isolado na sua passagem. Nunca deixa por ler; só rebenta
+// (declarado) se um único PDF real exceder 100pp.
+const UNKNOWN_PDF_PAGES = MAX_PAGES_PER_PASS;
 
-interface DocBlock { name: string; url: string; isImage: boolean; kind: "cert" | "mfg"; }
+interface DocBlock { name: string; url: string; isImage: boolean; kind: "cert" | "mfg"; pages: number; }
 
-// Blocos de conteúdo Anthropic (source url) para um conjunto de docs.
+// Custo de orçamento de um bloco: imagens = 0; PDF com contagem = a contagem; PDF sem = UNKNOWN.
+function pdfPages(isImage: boolean, pages: number | null | undefined): number {
+  if (isImage) return 0;
+  return (typeof pages === "number" && pages > 0) ? pages : UNKNOWN_PDF_PAGES;
+}
+
+// Blocos de conteúdo Anthropic (source url) para certs/docs de fabricante.
 function docContentBlocks(docs: DocBlock[]): any[] {
   const blocks: any[] = [];
   for (const d of docs) {
@@ -676,10 +687,26 @@ function docContentBlocks(docs: DocBlock[]): any[] {
   return blocks;
 }
 
-// Agrupa docs por CONTAGEM (o request é minúsculo com url source). Overflow de tokens → 400 Anthropic → BG catch.
-function packGroups(docs: DocBlock[], maxPerGroup: number): DocBlock[][] {
-  const groups: DocBlock[][] = [];
-  for (let i = 0; i < docs.length; i += maxPerGroup) groups.push(docs.slice(i, i + maxPerGroup));
+// Blocos de conteúdo para documentos contratuais (label próprio).
+function contractualContentBlocks(blocks: Array<{ url: string; isImage: boolean; label: string }>): any[] {
+  const out: any[] = [];
+  for (const b of blocks) {
+    out.push({ type: b.isImage ? "image" : "document", source: { type: "url", url: b.url } });
+    out.push({ type: "text", text: `[${b.label}]` });
+  }
+  return out;
+}
+
+// Agrupa por ORÇAMENTO DE PÁGINAS (guloso, preserva ordem). Um doc cujo custo excede o
+// budget vai sozinho (e se for PDF real > 100pp, a passagem rebenta na Anthropic → declarado).
+function packByPages<T extends { pages: number }>(docs: T[], budget: number): T[][] {
+  const groups: T[][] = [];
+  let cur: T[] = [], used = 0;
+  for (const d of docs) {
+    if (cur.length > 0 && used + d.pages > budget) { groups.push(cur); cur = []; used = 0; }
+    cur.push(d); used += d.pages;
+  }
+  if (cur.length > 0) groups.push(cur);
   return groups;
 }
 
@@ -710,19 +737,32 @@ Responde SEMPRE em português europeu.`;
 
 const EXTRACTION_INSTRUCTION = "Extrai os dados estruturados dos certificados/documentos de fabricante ACIMA (só deste grupo), como ARRAY JSON conforme o teu system prompt. Não dês parecer nem pesquises online.";
 
+// Extração PRÉVIA dos contratuais: lê MQT/CE/CTE/Contrato INTEGRALMENTE e extrai a
+// estrutura por artigo/secção (formato F4). Substitui os PDFs contratuais nas passagens
+// seguintes quando o prefixo contratual não cabe no orçamento de páginas.
+const CONTRACTUAL_EXTRACTION_SYSTEM = `És o Eng. Silva a fazer LEITURA INTEGRAL dos documentos contratuais (MQT / Caderno de Encargos / Condições Técnicas / Contrato) — NÃO é o parecer. Recebes o PAM, o email e um GRUPO de contratuais. Extrai a estrutura por artigo/secção que servirá para confrontar o PAM. Cita o nome EXACTO do ficheiro. Se um dado não estiver no documento, usa null. NUNCA inventes artigos, diâmetros, quantidades ou secções. Responde SÓ com um ARRAY JSON (sem markdown), um item por documento contratual:
+{"document": "nome exacto do ficheiro", "doc_kind": "um de: MQT, CE, CTE, Contrato, outro", "revisao": "revisão (ex. Rev.02, Dez 2025) ou null", "mqt_articles": [{"fase": "fase da obra ou null", "article": "artigo (ex. 1.3.3.1–.3)", "description": "descrição", "diameter": "diâmetro(s) ou null", "quantity": "quantidade(s) com unidade ou null", "norm": "norma ou null"}], "cte_sections": [{"section": "documento/secção (ex. Domésticos — 3.4.1)", "requirement": "requisito de projeto"}]}
+Responde SEMPRE em português europeu.`;
+
+const CONTRACTUAL_EXTRACTION_INSTRUCTION = "Lê INTEGRALMENTE os documentos contratuais ACIMA (só deste grupo) e extrai a estrutura por artigo/secção, como ARRAY JSON conforme o teu system prompt. Não dês parecer.";
+
 // Uma passagem de extração de um grupo. Erro RUIDOSO com o nº do grupo.
-async function runExtractionPass(apiKey: string, content: any[], groupNum: number, groupTotal: number): Promise<any[]> {
+async function runExtractionPass(opts: {
+  apiKey: string; content: any[]; system: string; maxTokens: number;
+  groupNum: number; groupTotal: number; label: string;
+}): Promise<any[]> {
+  const { apiKey, content, system, maxTokens, groupNum, groupTotal, label } = opts;
   const loop = await runClaudeWithContinuation({
-    apiKey, model: "claude-sonnet-4-5-20250929", maxTokens: 6000, temperature: 0,
-    system: EXTRACTION_SYSTEM, messages: [{ role: "user", content }],
-    maxIterations: 2, logPrefix: `[PAM extract ${groupNum}/${groupTotal}]`,
+    apiKey, model: "claude-sonnet-4-5-20250929", maxTokens, temperature: 0,
+    system, messages: [{ role: "user", content }],
+    maxIterations: 2, logPrefix: `[PAM ${label} ${groupNum}/${groupTotal}]`,
   });
   if (loop.finalStopReason === "max_tokens" || loop.hitIterationCap) {
-    throw new Error(`Extração do grupo ${groupNum}/${groupTotal} truncada (stop_reason=${loop.finalStopReason}). Reduzir dimensão do grupo.`);
+    throw new Error(`Extração (${label}) do grupo ${groupNum}/${groupTotal} truncada (stop_reason=${loop.finalStopReason}). Reduzir dimensão do grupo.`);
   }
   let arr: any;
   try { arr = extractJson(loop.accumulatedText || "[]"); } catch (e) {
-    throw new Error(`Extração do grupo ${groupNum}/${groupTotal}: JSON inválido — ${(e as any)?.message}`);
+    throw new Error(`Extração (${label}) do grupo ${groupNum}/${groupTotal}: JSON inválido — ${(e as any)?.message}`);
   }
   return Array.isArray(arr) ? arr : [arr];
 }
@@ -766,7 +806,7 @@ serve(async (req) => {
     // Registo = fonte única de verdade (paths + metadados). RLS aplicativo: só o DONO analisa.
     const { data: rec, error: recErr } = await supabase
       .from("material_approvals")
-      .select("obra_id, user_id, material_category, pdm_file_path, email_file_path, email_file_mime, mqt_file_path, mqt_name, ce_file_path, ce_file_name, contract_file_path, contract_file_name, certificates, manufacturer_docs")
+      .select("obra_id, user_id, material_category, pdm_file_path, pdm_page_count, email_file_path, email_file_mime, email_page_count, mqt_file_path, mqt_name, mqt_page_count, ce_file_path, ce_file_name, ce_page_count, contract_file_path, contract_file_name, contract_page_count, certificates, manufacturer_docs")
       .eq("id", approval_id)
       .eq("user_id", user.id)
       .single();
@@ -852,6 +892,9 @@ serve(async (req) => {
     const analyzedMfg: string[] = [];
     const skippedMfg: Array<{ name: string; reason: string }> = [];
     const attachedContractuais: string[] = [];
+    const skippedContractuais: Array<{ name: string; reason: string }> = [];
+    let passNum = 0;
+    let totalPasses = 0;
 
     const content: any[] = [];
 
@@ -878,70 +921,113 @@ serve(async (req) => {
     });
     console.log(`PAM CK: PAM pronto (+${Date.now() - t0}ms)`);
 
-    // 2. CONTRATUAIS (Via 1 manual + Via 2 KB) como PDFs — prioridade de orçamento sobre certs.
-    // Dedup por nome normalizado; manual precede KB. Contratuais nunca são cortados (têm prioridade).
+    // Páginas do prefixo NÃO-contratual (email + PAM). Imagens = 0.
+    const emailPages = pdfPages(!emailIsPdf, rec.email_page_count);
+    const pamPages = pdfPages(false, rec.pdm_page_count);
+    const prefixCost = emailPages + pamPages;
+
+    // 2. CONTRATUAIS (Via 1 manual + Via 2 KB) — com páginas para orçamentar.
     const normName = (s: string) => (s || "").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "").trim();
-    const contractualQueue: Array<{ name: string; path: string; bucket: string; label: string }> = [];
-    if (rec.mqt_file_path) contractualQueue.push({ name: rec.mqt_name || "MQT", path: rec.mqt_file_path, bucket: "material-approvals", label: "MQT / MAPA DE QUANTIDADES — mapa de quantidades e trabalhos do projecto" });
-    if (rec.ce_file_path) contractualQueue.push({ name: rec.ce_file_name || "Caderno de Encargos", path: rec.ce_file_path, bucket: "material-approvals", label: "CADERNO DE ENCARGOS — condições técnicas, especificações de materiais, ensaios exigidos" });
-    if (rec.contract_file_path) contractualQueue.push({ name: rec.contract_file_name || "Contrato", path: rec.contract_file_path, bucket: "material-approvals", label: "CONTRATO DA OBRA — contrato de empreitada" });
+    const contractualQueue: Array<{ name: string; path: string; bucket: string; label: string; pages: number | null }> = [];
+    if (rec.mqt_file_path) contractualQueue.push({ name: rec.mqt_name || "MQT", path: rec.mqt_file_path, bucket: "material-approvals", label: "MQT / MAPA DE QUANTIDADES — mapa de quantidades e trabalhos do projecto", pages: rec.mqt_page_count });
+    if (rec.ce_file_path) contractualQueue.push({ name: rec.ce_file_name || "Caderno de Encargos", path: rec.ce_file_path, bucket: "material-approvals", label: "CADERNO DE ENCARGOS — condições técnicas, especificações de materiais, ensaios exigidos", pages: rec.ce_page_count });
+    if (rec.contract_file_path) contractualQueue.push({ name: rec.contract_file_name || "Contrato", path: rec.contract_file_path, bucket: "material-approvals", label: "CONTRATO DA OBRA — contrato de empreitada", pages: rec.contract_page_count });
     for (const kb of (knowledge.contractualFiles || [])) {
-      contractualQueue.push({ name: kb.document_name, path: kb.file_path, bucket: "project-knowledge", label: `CONTRATUAL DA BASE DE CONHECIMENTO: ${kb.document_name}` });
+      contractualQueue.push({ name: kb.document_name, path: kb.file_path, bucket: "project-knowledge", label: `CONTRATUAL DA BASE DE CONHECIMENTO: ${kb.document_name}`, pages: kb.pages ?? null });
     }
+    // Resolve signed URLs (dedup: manual precede KB). Falha de URL → declarada (nunca silenciosa).
+    interface CBlock { name: string; url: string; isImage: boolean; pages: number; label: string; }
+    const contractualBlocks: CBlock[] = [];
     const seenContractual = new Set<string>();
     for (const c of contractualQueue) {
       const key = normName(c.name);
-      if (key && seenContractual.has(key)) continue; // dedup: manual precede KB
+      if (key && seenContractual.has(key)) continue;
       const url = await signedUrl(supabase, c.path, c.bucket);
-      if (!url) { console.warn(`PAM: contratual sem signed URL (${c.bucket}/${c.path}) — ${c.name}`); continue; }
+      if (!url) { skippedContractuais.push({ name: c.name, reason: "signed URL falhou" }); continue; }
       if (key) seenContractual.add(key);
-      content.push({ type: isImageName(c.name) ? "image" : "document", source: { type: "url", url } });
-      content.push({ type: "text", text: `[${c.label}]` });
-      attachedContractuais.push(c.name);
+      const isImg = isImageName(c.name);
+      contractualBlocks.push({ name: c.name, url, isImage: isImg, pages: pdfPages(isImg, c.pages), label: c.label });
     }
-    console.log(`PAM CK: contratuais prontos: ${attachedContractuais.length} (+${Date.now() - t0}ms) — ${attachedContractuais.join("; ")}`);
+    const contractualCostSum = contractualBlocks.reduce((s, c) => s + c.pages, 0);
 
-    // 4 + 5. Certificados e docs de fabricante — signed URL cada (ZERO bytes na memória; F5 corrige o OOM).
-    // Só resta "signed URL falhou" como falha declarada com causa.
+    // 4 + 5. Certificados e docs de fabricante — signed URL + páginas (ZERO bytes na memória).
     const docBlocks: DocBlock[] = [];
     for (const cert of certificates) {
       const url = await signedUrl(supabase, cert.path);
       if (!url) { skippedCerts.push({ name: cert.name, reason: "signed URL falhou" }); continue; }
-      docBlocks.push({ name: cert.name, url, isImage: isImageName(cert.name), kind: "cert" });
+      const isImg = isImageName(cert.name);
+      docBlocks.push({ name: cert.name, url, isImage: isImg, kind: "cert", pages: pdfPages(isImg, (cert as any).pages) });
     }
     for (const mdoc of manufacturer_docs) {
       const url = await signedUrl(supabase, mdoc.path);
       if (!url) { skippedMfg.push({ name: mdoc.name, reason: "signed URL falhou" }); continue; }
-      docBlocks.push({ name: mdoc.name, url, isImage: isImageName(mdoc.name), kind: "mfg" });
+      const isImg = isImageName(mdoc.name);
+      docBlocks.push({ name: mdoc.name, url, isImage: isImg, kind: "mfg", pages: pdfPages(isImg, (mdoc as any).pages) });
     }
-    console.log(`PAM CK: ${docBlocks.length} docs (cert+mfg) com signed URL (+${Date.now() - t0}ms)`);
+    const maxCertCost = docBlocks.reduce((m, d) => Math.max(m, d.pages), 0);
 
-    // F3+F5 — decisão single vs multi por CONTAGEM. Overflow de tokens → 400 Anthropic → BG catch (_error).
-    if (docBlocks.length <= MAX_DOCS_PER_PASS) {
-      // SINGLE PASS: todos os docs entram no content; segue a passagem final normal.
-      for (const b of docContentBlocks(docBlocks)) content.push(b);
-      for (const d of docBlocks) (d.kind === "cert" ? analyzedCerts : analyzedMfg).push(d.name);
-      await writeProgress(supabase, approval_id, { current: 1, total: 1, label: docBlocks.length ? "A analisar todos os documentos numa passagem…" : "A analisar…" });
+    // CHECKPOINT de calibração (dá os números reais do PAM 011 no 1º run).
+    console.log(`PAM CK: páginas — email=${emailPages} PAM=${pamPages} | contratuais=[${contractualBlocks.map((c) => `${c.name}:${c.isImage ? "img" : c.pages}`).join("; ")}] Σ=${contractualCostSum} | certs/mfg=[${docBlocks.map((d) => `${d.name}:${d.isImage ? "img" : d.pages}`).join("; ")}] maxCert=${maxCertCost} | orçamento/passagem=${MAX_PAGES_PER_PASS} (+${Date.now() - t0}ms)`);
+
+    // DECISÃO: contratuais INLINE (PDF em todas as passagens) só se sobrar orçamento
+    // para o maior cert numa passagem. Caso contrário → EXTRAÇÃO PRÉVIA dos contratuais.
+    const contractualsFitInline = prefixCost + contractualCostSum + maxCertCost <= MAX_PAGES_PER_PASS;
+    let certBudget: number;
+
+    if (contractualsFitInline) {
+      for (const b of contractualContentBlocks(contractualBlocks)) content.push(b);
+      for (const c of contractualBlocks) attachedContractuais.push(c.name);
+      certBudget = MAX_PAGES_PER_PASS - prefixCost - contractualCostSum;
+      console.log(`PAM CK: contratuais INLINE (${attachedContractuais.length}); orçamento certs=${certBudget}pp (+${Date.now() - t0}ms)`);
     } else {
-      // MULTI-PASS: extrai por grupo (sem web_search), consolida na passagem final.
-      const groups = packGroups(docBlocks, MAX_DOCS_PER_PASS);
-      const extractions: any[] = [];
-      for (let gi = 0; gi < groups.length; gi++) {
-        await writeProgress(supabase, approval_id, { current: gi + 1, total: groups.length + 1, label: `A analisar grupo ${gi + 1} de ${groups.length}…` });
-        console.log(`PAM CK: extração grupo ${gi + 1}/${groups.length} (+${Date.now() - t0}ms)`);
-        const groupContent = [...content, ...docContentBlocks(groups[gi]), { type: "text", text: EXTRACTION_INSTRUCTION }];
-        const ex = await runExtractionPass(anthropicKey, groupContent, gi + 1, groups.length); // throw ruidoso por grupo
-        extractions.push(...ex);
-        for (const d of groups[gi]) (d.kind === "cert" ? analyzedCerts : analyzedMfg).push(d.name);
-        console.log(`PAM: grupo ${gi + 1}/${groups.length} extraído (${ex.length} docs; acumulado ${extractions.length}).`);
+      // EXTRAÇÃO PRÉVIA: grupos de contratuais que cabem em (orçamento − prefixo).
+      const cGroups = packByPages(contractualBlocks, MAX_PAGES_PER_PASS - prefixCost);
+      console.log(`PAM CK: contratuais em EXTRAÇÃO PRÉVIA — ${cGroups.length} grupo(s) (prefixo=${prefixCost}pp Σcontr=${contractualCostSum}pp) (+${Date.now() - t0}ms)`);
+      const certGroupsPreview = packByPages(docBlocks, MAX_PAGES_PER_PASS - prefixCost);
+      totalPasses = cGroups.length + (certGroupsPreview.length > 1 ? certGroupsPreview.length : 0) + 1;
+      const contractualExtractions: any[] = [];
+      for (let gi = 0; gi < cGroups.length; gi++) {
+        passNum++;
+        await writeProgress(supabase, approval_id, { current: passNum, total: totalPasses, label: `A ler contratuais — grupo ${gi + 1} de ${cGroups.length}…` });
+        const groupContent = [...content, ...contractualContentBlocks(cGroups[gi]), { type: "text", text: CONTRACTUAL_EXTRACTION_INSTRUCTION }];
+        const ex = await runExtractionPass({ apiKey: anthropicKey, content: groupContent, system: CONTRACTUAL_EXTRACTION_SYSTEM, maxTokens: 8000, groupNum: gi + 1, groupTotal: cGroups.length, label: "contratual" });
+        contractualExtractions.push(...ex);
+        for (const c of cGroups[gi]) attachedContractuais.push(c.name);
+        console.log(`PAM: contratuais grupo ${gi + 1}/${cGroups.length} extraído (${ex.length} docs).`);
       }
-      await writeProgress(supabase, approval_id, { current: groups.length + 1, total: groups.length + 1, label: "A consolidar o parecer final…" });
-      content.push({ type: "text", text: `CERTIFICADOS/DOCS DE FABRICANTE — EXTRAÇÕES ESTRUTURADAS (analisados em ${groups.length} grupos; TRATA-AS COMO SE FOSSEM OS PRÓPRIOS CERTIFICADOS — uma entrada de conformidade por fornecedor):\n${JSON.stringify(extractions, null, 2)}` });
+      // O texto das extrações contratuais entra no prefixo de TODAS as passagens seguintes.
+      content.push({ type: "text", text: `DOCUMENTOS CONTRATUAIS — EXTRAÇÕES ESTRUTURADAS (lidos integralmente em ${cGroups.length} grupo(s); TRATA-AS COMO SE FOSSEM OS PRÓPRIOS MQT/CE/CTE para o confronto contratual e para mqt_articles_by_phase / cte_sections):\n${JSON.stringify(contractualExtractions, null, 2)}` });
+      certBudget = MAX_PAGES_PER_PASS - prefixCost;
     }
-    if (skippedCerts.length > 0 || skippedMfg.length > 0) {
-      console.warn(`PAM: downloads falhados — certs=${skippedCerts.length}, mfg=${skippedMfg.length}`);
+
+    // CERTIFICADOS por orçamento de páginas. 1 grupo → inline na passagem final; >1 → extração + consolidação.
+    const certGroups = packByPages(docBlocks, certBudget);
+    if (totalPasses === 0) totalPasses = (certGroups.length > 1 ? certGroups.length : 0) + 1; // caso inline
+    if (certGroups.length <= 1) {
+      const only = certGroups[0] || [];
+      for (const b of docContentBlocks(only)) content.push(b);
+      for (const d of only) (d.kind === "cert" ? analyzedCerts : analyzedMfg).push(d.name);
+      passNum++;
+      await writeProgress(supabase, approval_id, { current: passNum, total: totalPasses, label: docBlocks.length ? "A analisar todos os documentos…" : "A analisar…" });
+    } else {
+      const certExtractions: any[] = [];
+      for (let gi = 0; gi < certGroups.length; gi++) {
+        passNum++;
+        await writeProgress(supabase, approval_id, { current: passNum, total: totalPasses, label: `A analisar certificados — grupo ${gi + 1} de ${certGroups.length}…` });
+        const groupContent = [...content, ...docContentBlocks(certGroups[gi]), { type: "text", text: EXTRACTION_INSTRUCTION }];
+        const ex = await runExtractionPass({ apiKey: anthropicKey, content: groupContent, system: EXTRACTION_SYSTEM, maxTokens: 6000, groupNum: gi + 1, groupTotal: certGroups.length, label: "cert" });
+        certExtractions.push(...ex);
+        for (const d of certGroups[gi]) (d.kind === "cert" ? analyzedCerts : analyzedMfg).push(d.name);
+        console.log(`PAM: certs grupo ${gi + 1}/${certGroups.length} extraído (${ex.length} docs; acumulado ${certExtractions.length}).`);
+      }
+      passNum++;
+      await writeProgress(supabase, approval_id, { current: passNum, total: totalPasses, label: "A consolidar o parecer final…" });
+      content.push({ type: "text", text: `CERTIFICADOS/DOCS DE FABRICANTE — EXTRAÇÕES ESTRUTURADAS (analisados em ${certGroups.length} grupos; TRATA-AS COMO SE FOSSEM OS PRÓPRIOS CERTIFICADOS — uma entrada de conformidade por fornecedor):\n${JSON.stringify(certExtractions, null, 2)}` });
     }
-    console.log(`PAM: docs analisados certs=${analyzedCerts.length}/${certificates.length}, mfg=${analyzedMfg.length}/${manufacturer_docs.length}`);
+    if (skippedCerts.length > 0 || skippedMfg.length > 0 || skippedContractuais.length > 0) {
+      console.warn(`PAM: docs não analisados — contratuais=${skippedContractuais.length}, certs=${skippedCerts.length}, mfg=${skippedMfg.length}`);
+    }
+    console.log(`PAM: analisados contratuais=${attachedContractuais.length}, certs=${analyzedCerts.length}/${certificates.length}, mfg=${analyzedMfg.length}/${manufacturer_docs.length}`);
 
     // 7. Build context note based on available documents
     const docParts: string[] = [];
@@ -1119,9 +1205,14 @@ Responde SEMPRE em português europeu.`;
     analysis.no_contractual_in_context = !knowledge.hasContractual && !rec.mqt_file_path && !rec.ce_file_path && !rec.contract_file_path;
     analysis.ce_for_category_missing = !knowledge.ceForCategoryFound && !rec.ce_file_path;
     analysis.attachments_processing = {
+      contractuais: { attached: attachedContractuais, skipped: skippedContractuais },
       certificates: { received: certificates.length, analyzed: analyzedCerts, skipped: skippedCerts },
       manufacturer_docs: { received: manufacturer_docs.length, analyzed: analyzedMfg, skipped: skippedMfg },
     };
+    // Lista AUTORITATIVA (do nosso código) de tudo o que foi/não foi analisado — para o
+    // escrutínio humano antes da assinatura. Nada cai "por tamanho"; skips só por URL/ilegível.
+    analysis.documents_analyzed = [...attachedContractuais, ...analyzedCerts, ...analyzedMfg];
+    analysis.documents_not_analyzed = [...skippedContractuais, ...skippedCerts, ...skippedMfg];
 
     // Update the approval record
     await supabase
