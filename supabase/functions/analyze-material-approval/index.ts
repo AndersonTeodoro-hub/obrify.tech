@@ -669,7 +669,7 @@ const MAX_PAGES_PER_PASS = 85;
 // (declarado) se um único PDF real exceder 100pp.
 const UNKNOWN_PDF_PAGES = MAX_PAGES_PER_PASS;
 
-interface DocBlock { name: string; url: string; isImage: boolean; kind: "cert" | "mfg"; pages: number; }
+interface DocBlock { name: string; url: string; isImage: boolean; kind: "cert" | "mfg"; pages: number; path: string; }
 
 // Custo de orçamento de um bloco: imagens = 0; PDF com contagem = a contagem; PDF sem = UNKNOWN.
 function pdfPages(isImage: boolean, pages: number | null | undefined): number {
@@ -685,16 +685,6 @@ function docContentBlocks(docs: DocBlock[]): any[] {
     blocks.push({ type: "text", text: `[${d.kind === "cert" ? "CERTIFICADO/LAUDO" : "DOCUMENTO DO FABRICANTE"}: ${d.name}]` });
   }
   return blocks;
-}
-
-// Blocos de conteúdo para documentos contratuais (label próprio).
-function contractualContentBlocks(blocks: Array<{ url: string; isImage: boolean; label: string }>): any[] {
-  const out: any[] = [];
-  for (const b of blocks) {
-    out.push({ type: b.isImage ? "image" : "document", source: { type: "url", url: b.url } });
-    out.push({ type: "text", text: `[${b.label}]` });
-  }
-  return out;
 }
 
 // Agrupa por ORÇAMENTO DE PÁGINAS (guloso, preserva ordem). Um doc cujo custo excede o
@@ -719,6 +709,23 @@ async function writeProgress(supabase: any, approvalId: string, progress: { curr
       .update({ ai_analysis: { ...prev, _progress: { ...progress, at: new Date().toISOString() } }, updated_at: new Date().toISOString() })
       .eq("id", approvalId);
   } catch (e) { console.error("PAM: falha ao escrever progresso:", (e as any)?.message || e); }
+}
+
+// Orçamento de tempo POR INVOCAÇÃO. Wall-clock Pro = 400s; deixamos margem para
+// persistir o progresso + re-invocar antes de a plataforma matar o worker.
+const WALL_CLOCK_MS = 400_000;
+const SAFE_BUDGET_MS = 300_000;   // extrações: pára e re-invoca ao passar isto
+const FINAL_RESERVE_MS = 200_000; // a passagem final (web_search) exige pelo menos isto disponível
+
+// Persiste o estado das extrações de certs em ai_analysis._cert_extractions (merge, sem
+// migração). Erro RUIDOSO — perder o estado obrigaria a re-extrair na invocação seguinte.
+async function mergeCertState(supabase: any, approvalId: string, cert: { items: any[]; done_paths: string[] }): Promise<void> {
+  const { data } = await supabase.from("material_approvals").select("ai_analysis").eq("id", approvalId).single();
+  const prev = (data?.ai_analysis && typeof data.ai_analysis === "object") ? data.ai_analysis : {};
+  const { error } = await supabase.from("material_approvals")
+    .update({ ai_analysis: { ...prev, _cert_extractions: cert }, updated_at: new Date().toISOString() })
+    .eq("id", approvalId);
+  if (error) throw new Error(`Falha a persistir estado de certs: ${error.message}`);
 }
 
 // Extração robusta de JSON (objecto ou array).
@@ -824,10 +831,6 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     const authToken = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: authError } = await supabase.auth.getUser(authToken);
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
 
     const body = await req.json();
     if (!body.approval_id || typeof body.approval_id !== "string") {
@@ -838,15 +841,29 @@ serve(async (req) => {
     const fiscal_name = (typeof body.fiscal_name === "string" && body.fiscal_name.trim()) ? body.fiscal_name.trim() : null;
     const fiscal_company = (typeof body.fiscal_company === "string" && body.fiscal_company.trim()) ? body.fiscal_company.trim() : null;
 
-    // Registo = fonte única de verdade (paths + metadados). RLS aplicativo: só o DONO analisa.
-    const { data: rec, error: recErr } = await supabase
+    // CONTINUAÇÃO INTERNA: só a própria function (service key) pode encadear invocações.
+    // Salta a auth de utilizador e o lock (já adquiridos pela 1ª invocação).
+    const isContinuation = body._continuation === true && authToken === supabaseKey;
+
+    let authedUserId: string | null = null;
+    if (!isContinuation) {
+      const { data: { user }, error: authError } = await supabase.auth.getUser(authToken);
+      if (authError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      authedUserId = user.id;
+    }
+
+    // Registo = fonte única de verdade. Normal: gated por dono (RLS aplicativo).
+    // Continuação: por id (o dono já foi validado na 1ª invocação).
+    let recQuery = supabase
       .from("material_approvals")
-      .select("obra_id, user_id, material_category, pdm_file_path, pdm_page_count, email_file_path, email_file_mime, email_page_count, mqt_file_path, mqt_name, mqt_page_count, ce_file_path, ce_file_name, ce_page_count, contract_file_path, contract_file_name, contract_page_count, certificates, manufacturer_docs")
-      .eq("id", approval_id)
-      .eq("user_id", user.id)
-      .single();
+      .select("obra_id, user_id, material_category, status, ai_analysis, pdm_file_path, pdm_page_count, email_file_path, email_file_mime, email_page_count, mqt_file_path, mqt_name, mqt_page_count, ce_file_path, ce_file_name, ce_page_count, contract_file_path, contract_file_name, contract_page_count, certificates, manufacturer_docs")
+      .eq("id", approval_id);
+    if (!isContinuation) recQuery = recQuery.eq("user_id", authedUserId);
+    const { data: rec, error: recErr } = await recQuery.single();
     if (recErr || !rec) {
-      console.warn(`PAM: registo não encontrado ou sem permissão (approval_id=${approval_id}, user=${user.id}): ${recErr?.message || "vazio"}`);
+      console.warn(`PAM: registo não encontrado ou sem permissão (approval_id=${approval_id}, continuation=${isContinuation}): ${recErr?.message || "vazio"}`);
       return new Response(JSON.stringify({ error: "Aprovação não encontrada ou sem permissão." }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -873,24 +890,32 @@ serve(async (req) => {
       mfg_docs: manufacturer_docs.length,
     }));
 
-    // Lock atómico: só adquire se NÃO estiver já 'analyzing'. UPDATE único (atómico à
-    // linha) → duas invocações simultâneas não passam ambas; a 2ª afecta 0 linhas → 409.
-    const { data: locked, error: lockErr } = await supabase
-      .from("material_approvals")
-      .update({ status: "analyzing", updated_at: new Date().toISOString() })
-      .eq("id", approval_id)
-      .neq("status", "analyzing")
-      .select("id");
-    if (lockErr) {
-      // Erro ruidoso — falha ao adquirir o lock nunca é mascarada.
-      throw new Error(`Falha ao adquirir lock de análise: ${lockErr.message}`);
-    }
-    if (!locked || locked.length === 0) {
-      console.warn(`PAM: análise JÁ em curso para ${approval_id} — invocação paralela rejeitada (409).`);
-      return new Response(
-        JSON.stringify({ error: "Já existe uma análise em curso para este PAM. Aguarde a conclusão." }),
-        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+    // Lock atómico (só na 1ª invocação). UPDATE único (atómico à linha) → duas invocações
+    // simultâneas não passam ambas; a 2ª afecta 0 linhas → 409. A continuação NÃO re-adquire
+    // (o lock 'analyzing' já é nosso) — apenas confirma que ainda é a nossa análise.
+    if (!isContinuation) {
+      const { data: locked, error: lockErr } = await supabase
+        .from("material_approvals")
+        .update({ status: "analyzing", updated_at: new Date().toISOString() })
+        .eq("id", approval_id)
+        .neq("status", "analyzing")
+        .select("id");
+      if (lockErr) {
+        // Erro ruidoso — falha ao adquirir o lock nunca é mascarada.
+        throw new Error(`Falha ao adquirir lock de análise: ${lockErr.message}`);
+      }
+      if (!locked || locked.length === 0) {
+        console.warn(`PAM: análise JÁ em curso para ${approval_id} — invocação paralela rejeitada (409).`);
+        return new Response(
+          JSON.stringify({ error: "Já existe uma análise em curso para este PAM. Aguarde a conclusão." }),
+          { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+    } else if (rec.status !== "analyzing") {
+      // Continuação órfã: alguém repôs 'pending' ou eliminou. Aborta limpo (não re-processa).
+      console.warn(`PAM: continuação abortada — status=${rec.status} (já não é a nossa análise).`);
+      return new Response(JSON.stringify({ ok: true, aborted: rec.status }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     lockedApprovalId = approval_id; // a partir daqui o catch externo deve repor 'pending'
 
@@ -902,6 +927,23 @@ serve(async (req) => {
     // Data de hoje (para o modelo aferir validade/caducidade dos certificados).
     const todayISO = new Date().toISOString().slice(0, 10);
     const t0 = Date.now(); // checkpoints de observabilidade (dão a timeline de cada etapa nos logs)
+
+    // Encadeamento: cada invocação processa o que couber em SAFE_BUDGET_MS e re-invoca-se
+    // para continuar. Teto de 400s POR invocação, nunca por análise. Retoma idempotente
+    // (a function extrai só o que ainda não está persistido).
+    const functionUrl = `${supabaseUrl}/functions/v1/analyze-material-approval`;
+    let processedThisInvocation = 0;
+    const overBudget = () => (Date.now() - t0) > SAFE_BUDGET_MS;
+    const reinvoke = async (reason: string) => {
+      console.log(`PAM: orçamento de tempo (${Date.now() - t0}ms) — re-invocar para continuar (${reason}).`);
+      await writeProgress(supabase, approval_id, { current: 0, total: 0, label: `A continuar noutra passagem (${reason})…` });
+      const resp = await fetch(functionUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${supabaseKey}` },
+        body: JSON.stringify({ approval_id, fiscal_name, fiscal_company, _continuation: true }),
+      });
+      if (!resp.ok) throw new Error(`Re-invocação de continuação falhou (${resp.status}): ${(await resp.text().catch(() => "")).slice(0, 200)}`);
+    };
 
     // 6. Retrieval MOVIDO para antes da montagem: contratuais da KB (Via 2) têm de ser
     // anexados ANTES dos certificados (prioridade de orçamento).
@@ -928,8 +970,6 @@ serve(async (req) => {
     const skippedMfg: Array<{ name: string; reason: string }> = [];
     const attachedContractuais: string[] = [];
     const skippedContractuais: Array<{ name: string; reason: string }> = [];
-    let passNum = 0;
-    let totalPasses = 0;
 
     const content: any[] = [];
 
@@ -961,7 +1001,7 @@ serve(async (req) => {
     const pamPages = pdfPages(false, rec.pdm_page_count);
     const prefixCost = emailPages + pamPages;
 
-    // 2. CONTRATUAIS (Via 1 manual + Via 2 KB) — com páginas para orçamentar.
+    // 2. CONTRATUAIS (Via 1 manual + Via 2 KB) — fila dedup (URLs só para os pendentes).
     const normName = (s: string) => (s || "").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "").trim();
     const contractualQueue: Array<{ name: string; path: string; bucket: string; label: string; pages: number | null }> = [];
     if (rec.mqt_file_path) contractualQueue.push({ name: rec.mqt_name || "MQT", path: rec.mqt_file_path, bucket: "material-approvals", label: "MQT / MAPA DE QUANTIDADES — mapa de quantidades e trabalhos do projecto", pages: rec.mqt_page_count });
@@ -970,99 +1010,101 @@ serve(async (req) => {
     for (const kb of (knowledge.contractualFiles || [])) {
       contractualQueue.push({ name: kb.document_name, path: kb.file_path, bucket: "project-knowledge", label: `CONTRATUAL DA BASE DE CONHECIMENTO: ${kb.document_name}`, pages: kb.pages ?? null });
     }
-    // Resolve signed URLs (dedup: manual precede KB). Falha de URL → declarada (nunca silenciosa).
-    interface CBlock { name: string; url: string; isImage: boolean; pages: number; label: string; }
-    const contractualBlocks: CBlock[] = [];
     const seenContractual = new Set<string>();
-    for (const c of contractualQueue) {
+    const contractualDocs = contractualQueue.filter((c) => {
       const key = normName(c.name);
-      if (key && seenContractual.has(key)) continue;
-      const url = await signedUrl(supabase, c.path, c.bucket);
-      if (!url) { skippedContractuais.push({ name: c.name, reason: "signed URL falhou" }); continue; }
+      if (key && seenContractual.has(key)) return false;
       if (key) seenContractual.add(key);
-      const isImg = isImageName(c.name);
-      contractualBlocks.push({ name: c.name, url, isImage: isImg, pages: pdfPages(isImg, c.pages), label: c.label });
-    }
-    const contractualCostSum = contractualBlocks.reduce((s, c) => s + c.pages, 0);
+      return true;
+    });
 
-    // 4 + 5. Certificados e docs de fabricante — signed URL + páginas (ZERO bytes na memória).
+    // 4 + 5. Certificados e docs de fabricante — signed URL + páginas + path (ZERO bytes na memória).
     const docBlocks: DocBlock[] = [];
     for (const cert of certificates) {
       const url = await signedUrl(supabase, cert.path);
       if (!url) { skippedCerts.push({ name: cert.name, reason: "signed URL falhou" }); continue; }
       const isImg = isImageName(cert.name);
-      docBlocks.push({ name: cert.name, url, isImage: isImg, kind: "cert", pages: pdfPages(isImg, (cert as any).pages) });
+      docBlocks.push({ name: cert.name, url, isImage: isImg, kind: "cert", pages: pdfPages(isImg, (cert as any).pages), path: cert.path });
     }
     for (const mdoc of manufacturer_docs) {
       const url = await signedUrl(supabase, mdoc.path);
       if (!url) { skippedMfg.push({ name: mdoc.name, reason: "signed URL falhou" }); continue; }
       const isImg = isImageName(mdoc.name);
-      docBlocks.push({ name: mdoc.name, url, isImage: isImg, kind: "mfg", pages: pdfPages(isImg, (mdoc as any).pages) });
-    }
-    const maxCertCost = docBlocks.reduce((m, d) => Math.max(m, d.pages), 0);
-
-    // CHECKPOINT de calibração (dá os números reais do PAM 011 no 1º run).
-    console.log(`PAM CK: páginas — email=${emailPages} PAM=${pamPages} | contratuais=[${contractualBlocks.map((c) => `${c.name}:${c.isImage ? "img" : c.pages}`).join("; ")}] Σ=${contractualCostSum} | certs/mfg=[${docBlocks.map((d) => `${d.name}:${d.isImage ? "img" : d.pages}`).join("; ")}] maxCert=${maxCertCost} | orçamento/passagem=${MAX_PAGES_PER_PASS} (+${Date.now() - t0}ms)`);
-
-    // DECISÃO: contratuais INLINE (PDF em todas as passagens) só se sobrar orçamento
-    // para o maior cert numa passagem. Caso contrário → EXTRAÇÃO PRÉVIA dos contratuais.
-    const contractualsFitInline = prefixCost + contractualCostSum + maxCertCost <= MAX_PAGES_PER_PASS;
-    let certBudget: number;
-
-    if (contractualsFitInline) {
-      for (const b of contractualContentBlocks(contractualBlocks)) content.push(b);
-      for (const c of contractualBlocks) attachedContractuais.push(c.name);
-      certBudget = MAX_PAGES_PER_PASS - prefixCost - contractualCostSum;
-      console.log(`PAM CK: contratuais INLINE (${attachedContractuais.length}); orçamento certs=${certBudget}pp (+${Date.now() - t0}ms)`);
-    } else {
-      // EXTRAÇÃO PRÉVIA: grupos de contratuais que cabem em (orçamento − prefixo).
-      const cGroups = packByPages(contractualBlocks, MAX_PAGES_PER_PASS - prefixCost);
-      console.log(`PAM CK: contratuais em EXTRAÇÃO PRÉVIA — ${cGroups.length} grupo(s) (prefixo=${prefixCost}pp Σcontr=${contractualCostSum}pp) (+${Date.now() - t0}ms)`);
-      const certGroupsPreview = packByPages(docBlocks, MAX_PAGES_PER_PASS - prefixCost);
-      totalPasses = cGroups.length + (certGroupsPreview.length > 1 ? certGroupsPreview.length : 0) + 1;
-      const contractualExtractions: any[] = [];
-      for (let gi = 0; gi < cGroups.length; gi++) {
-        passNum++;
-        await writeProgress(supabase, approval_id, { current: passNum, total: totalPasses, label: `A ler contratuais — grupo ${gi + 1} de ${cGroups.length}…` });
-        const buildC = (bs: CBlock[]) => [...content, ...contractualContentBlocks(bs), { type: "text", text: CONTRACTUAL_EXTRACTION_INSTRUCTION }];
-        const ex = await extractGroupAdaptive(cGroups[gi], buildC, { apiKey: anthropicKey, system: CONTRACTUAL_EXTRACTION_SYSTEM, maxTokens: 16000, label: `contratual ${gi + 1}/${cGroups.length}` });
-        contractualExtractions.push(...ex);
-        for (const c of cGroups[gi]) attachedContractuais.push(c.name);
-        console.log(`PAM: contratuais grupo ${gi + 1}/${cGroups.length} extraído (${ex.length} docs).`);
-      }
-      // O texto das extrações contratuais entra no prefixo de TODAS as passagens seguintes.
-      content.push({ type: "text", text: `DOCUMENTOS CONTRATUAIS — EXTRAÇÕES ESTRUTURADAS (lidos integralmente em ${cGroups.length} grupo(s); TRATA-AS COMO SE FOSSEM OS PRÓPRIOS MQT/CE/CTE para o confronto contratual e para mqt_articles_by_phase / cte_sections):\n${JSON.stringify(contractualExtractions, null, 2)}` });
-      certBudget = MAX_PAGES_PER_PASS - prefixCost;
+      docBlocks.push({ name: mdoc.name, url, isImage: isImg, kind: "mfg", pages: pdfPages(isImg, (mdoc as any).pages), path: mdoc.path });
     }
 
-    // CERTIFICADOS por orçamento de páginas. 1 grupo → inline na passagem final; >1 → extração + consolidação.
-    const certGroups = packByPages(docBlocks, certBudget);
-    if (totalPasses === 0) totalPasses = (certGroups.length > 1 ? certGroups.length : 0) + 1; // caso inline
-    if (certGroups.length <= 1) {
-      const only = certGroups[0] || [];
-      for (const b of docContentBlocks(only)) content.push(b);
-      for (const d of only) (d.kind === "cert" ? analyzedCerts : analyzedMfg).push(d.name);
-      passNum++;
-      await writeProgress(supabase, approval_id, { current: passNum, total: totalPasses, label: docBlocks.length ? "A analisar todos os documentos…" : "A analisar…" });
-    } else {
-      const certExtractions: any[] = [];
-      for (let gi = 0; gi < certGroups.length; gi++) {
-        passNum++;
-        await writeProgress(supabase, approval_id, { current: passNum, total: totalPasses, label: `A analisar certificados — grupo ${gi + 1} de ${certGroups.length}…` });
-        const buildK = (bs: DocBlock[]) => [...content, ...docContentBlocks(bs), { type: "text", text: EXTRACTION_INSTRUCTION }];
-        const ex = await extractGroupAdaptive(certGroups[gi], buildK, { apiKey: anthropicKey, system: EXTRACTION_SYSTEM, maxTokens: 16000, label: `cert ${gi + 1}/${certGroups.length}` });
-        certExtractions.push(...ex);
-        for (const d of certGroups[gi]) (d.kind === "cert" ? analyzedCerts : analyzedMfg).push(d.name);
-        console.log(`PAM: certs grupo ${gi + 1}/${certGroups.length} extraído (${ex.length} docs; acumulado ${certExtractions.length}).`);
-      }
-      passNum++;
-      await writeProgress(supabase, approval_id, { current: passNum, total: totalPasses, label: "A consolidar o parecer final…" });
-      content.push({ type: "text", text: `CERTIFICADOS/DOCS DE FABRICANTE — EXTRAÇÕES ESTRUTURADAS (analisados em ${certGroups.length} grupos; TRATA-AS COMO SE FOSSEM OS PRÓPRIOS CERTIFICADOS — uma entrada de conformidade por fornecedor):\n${JSON.stringify(certExtractions, null, 2)}` });
+    console.log(`PAM CK: páginas — email=${emailPages} PAM=${pamPages} | contratuais=[${contractualDocs.map((c) => `${c.name}:${c.pages ?? "?"}`).join("; ")}] | certs/mfg=[${docBlocks.map((d) => `${d.name}:${d.isImage ? "img" : d.pages}`).join("; ")}] | orçamento/passagem=${MAX_PAGES_PER_PASS} (+${Date.now() - t0}ms)`);
+
+    // ========================================================================
+    // FASE CONTRATUAIS — 1 doc/passagem, extração PERSISTIDA por obra (reutilizada
+    // por TODOS os PAMs e entre invocações encadeadas). Leitura integral mantida.
+    // ========================================================================
+    const contractualPaths = contractualDocs.map((c) => c.path);
+    const { data: doneRows, error: doneErr } = contractualPaths.length > 0
+      ? await supabase.from("contractual_extractions").select("doc_path, extraction").eq("obra_id", obra_id).in("doc_path", contractualPaths)
+      : { data: [] as any[], error: null };
+    if (doneErr) throw new Error(`Falha ao ler contractual_extractions: ${doneErr.message}`);
+    const doneContractual = new Map<string, any[]>();
+    for (const r of (doneRows || [])) doneContractual.set(r.doc_path, Array.isArray(r.extraction) ? r.extraction : [r.extraction]);
+
+    for (const c of contractualDocs) {
+      if (doneContractual.has(c.path)) continue; // reutiliza extração já persistida (voa)
+      if (processedThisInvocation >= 1 && overBudget()) { await reinvoke("mais contratuais por ler"); return; }
+      const url = await signedUrl(supabase, c.path, c.bucket);
+      if (!url) { skippedContractuais.push({ name: c.name, reason: "signed URL falhou" }); continue; }
+      const isImg = isImageName(c.name);
+      const cb = { name: c.name, url, isImage: isImg, pages: pdfPages(isImg, c.pages), path: c.path, label: c.label };
+      await writeProgress(supabase, approval_id, { current: doneContractual.size + 1, total: contractualDocs.length, label: `A ler contratual: ${c.name}…` });
+      const build = (bs: (typeof cb)[]) => [...content, { type: bs[0].isImage ? "image" : "document", source: { type: "url", url: bs[0].url } }, { type: "text", text: `[${bs[0].label}]` }, { type: "text", text: CONTRACTUAL_EXTRACTION_INSTRUCTION }];
+      const ex = await extractGroupAdaptive([cb], build, { apiKey: anthropicKey, system: CONTRACTUAL_EXTRACTION_SYSTEM, maxTokens: 16000, label: `contratual ${c.name}` });
+      const { error: upErr } = await supabase.from("contractual_extractions").upsert(
+        { obra_id, user_id, doc_name: c.name, doc_path: c.path, bucket: c.bucket, pages: cb.pages, extraction: ex, updated_at: new Date().toISOString() },
+        { onConflict: "obra_id,doc_path" });
+      if (upErr) throw new Error(`Falha a persistir extração contratual "${c.name}": ${upErr.message}`);
+      doneContractual.set(c.path, ex);
+      processedThisInvocation++;
+      console.log(`PAM: contratual "${c.name}" extraído e persistido (+${Date.now() - t0}ms).`);
     }
+
+    // ========================================================================
+    // FASE CERTS — grupos por páginas, estado em ai_analysis._cert_extractions.
+    // ========================================================================
+    const prevCert = (rec.ai_analysis && (rec.ai_analysis as any)._cert_extractions) || { items: [], done_paths: [] };
+    const cert: { items: any[]; done_paths: string[] } = { items: [...(prevCert.items || [])], done_paths: [...(prevCert.done_paths || [])] };
+    const donePaths = new Set(cert.done_paths);
+    const pendingCerts = docBlocks.filter((d) => !donePaths.has(d.path));
+    const certBudget = MAX_PAGES_PER_PASS - prefixCost;
+    const certGroups = packByPages(pendingCerts, certBudget);
+    for (let gi = 0; gi < certGroups.length; gi++) {
+      if (processedThisInvocation >= 1 && overBudget()) { await reinvoke("mais certificados por ler"); return; }
+      await writeProgress(supabase, approval_id, { current: cert.done_paths.length, total: docBlocks.length, label: `A analisar certificados (${cert.done_paths.length}/${docBlocks.length})…` });
+      const buildK = (bs: DocBlock[]) => [...content, ...docContentBlocks(bs), { type: "text", text: EXTRACTION_INSTRUCTION }];
+      const ex = await extractGroupAdaptive(certGroups[gi], buildK, { apiKey: anthropicKey, system: EXTRACTION_SYSTEM, maxTokens: 16000, label: `cert grupo ${gi + 1}` });
+      cert.items.push(...ex);
+      for (const d of certGroups[gi]) cert.done_paths.push(d.path);
+      await mergeCertState(supabase, approval_id, cert);
+      processedThisInvocation++;
+      console.log(`PAM: certs grupo ${gi + 1}/${certGroups.length} extraído (${ex.length} docs; acumulado ${cert.items.length}) (+${Date.now() - t0}ms).`);
+    }
+
+    // Contratuais + certs completos. Reconstrói a completude a partir do estado persistido
+    // (numa invocação de continuação, os arrays locais estavam vazios).
+    for (const c of contractualDocs) if (doneContractual.has(c.path)) attachedContractuais.push(c.name);
+    const doneCertSet = new Set(cert.done_paths);
+    for (const d of docBlocks) if (doneCertSet.has(d.path)) (d.kind === "cert" ? analyzedCerts : analyzedMfg).push(d.name);
+
     if (skippedCerts.length > 0 || skippedMfg.length > 0 || skippedContractuais.length > 0) {
       console.warn(`PAM: docs não analisados — contratuais=${skippedContractuais.length}, certs=${skippedCerts.length}, mfg=${skippedMfg.length}`);
     }
     console.log(`PAM: analisados contratuais=${attachedContractuais.length}, certs=${analyzedCerts.length}/${certificates.length}, mfg=${analyzedMfg.length}/${manufacturer_docs.length}`);
+
+    // FASE FINAL (web_search → parecer). Exige uma invocação com tempo — se sobra pouco,
+    // re-invoca para a final arrancar fresca. Depois injecta os textos das extrações.
+    if ((Date.now() - t0) > (WALL_CLOCK_MS - FINAL_RESERVE_MS)) { await reinvoke("parecer final"); return; }
+    await writeProgress(supabase, approval_id, { current: docBlocks.length, total: docBlocks.length, label: "A consolidar o parecer final…" });
+    const allContractualEx = contractualDocs.filter((c) => doneContractual.has(c.path)).flatMap((c) => doneContractual.get(c.path)!);
+    if (allContractualEx.length > 0) content.push({ type: "text", text: `DOCUMENTOS CONTRATUAIS — EXTRAÇÕES ESTRUTURADAS (leitura integral persistida; TRATA-AS COMO OS PRÓPRIOS MQT/CE/CTE para o confronto contratual e para mqt_articles_by_phase / cte_sections):\n${JSON.stringify(allContractualEx, null, 2)}` });
+    if (cert.items.length > 0) content.push({ type: "text", text: `CERTIFICADOS/DOCS DE FABRICANTE — EXTRAÇÕES ESTRUTURADAS (uma entrada de conformidade por fornecedor):\n${JSON.stringify(cert.items, null, 2)}` });
 
     // 7. Build context note based on available documents
     const docParts: string[] = [];
