@@ -746,25 +746,60 @@ Responde SEMPRE em português europeu.`;
 
 const CONTRACTUAL_EXTRACTION_INSTRUCTION = "Lê INTEGRALMENTE os documentos contratuais ACIMA (só deste grupo) e extrai a estrutura por artigo/secção, como ARRAY JSON conforme o teu system prompt. Não dês parecer.";
 
-// Uma passagem de extração de um grupo. Erro RUIDOSO com o nº do grupo.
+// Uma passagem de extração. Sinaliza truncamento (NÃO faz throw) para a rede de
+// degradação decidir re-dividir. Throw só em falha dura de JSON. Truncamento é ruidoso.
 async function runExtractionPass(opts: {
-  apiKey: string; content: any[]; system: string; maxTokens: number;
-  groupNum: number; groupTotal: number; label: string;
-}): Promise<any[]> {
-  const { apiKey, content, system, maxTokens, groupNum, groupTotal, label } = opts;
+  apiKey: string; content: any[]; system: string; maxTokens: number; label: string;
+}): Promise<{ truncated: boolean; data: any[] }> {
+  const { apiKey, content, system, maxTokens, label } = opts;
   const loop = await runClaudeWithContinuation({
     apiKey, model: "claude-sonnet-4-5-20250929", maxTokens, temperature: 0,
     system, messages: [{ role: "user", content }],
-    maxIterations: 2, logPrefix: `[PAM ${label} ${groupNum}/${groupTotal}]`,
+    maxIterations: 2, logPrefix: `[PAM ${label}]`,
   });
   if (loop.finalStopReason === "max_tokens" || loop.hitIterationCap) {
-    throw new Error(`Extração (${label}) do grupo ${groupNum}/${groupTotal} truncada (stop_reason=${loop.finalStopReason}). Reduzir dimensão do grupo.`);
+    console.warn(`PAM: extração (${label}) truncada (stop_reason=${loop.finalStopReason}) — a rede vai re-dividir se houver >1 doc.`);
+    return { truncated: true, data: [] };
   }
   let arr: any;
   try { arr = extractJson(loop.accumulatedText || "[]"); } catch (e) {
-    throw new Error(`Extração (${label}) do grupo ${groupNum}/${groupTotal}: JSON inválido — ${(e as any)?.message}`);
+    throw new Error(`Extração (${label}): JSON inválido — ${(e as any)?.message}`);
   }
-  return Array.isArray(arr) ? arr : [arr];
+  return { truncated: false, data: Array.isArray(arr) ? arr : [arr] };
+}
+
+// REDE DE DEGRADAÇÃO: corre a extração de um grupo; se truncar (max_tokens) e houver
+// >1 doc, re-divide ao meio e repete cada metade (recursivo, até grupos de 1 doc). O
+// pipeline nunca trava por um grupo gordo — adapta-se. PER-DOC CACHE (chave = url única
+// por doc): um documento extraído com sucesso individualmente é memoizado e NUNCA
+// re-processado numa re-divisão. Só falha DECLARADO se um ÚNICO documento truncar
+// sozinho, com o nome do doc (nunca silenciado).
+async function extractGroupAdaptive<T extends { name: string; url: string }>(
+  blocks: T[],
+  buildContent: (bs: T[]) => any[],
+  cfg: { apiKey: string; system: string; maxTokens: number; label: string },
+  cache: Map<string, any[]> = new Map(),
+): Promise<any[]> {
+  const cachedData = blocks.filter((b) => cache.has(b.url)).flatMap((b) => cache.get(b.url)!);
+  const pending = blocks.filter((b) => !cache.has(b.url));
+  if (pending.length === 0) return cachedData;
+
+  const res = await runExtractionPass({
+    apiKey: cfg.apiKey, content: buildContent(pending), system: cfg.system,
+    maxTokens: cfg.maxTokens, label: cfg.label,
+  });
+  if (!res.truncated) {
+    if (pending.length === 1) cache.set(pending[0].url, res.data); // memoiza o doc individual
+    return [...cachedData, ...res.data];
+  }
+  if (pending.length <= 1) {
+    throw new Error(`Extração (${cfg.label}) do documento "${pending[0]?.name ?? "?"}" truncada mesmo com ${cfg.maxTokens} tokens de output — documento demasiado denso para uma única passagem. Falha declarada (nunca silenciada).`);
+  }
+  const mid = Math.ceil(pending.length / 2);
+  console.warn(`PAM: ${cfg.label} truncou com ${pending.length} docs — re-dividir ${mid}+${pending.length - mid} e repetir.`);
+  const left = await extractGroupAdaptive(pending.slice(0, mid), buildContent, { ...cfg, label: `${cfg.label}·A` }, cache);
+  const right = await extractGroupAdaptive(pending.slice(mid), buildContent, { ...cfg, label: `${cfg.label}·B` }, cache);
+  return [...cachedData, ...left, ...right];
 }
 
 serve(async (req) => {
@@ -989,8 +1024,8 @@ serve(async (req) => {
       for (let gi = 0; gi < cGroups.length; gi++) {
         passNum++;
         await writeProgress(supabase, approval_id, { current: passNum, total: totalPasses, label: `A ler contratuais — grupo ${gi + 1} de ${cGroups.length}…` });
-        const groupContent = [...content, ...contractualContentBlocks(cGroups[gi]), { type: "text", text: CONTRACTUAL_EXTRACTION_INSTRUCTION }];
-        const ex = await runExtractionPass({ apiKey: anthropicKey, content: groupContent, system: CONTRACTUAL_EXTRACTION_SYSTEM, maxTokens: 8000, groupNum: gi + 1, groupTotal: cGroups.length, label: "contratual" });
+        const buildC = (bs: CBlock[]) => [...content, ...contractualContentBlocks(bs), { type: "text", text: CONTRACTUAL_EXTRACTION_INSTRUCTION }];
+        const ex = await extractGroupAdaptive(cGroups[gi], buildC, { apiKey: anthropicKey, system: CONTRACTUAL_EXTRACTION_SYSTEM, maxTokens: 16000, label: `contratual ${gi + 1}/${cGroups.length}` });
         contractualExtractions.push(...ex);
         for (const c of cGroups[gi]) attachedContractuais.push(c.name);
         console.log(`PAM: contratuais grupo ${gi + 1}/${cGroups.length} extraído (${ex.length} docs).`);
@@ -1014,8 +1049,8 @@ serve(async (req) => {
       for (let gi = 0; gi < certGroups.length; gi++) {
         passNum++;
         await writeProgress(supabase, approval_id, { current: passNum, total: totalPasses, label: `A analisar certificados — grupo ${gi + 1} de ${certGroups.length}…` });
-        const groupContent = [...content, ...docContentBlocks(certGroups[gi]), { type: "text", text: EXTRACTION_INSTRUCTION }];
-        const ex = await runExtractionPass({ apiKey: anthropicKey, content: groupContent, system: EXTRACTION_SYSTEM, maxTokens: 6000, groupNum: gi + 1, groupTotal: certGroups.length, label: "cert" });
+        const buildK = (bs: DocBlock[]) => [...content, ...docContentBlocks(bs), { type: "text", text: EXTRACTION_INSTRUCTION }];
+        const ex = await extractGroupAdaptive(certGroups[gi], buildK, { apiKey: anthropicKey, system: EXTRACTION_SYSTEM, maxTokens: 16000, label: `cert ${gi + 1}/${certGroups.length}` });
         certExtractions.push(...ex);
         for (const d of certGroups[gi]) (d.kind === "cert" ? analyzedCerts : analyzedMfg).push(d.name);
         console.log(`PAM: certs grupo ${gi + 1}/${certGroups.length} extraído (${ex.length} docs; acumulado ${certExtractions.length}).`);
