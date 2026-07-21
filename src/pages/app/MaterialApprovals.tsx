@@ -372,7 +372,14 @@ export default function MaterialApprovals() {
   };
 
   const resetEmailDraft = (a: Approval) => {
+    // Sem email_response no parecer, repor punha exactamente o mesmo texto no ecrã e o botão
+    // parecia morto. O utilizador tem de saber que a sugestão não existe — silêncio nunca.
+    if (!a.ai_analysis?.email_response?.body) {
+      toast.error('Esta análise não tem sugestão de email para repor (o parecer não gerou "email_response").');
+      return;
+    }
     setEmailDraft(prev => { const { [a.id]: _, ...rest } = prev; return rest; });
+    toast.success('Sugestão de email reposta.');
   };
 
   const copyEmail = async (a: Approval) => {
