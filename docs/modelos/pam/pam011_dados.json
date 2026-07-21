@@ -1,0 +1,96 @@
+{
+  "numero_pam": "011",
+  "subtitulo": "Obra 2602 — Hotel JW Marriott Palmares · Ferreira Build Power · Análise da Fiscalização (MQT Fases 1.1/1.2 + CTE Esgotos Domésticos + CTE Esgotos Pluviais) · 17/07/2026",
+  "parecer": "APROVADO CONDICIONADO",
+  "parecer_texto": "— confirmado após cruzamento com o MQT e com as duas Memórias Descritivas de projeto (Igenaci, Nov. 2024, Rev.00). Material: tubagem PVC-U PN10 e acessórios (curvas, forquilhas, tês); marca em obra MONTALGARVE (distribuidor); fabricante: POLITEJO.",
+  "seccao1": {
+    "grupos": [
+      {
+        "titulo": "Fase 1.1 — Pisos -5/-6 (Rev.02, Dez 2025)",
+        "artigos": [
+          {
+            "artigo": "1.3.3.1–.3",
+            "descricao": "Residuais domésticas enterradas (área U)",
+            "diametros": "125 / 160 / 200",
+            "quantidades": "74,05 / 30,25 / 43,45",
+            "norma": "EN ISO 1452 – PN10"
+          },
+          {
+            "artigo": "1.4.4.1–.2",
+            "descricao": "Pluviais enterradas (área U)",
+            "diametros": "125 / 160",
+            "quantidades": "118,40 / 45,10",
+            "norma": "EN ISO 1452 – PN10"
+          }
+        ]
+      },
+      {
+        "titulo": "Fase 1.2 — Pisos -3/-4 (Rev.01, Fev 2026)",
+        "artigos": [
+          {
+            "artigo": "1.3.3.1–.3",
+            "descricao": "Residuais domésticas enterradas (área U)",
+            "diametros": "125 / 160 / 200",
+            "quantidades": "42,00 / 87,60 / 61,00",
+            "norma": "EN ISO 1452 – PN10"
+          },
+          {
+            "artigo": "1.4.2.1–.4",
+            "descricao": "Pluviais enterradas (área U)",
+            "diametros": "125 / 160 / 200 / 250",
+            "quantidades": "179,30 / 73,60 / 97,35 / 132,33",
+            "norma": "EN ISO 1452 – PN10"
+          },
+          {
+            "artigo": "1.4.1.1–.2",
+            "descricao": "Pluviais interiores (área B) — nota MQT: PN10",
+            "diametros": "75 / 90",
+            "quantidades": "14,00 / 12,00",
+            "norma": "EN ISO 1452 – PN10"
+          }
+        ]
+      }
+    ]
+  },
+  "seccao2": {
+    "linhas": [
+      {
+        "seccao": "Domésticos — 3.4.1 Tubagens e Acessórios",
+        "requisito": "PVC-U área B (redes interiores); PVC-U área U classe \"PN6\" (redes enterradas); ligação por abocardamento com anel de borracha",
+        "verificacao": "CONFORME POR EXCESSO — MQT/PAM consideram PN10 (EN ISO 1452) > PN6. Juntas elásticas OR Politejo cumprem a exigência de anel de borracha"
+      },
+      {
+        "seccao": "Domésticos — 3.2 / 3.4.7",
+        "requisito": "Rede gravítica, inclinação mín. 1,0%; montagem de tubagens enterradas segundo boa prática",
+        "verificacao": "CONFORME — tubo PN10 admissível em rede gravítica; execução a controlar em obra"
+      },
+      {
+        "seccao": "Pluviais — 1.4.1 Tubagens e Acessórios",
+        "requisito": "Tubos e acessórios PVC-U classe \"PN6\"; anel de borracha; geodrenos em PVC corrugado",
+        "verificacao": "CONFORME POR EXCESSO — PN10 > PN6. Geodrenos = artigo MQT 1.4.5, fora do âmbito do PAM 011"
+      },
+      {
+        "seccao": "Pluviais — 1.1 / 1.2 Traçado",
+        "requisito": "Coletores enterrados gravíticos, ligação à rede pública ou poços de infiltração",
+        "verificacao": "CONFORME — classe de pressão não é impeditiva em rede gravítica"
+      },
+      {
+        "seccao": "Ambos — Ensaios das Redes (4 / 2)",
+        "requisito": "Ensaios segundo DR n.º 23/95; casos especiais acordados com a Fiscalização",
+        "verificacao": "A ACAUTELAR EM EXECUÇÃO — incluir no plano de inspeção e ensaio; não afeta a aprovação do material"
+      },
+      {
+        "seccao": "Ambos — Considerações Finais (6 / 4)",
+        "requisito": "RGSPPDADAR, recomendações LNEC, especificações dos fabricantes e entidades gestoras",
+        "verificacao": "CONFORME — certificação de terceira parte Politejo (AENOR/SGS) satisfaz a exigência de homologação"
+      }
+    ]
+  },
+  "seccao3": "Certificado AENOR 001/006265 (EN ISO 1452-2, saneamento c/ pressão, PN10 Ø110–630, val. 02/2031) · Certificado AENOR 001/006264 (EN ISO 1452-2, água, PN10 Ø50–630, val. 02/2031) · Certificado SGS PT04/01297 (NP EN ISO 1452-1/-2, PN10: SDR21 Ø63–90 e SDR26 Ø110–630, val. 10/2027) · Catálogo Politejo HIDRABLOC CD51R04 (acessórios EN 1452-3, DN63–800) · Declaração Politejo reciclados (máx. 10%).",
+  "seccao4": "Ferroplast, Plimat e FERSIL (EN 1329-1 Série B — evacuação no interior de edifícios; o WRAS Plimat exclui uso enterrado; a FERSIL remete enterrados para EN 1401) e Politejo SANICOL (EN 1401-1 — gravítico enterrado sem pressão, sem objeto dado o MQT fixar PN10). Nota: o CTE de domésticos admite área B (EN 1329) nas redes interiores — artigos 1.3.1 do MQT, EXCLUÍDOS do reorçamento e fora do âmbito deste PAM.",
+  "seccao5": [
+    "Entrega da Ficha de Dados de Segurança",
+    "Declaração da Politejo confirmando classe PN10 dos acessórios HIDRABLOC nos diâmetros a aplicar (os certificados cobrem apenas tubos)",
+    "Verificação de marcação na receção — EN ISO 1452 / PN10 / fabricante / lote; material marcado EN 1329 ou EN 1401 não será aceite na rede enterrada"
+  ]
+}
