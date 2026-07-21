@@ -1,5 +1,11 @@
 {
+  "functions": {
+    "api/gerar_resumo_pam.py": {
+      "includeFiles": "docs/modelos/pam/modelo_resumo_pam.py"
+    }
+  },
   "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
