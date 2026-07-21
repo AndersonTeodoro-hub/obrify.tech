@@ -20,6 +20,11 @@ export interface ClaudeLoopOptions {
   maxIterations?: number; // default 5
   logPrefix?: string; // default "[Claude loop]"
   temperature?: number; // omitido → default da API (1.0). Parecer técnico deve passar 0.
+  // Aborta a chamada HTTP ao fim deste tempo. SEM isto, uma chamada longa deixa o
+  // wall-clock da plataforma matar o worker: o catch do caller NUNCA corre e a falha fica
+  // silenciosa (sem _error, sem estado reposto, lock preso). Com isto, o abort é nosso e
+  // o erro sobe pela via normal.
+  timeoutMs?: number;
 }
 
 export interface ClaudeLoopResult {
@@ -29,6 +34,8 @@ export interface ClaudeLoopResult {
   iterationsUsed: number;
   finalMessages: any[]; // messages + assistants acumulados (úteis para um 2º turno)
   hitIterationCap: boolean;
+  apiFailed: boolean;      // saiu por falha da API numa continuação → accumulatedText é PARCIAL
+  apiError: string | null; // causa real dessa falha; sem isto vira "JSON inválido" e perde-se
 }
 
 export async function runClaudeWithContinuation(
@@ -43,6 +50,8 @@ export async function runClaudeWithContinuation(
   let totalServerToolCalls = 0;
   let finalStopReason = "";
   let iteration = 0;
+  let apiFailed = false;
+  let apiError: string | null = null;
 
   while (iteration < maxIterations) {
     iteration++;
@@ -65,6 +74,7 @@ export async function runClaudeWithContinuation(
           ...(options.tools ? { tools: options.tools } : {}),
           ...(options.toolChoice ? { tool_choice: options.toolChoice } : {}),
         }),
+        ...(options.timeoutMs ? { signal: AbortSignal.timeout(options.timeoutMs) } : {}),
       });
 
       if (!response.ok) {
@@ -74,17 +84,28 @@ export async function runClaudeWithContinuation(
           // Fail-loud: outage na 1ª chamada não pode ser mascarado
           throw new Error(`Claude API error: ${response.status} - ${errBody.substring(0, 300)}`);
         }
-        break; // continuações: degradação graciosa, usa o acumulado
+        // Degradação graciosa: usa o acumulado, mas SINALIZA que é parcial — o caller
+        // não pode confundir isto com uma resposta completa e tentar interpretá-la.
+        apiFailed = true;
+        apiError = `HTTP ${response.status}: ${errBody.substring(0, 300)}`;
+        break;
       }
 
       result = await response.json();
     } catch (loopErr) {
-      console.error(`${logPrefix} iteração ${iteration} FALHOU na chamada API:`, loopErr);
+      // Distinguir o nosso abort por timeout de um erro de rede: são diagnósticos diferentes.
+      const name = (loopErr as any)?.name;
+      const detail = (name === "TimeoutError" || name === "AbortError")
+        ? `TIMEOUT ao fim de ${options.timeoutMs}ms — abortada por nós ANTES do wall-clock da plataforma (a chamada demorou mais do que o orçamento desta invocação)`
+        : String((loopErr as any)?.message || loopErr);
+      console.error(`${logPrefix} iteração ${iteration} FALHOU na chamada API: ${detail}`);
       if (iteration === 1 && !accumulatedText) {
         // Fail-loud: outage na 1ª chamada não pode ser mascarado
-        throw loopErr;
+        throw new Error(`${logPrefix} chamada à Anthropic falhou: ${detail}`);
       }
-      break; // continuações: degradação graciosa, usa o acumulado
+      apiFailed = true;
+      apiError = detail;
+      break; // continuações: degradação graciosa, usa o acumulado (agora sinalizado)
     }
 
     // Acumular texto desta iteração (apenas blocos type==="text")
@@ -120,5 +141,7 @@ export async function runClaudeWithContinuation(
     iterationsUsed: iteration,
     finalMessages: messages,
     hitIterationCap,
+    apiFailed,
+    apiError,
   };
 }
