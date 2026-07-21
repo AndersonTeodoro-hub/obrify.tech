@@ -2,43 +2,93 @@
 """
 api/gerar_resumo_pam.py — WRAPPER HTTP (Vercel Python) do gerador oficial.
 
-TESTE EMPÍRICO (Passo A): provar se o Vercel corre python3 + reportlab em
-produção. NÃO altera nem move o gerador congelado — importa-o do sítio
-(docs/modelos/pam/modelo_resumo_pam.py) via sys.path.
+Passo A: provar/pôr a correr python3 + reportlab em produção. NÃO altera nem
+move nem duplica o gerador congelado (docs/modelos/pam/modelo_resumo_pam.py) —
+localiza-o no bundle em runtime e carrega-o via importlib.
 
-- POST  /api/gerar_resumo_pam   body = JSON oficial (spec secção 8) -> application/pdf
-- GET   /api/gerar_resumo_pam   health-check (runtime, versão do reportlab, import OK)
+- POST /api/gerar_resumo_pam   body = JSON oficial (spec secção 8) -> application/pdf
+- GET  /api/gerar_resumo_pam   health-check + DIAGNÓSTICO do filesystem real da função
 
-Erros SEMPRE ruidosos: payload inválido -> 400 com a lista de campos em falta;
-import/geração falhados -> 500 com a causa (nunca silenciados).
+Erros SEMPRE ruidosos: payload inválido -> 400 com campos em falta; import/
+geração falhados -> 500 com a causa; nada silenciado.
+
+CAUSA DO ModuleNotFoundError anterior: `import modelo_resumo_pam` dependia de o
+ficheiro estar num caminho fixo do sys.path. O tracer do Vercel não segue
+sys.path dinâmico; o includeFiles pode colocá-lo noutro sítio (ou não o
+colocar). Este localizador procura-o onde quer que esteja no bundle e, se não
+existir, o health-check imprime o filesystem real para a próxima iteração.
 """
 
+import glob
+import importlib.util
 import io
 import json
 import os
 import sys
 from http.server import BaseHTTPRequestHandler
 
-# O gerador congelado fica fora de api/. Carrega-se do sítio (não se move nem altera).
-# includeFiles em vercel.json garante que o ficheiro entra no bundle da função.
-_MODELO_DIR = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "docs", "modelos", "pam")
-)
-if _MODELO_DIR not in sys.path:
-    sys.path.insert(0, _MODELO_DIR)
+_NOME = "modelo_resumo_pam.py"
+_ESTE = os.path.abspath(__file__)
+# Raiz do bundle da função: .../api/gerar_resumo_pam.py -> sobe 1 nível (api) -> raiz.
+_RAIZ = os.path.dirname(os.path.dirname(_ESTE))
 
-# Import tolerante a falha: se o bundle não incluiu o ficheiro ou faltar reportlab,
-# o módulo continua a carregar e o erro é REPORTADO (health-check / 500), não escondido.
-try:
-    from modelo_resumo_pam import gerar_resumo_pam  # type: ignore
-    _IMPORT_ERRO = None
-except Exception as e:  # noqa: BLE001 — queremos ver QUALQUER causa
-    gerar_resumo_pam = None
-    _IMPORT_ERRO = repr(e)
+
+def _localizar():
+    """Encontra o gerador congelado no bundle. Devolve (caminho|None, diagnostico)."""
+    diag = {"raiz": _RAIZ, "cwd": os.getcwd(), "este": _ESTE, "tentativas": []}
+    esperado = os.path.join(_RAIZ, "docs", "modelos", "pam", _NOME)
+    diag["esperado"] = esperado
+    diag["esperado_existe"] = os.path.isfile(esperado)
+
+    # 1) Caminhos diretos prováveis (baratos, sem walk).
+    diretos = [
+        esperado,
+        os.path.join(os.getcwd(), "docs", "modelos", "pam", _NOME),
+        os.path.normpath(os.path.join(os.path.dirname(_ESTE), "..", "docs", "modelos", "pam", _NOME)),
+    ]
+    for p in diretos:
+        diag["tentativas"].append(p)
+        if os.path.isfile(p):
+            diag["encontrado_via"] = "direto"
+            return p, diag
+
+    # 2) Procura recursiva LIMITADA à raiz do bundle (dir pequeno; nunca a partir de /).
+    for achado in glob.glob(os.path.join(_RAIZ, "**", _NOME), recursive=True):
+        diag["tentativas"].append("glob:" + achado)
+        if os.path.isfile(achado):
+            diag["encontrado_via"] = "glob"
+            return achado, diag
+
+    diag["encontrado_via"] = None
+    return None, diag
+
+
+def _carregar():
+    caminho, diag = _localizar()
+    if not caminho:
+        return None, "modelo_resumo_pam.py NAO encontrado no bundle", diag
+    try:
+        spec = importlib.util.spec_from_file_location("modelo_resumo_pam", caminho)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # executa o ficheiro congelado NO SÍTIO (sem copiar)
+        diag["carregado_de"] = caminho
+        return mod.gerar_resumo_pam, None, diag
+    except Exception as e:  # noqa: BLE001 — qualquer causa tem de ser visível
+        return None, repr(e), diag
+
+
+gerar_resumo_pam, _IMPORT_ERRO, _DIAG = _carregar()
+
+
+def _listar(caminho):
+    try:
+        return sorted(os.listdir(caminho))
+    except Exception as e:  # noqa: BLE001
+        return "erro: " + repr(e)
 
 
 def _validar(dados):
-    """Devolve a lista de campos obrigatórios em falta/ inválidos (spec secção 8)."""
+    """Devolve a lista de campos obrigatórios em falta/inválidos (spec secção 8)."""
     if not isinstance(dados, dict):
         return ["corpo JSON tem de ser um objeto"]
     faltam = []
@@ -93,9 +143,12 @@ class handler(BaseHTTPRequestHandler):
             "runtime": "python",
             "python": sys.version.split()[0],
             "modelo_importado": gerar_resumo_pam is not None,
+            "import_erro": _IMPORT_ERRO,
+            # DIAGNÓSTICO do filesystem real — revela onde (ou se) o ficheiro está no bundle.
+            "diag": _DIAG,
+            "raiz_listagem": _listar(_RAIZ),
+            "docs_pam_listagem": _listar(os.path.join(_RAIZ, "docs", "modelos", "pam")),
         }
-        if _IMPORT_ERRO:
-            info["import_erro"] = _IMPORT_ERRO
         try:
             import reportlab
             info["reportlab"] = reportlab.Version
@@ -105,7 +158,7 @@ class handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if gerar_resumo_pam is None:
-            return self._json(500, {"erro": "modelo_resumo_pam nao importado", "detalhe": _IMPORT_ERRO})
+            return self._json(500, {"erro": "modelo_resumo_pam nao carregado", "detalhe": _IMPORT_ERRO, "diag": _DIAG})
 
         try:
             length = int(self.headers.get("Content-Length") or 0)
