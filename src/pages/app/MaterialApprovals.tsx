@@ -1175,6 +1175,18 @@ export default function MaterialApprovals() {
                           >
                             <FileText className="w-3 h-3" /> Resumo 1pg
                           </Button>
+                          {/* C10: sem isto não havia caminho para re-analisar um PAM concluído —
+                              o bloco com "Analisar agora" (:723) só aparece em pending/analyzing. */}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="gap-1 text-xs"
+                            disabled={!a.email_file_path || !!processing[a.id]}
+                            title={!a.email_file_path ? 'Falta print do email — re-submeta o pedido com o email do empreiteiro' : 'Corre uma análise nova por cima desta'}
+                            onClick={(e) => { e.stopPropagation(); processApproval(a); }}
+                          >
+                            <RotateCcw className="w-3 h-3" /> Re-analisar
+                          </Button>
                         </div>
                       </>
                     )}

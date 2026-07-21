@@ -8,6 +8,11 @@ interface AnalysisData {
   recommendation?: string;
   confidence?: number;
   header_sintese?: { veredito?: string; base_analise?: string; material?: string };
+  // Campos do modelo aprovado (título + subtítulo). Opcionais: pareceres antigos não os têm.
+  pam_reference?: string;        // "PAM 011" — extraído do documento, nunca inventado
+  empreiteiro?: string;          // quem submete o pedido, extraído do PAM
+  documents_crossed?: string[];  // documentos cruzados, para o subtítulo
+  analysis_date?: string;        // data da análise (≠ data de exportação)
   material_proposed?: { name?: string; manufacturer?: string; product?: string; model?: string; specifications?: string[] };
   project_requirements?: { description?: string; exposure_conditions?: string; special_requirements?: string[]; required_tests?: string[]; source?: string };
   material_specified?: { description?: string; requirements?: string[] }; // legado v2
@@ -88,101 +93,131 @@ function footers(doc: jsPDF, fiscalCompany?: string) {
   }
 }
 
+// Cabeçalho do RESUMO — estrutura do modelo aprovado: título com a referência do PAM e UMA
+// linha de subtítulo "Obra … · empreiteiro · Análise da Fiscalização (docs cruzados) · data".
+// Separado de header() de propósito: o relatório completo mantém o cabeçalho antigo intacto.
+function headerReference(doc: jsPDF, a: AnalysisData, approval: ApprovalData, obraName: string, logo?: string, clientLogo?: string): number {
+  if (logo) { try { doc.addImage(logo, 'PNG', ML, 10, 22, 12); } catch { /* ignore */ } }
+  if (clientLogo) { try { doc.addImage(clientLogo, 'PNG', PAGE_W - MR - 30, 8, 30, 14); } catch { /* ignore */ } }
+  const ref = S(a.pam_reference || '').trim();
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(...RGB.ink);
+  doc.text(S(`Analise de Pedido de Aprovacao de Materiais${ref ? `, ${ref}` : ''}`), PAGE_W / 2, 16, { align: 'center' });
+
+  const cruzados = (a.documents_crossed || []).filter(Boolean).map(S).join(' + ');
+  const dataAnalise = a.analysis_date ? S(a.analysis_date)
+    : (approval.decided_at ? new Date(approval.decided_at).toLocaleDateString('pt-PT') : new Date().toLocaleDateString('pt-PT'));
+  const sub = [
+    S(obraName),
+    a.empreiteiro ? S(a.empreiteiro) : null,
+    cruzados ? `Analise da Fiscalizacao (${cruzados})` : 'Analise da Fiscalizacao',
+    dataAnalise,
+  ].filter(Boolean).join(' \xB7 ');
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...RGB.soft);
+  const subLines = doc.splitTextToSize(sub, CW);
+  doc.text(subLines, PAGE_W / 2, 22, { align: 'center' });
+  const yLine = 22 + subLines.length * 4.2 + 1.5;
+  doc.setDrawColor(203, 213, 225); doc.setLineWidth(0.4); doc.line(ML, yLine, PAGE_W - MR, yLine);
+  return yLine + 6;
+}
+
 // Síntese + 5 blocos de referência (partilhado Executivo/Completo). Devolve o y final.
 function renderReferenceBlocks(doc: jsPDF, a: AnalysisData, approval: ApprovalData, startY: number): number {
   let y = startY;
   const vm = verdictMeta(a, approval);
 
-  // Badge de veredito
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5);
-  const bw = Math.max(doc.getTextWidth(S(vm.label)) + 12, 45);
-  doc.setFillColor(...vm.color); doc.roundedRect(ML, y, bw, 9, 2.5, 2.5, 'F');
-  doc.setTextColor(255, 255, 255); doc.text(S(vm.label), ML + bw / 2, y + 6, { align: 'center' });
-  if (typeof a.confidence === 'number') {
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...RGB.soft);
-    doc.text(S(`Confianca: ${a.confidence}%`), ML + bw + 6, y + 6);
-  }
-  y += 13;
-
-  // Síntese
+  // PARECER — parágrafo destacado, na ordem do modelo: veredito -> base da análise -> material.
+  // (Substitui o badge: o modelo aprovado não tem badge, tem "Parecer final: <VEREDITO> — …".)
   const sint = a.header_sintese;
-  const sinteseText = [sint?.material, sint?.base_analise].filter(Boolean).map(S).join(' - ') || S(a.justification || '');
-  if (sinteseText) {
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...vm.color);
+  doc.text(S(`Parecer final: ${vm.label}`), ML, y); y += 5.5;
+  const parecerText = [
+    sint?.base_analise ? S(sint.base_analise) : '',
+    sint?.material ? S(`Material: ${sint.material}`) : '',
+  ].filter(Boolean).join(' ') || S(a.justification || '');
+  if (parecerText) {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...RGB.body);
-    const lines = doc.splitTextToSize(sinteseText, CW);
-    doc.text(lines, ML, y); y += lines.length * 4.2 + 3;
+    const lines = doc.splitTextToSize(parecerText, CW);
+    doc.text(lines, ML, y); y += lines.length * 4.2 + 4;
   }
 
-  const sectionTitle = (t: string) => {
+  const sectionTitle = (t: string, gap = 2) => {
     if (y > PAGE_H - MB - 24) { doc.addPage(); y = 20; }
     doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...RGB.ink);
-    doc.text(S(t), ML, y); y += 2;
+    doc.text(S(t), ML, y); y += gap;
+  };
+  // Prosa compacta (secções 3 e 4 do modelo): itens concatenados, sem tabela.
+  const prose = (txt: string) => {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...RGB.body);
+    const lines = doc.splitTextToSize(txt, CW);
+    if (y + lines.length * 4 > PAGE_H - MB - 6) { doc.addPage(); y = 20; }
+    doc.text(lines, ML, y); y += lines.length * 4 + 4;
   };
   const afterTable = () => { y = (doc as { lastAutoTable: { finalY: number } } & jsPDF).lastAutoTable.finalY + 6; };
 
-  // 1. Artigos do MQT por fase
+  // 1. Artigos do MQT — a fase é LINHA DE SUBGRUPO (formato do modelo), não coluna.
   if (a.mqt_articles_by_phase?.length) {
-    sectionTitle('1. Artigos do MQT abrangidos');
+    sectionTitle(`1. Artigos do MQT abrangidos${a.pam_reference ? ` pelo ${S(a.pam_reference)}` : ''}`);
+    const faseLabel = (r: { fase?: string; revisao?: string }) => {
+      const f = S(r.fase || '').trim(), rev = S(r.revisao || '').trim();
+      return !f && !rev ? '' : (rev ? `${f} (${rev})` : f);
+    };
+    const rows: unknown[] = [];
+    let faseActual: string | null = null;
+    for (const r of a.mqt_articles_by_phase) {
+      const fl = faseLabel(r);
+      if (fl && fl !== faseActual) {
+        faseActual = fl;
+        rows.push([{ content: fl, colSpan: 5, styles: { fontStyle: 'bold', fillColor: [241, 245, 249], textColor: RGB.ink } }]);
+      }
+      rows.push([S(r.article || '-'), S(r.description || '-'), S(r.diameter || '-'), S(r.quantity || '-'), S(r.norm || '-')]);
+    }
     autoTable(doc, {
       startY: y, margin: { left: ML, right: MR },
-      head: [['Fase / Rev.', 'Artigo', 'Descricao', 'O/ (mm)', 'Quant.', 'Norma']],
-      body: a.mqt_articles_by_phase.map(r => [
-        S([r.fase, r.revisao].filter(Boolean).join('\n') || '-'), S(r.article || '-'), S(r.description || '-'),
-        S(r.diameter || '-'), S(r.quantity || '-'), S(r.norm || '-'),
-      ]),
+      head: [['Artigo', 'Descricao', 'O/ (mm)', 'Quant. (m)', 'Norma']],
+      body: rows as string[][],
       styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak', textColor: RGB.body },
       headStyles: { fillColor: [71, 85, 105], textColor: [255, 255, 255], fontSize: 7, fontStyle: 'bold' },
-      columnStyles: { 0: { cellWidth: 28 }, 1: { cellWidth: 22 }, 2: { cellWidth: CW - 28 - 22 - 18 - 18 - 24 }, 3: { cellWidth: 18 }, 4: { cellWidth: 18 }, 5: { cellWidth: 24 } },
+      columnStyles: { 0: { cellWidth: 24 }, 1: { cellWidth: CW - 24 - 26 - 28 - 28 }, 2: { cellWidth: 26 }, 3: { cellWidth: 28 }, 4: { cellWidth: 28 } },
     });
     afterTable();
   }
 
   // 2. Seccoes dos CTE + veredito fino
   if (a.cte_sections?.length) {
-    sectionTitle('2. Seccoes dos CTE aplicaveis');
+    sectionTitle(`2. Seccoes dos CTE aplicaveis${a.pam_reference ? ` ao ${S(a.pam_reference)}` : ''}`);
     autoTable(doc, {
       startY: y, margin: { left: ML, right: MR },
-      head: [['CTE / Seccao', 'Requisito', 'Verificacao', 'Veredito']],
-      body: a.cte_sections.map(s => [S(s.section || '-'), S(s.requirement || '-'), S(s.verification || '-'), cteVerdictMeta(s.verdict).label]),
+      // 3 colunas (modelo): o veredicto é EMBUTIDO no início da Verificação, não é coluna.
+      head: [['CTE / Seccao', 'Requisito de projeto', 'Verificacao']],
+      body: a.cte_sections.map(s => {
+        const label = cteVerdictMeta(s.verdict).label;
+        const v = S(s.verification || '').trim();
+        // Não duplica o veredicto se o modelo já o escreveu no início da verificação.
+        const verif = (label && label !== '-' && !v.toUpperCase().startsWith(label)) ? `${label} - ${v}` : v;
+        return [S(s.section || '-'), S(s.requirement || '-'), verif || '-'];
+      }),
       styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak', textColor: RGB.body },
       headStyles: { fillColor: [71, 85, 105], textColor: [255, 255, 255], fontSize: 7, fontStyle: 'bold' },
-      columnStyles: { 0: { cellWidth: 34 }, 1: { cellWidth: 44 }, 2: { cellWidth: CW - 34 - 44 - 34 }, 3: { cellWidth: 34 } },
-      didParseCell: (d) => {
-        if (d.section === 'body' && d.column.index === 3) {
-          const m = cteVerdictMeta(a.cte_sections![d.row.index].verdict);
-          d.cell.styles.textColor = m.color; d.cell.styles.fontStyle = 'bold'; d.cell.styles.fontSize = 6.5;
-        }
-      },
+      columnStyles: { 0: { cellWidth: 34 }, 1: { cellWidth: 50 }, 2: { cellWidth: CW - 34 - 50 } },
     });
     afterTable();
   }
 
-  // 3. Documentos que suportam
-  if (a.supporting_documents?.length) {
-    sectionTitle('3. Documentos que suportam a aprovacao');
-    autoTable(doc, {
-      startY: y, margin: { left: ML, right: MR },
-      head: [['No', 'Norma', 'Ambito', 'Validade']],
-      body: a.supporting_documents.map(d => [S(d.number || '-'), S(d.norm || '-'), S(d.scope || '-'), S(d.validity || '-')]),
-      styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak', textColor: RGB.body },
-      headStyles: { fillColor: [71, 85, 105], textColor: [255, 255, 255], fontSize: 7, fontStyle: 'bold' },
-      columnStyles: { 0: { cellWidth: 40 }, 1: { cellWidth: 34 }, 2: { cellWidth: CW - 40 - 34 - 26 }, 3: { cellWidth: 26 } },
-    });
-    afterTable();
+  // 3. Documentos que suportam — PROSA compacta separada por " · " (formato do modelo).
+  const sup = (a.supporting_documents || []).filter(d => d && (d.number || d.norm || d.scope));
+  if (sup.length) {
+    sectionTitle('3. Documentos que suportam a aprovacao', 5);
+    prose(sup.map(d => {
+      const det = [d.norm, d.scope, d.validity ? `val. ${d.validity}` : ''].filter(Boolean).map(S).join(', ');
+      return `${S(d.number || '-')}${det ? ` (${det})` : ''}`;
+    }).join(' \xB7 ') + '.');
   }
 
-  // 4. Documentos sem aplicacao
-  if (a.documents_without_application?.length) {
-    sectionTitle('4. Documentos entregues sem aplicacao');
-    autoTable(doc, {
-      startY: y, margin: { left: ML, right: MR },
-      head: [['Documento', 'Motivo']],
-      body: a.documents_without_application.map(d => [S(d.document || '-'), S(d.reason || '-')]),
-      styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak', textColor: RGB.body },
-      headStyles: { fillColor: [71, 85, 105], textColor: [255, 255, 255], fontSize: 7, fontStyle: 'bold' },
-      columnStyles: { 0: { cellWidth: 55 }, 1: { cellWidth: CW - 55 } },
-    });
-    afterTable();
+  // 4. Documentos sem aplicacao — PROSA compacta com o motivo de cada um (formato do modelo).
+  const semApl = (a.documents_without_application || []).filter(d => d && (d.document || d.reason));
+  if (semApl.length) {
+    sectionTitle(`4. Documentos entregues sem aplicacao${a.pam_reference ? ` ao ${S(a.pam_reference)}` : ''}`, 5);
+    prose(semApl.map(d => `${S(d.document || '-')}${d.reason ? ` (${S(d.reason)})` : ''}`).join(' \xB7 ') + '.');
   }
 
   // 5. Condicoes da aprovacao
@@ -206,7 +241,10 @@ export function generateMaterialApprovalExecutive(
 ) {
   const doc = new jsPDF('p', 'mm', 'a4');
   const a = analysis || {};
-  let y = header(doc, 'Analise PAM - Resumo', approval, obraName, fiscalName, fiscalCompany, logoBase64, clientLogoBase64);
+  // Cabeçalho do modelo aprovado (título com referência do PAM + subtítulo de 1 linha).
+  // `fiscalName` deixa de entrar no cabeçalho: o modelo não o tem. Continua no rodapé.
+  void fiscalName;
+  let y = headerReference(doc, a, approval, obraName, logoBase64, clientLogoBase64);
   y = renderReferenceBlocks(doc, a, approval, y);
   // Fallback total: parecer antigo sem qualquer bloco novo -> mostrar a justificação, nunca crashar.
   if (!a.header_sintese && !a.mqt_articles_by_phase?.length && !a.cte_sections?.length && !(a.conditions || []).length && a.justification) {
