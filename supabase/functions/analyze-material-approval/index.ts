@@ -716,6 +716,15 @@ async function writeProgress(supabase: any, approvalId: string, progress: { curr
 const WALL_CLOCK_MS = 400_000;
 const SAFE_BUDGET_MS = 300_000;   // extrações: pára e re-invoca ao passar isto
 const FINAL_RESERVE_MS = 200_000; // a passagem final (web_search) exige pelo menos isto disponível
+// Margem que fica DEPOIS de abortarmos a passagem final, para o catch escrever _error e
+// repor 'pending'. Sem este colchão o wall-clock mata o worker antes de registar a falha.
+const FINAL_ABORT_MARGIN_MS = 25_000;
+// Handoff entre invocações encadeadas.
+const HANDOFF_TIMEOUT_MS = 20_000; // um handoff que não responde é falha, não espera eterna
+const MAX_HOPS = 12;               // teto de passagens: se não converge, DECLARA em vez de encadear sem fim
+// Marcador de build: aparece no log de arranque de CADA invocação. Serve para saber, numa
+// autópsia, que código correu naquela passagem. Actualizar quando o comportamento mudar.
+const PAM_BUILD = "2026-07-21 handoff-verificado+timeout-final";
 
 // Persiste o estado das extrações de certs em ai_analysis._cert_extractions (merge, sem
 // migração). Erro RUIDOSO — perder o estado obrigaria a re-extrair na invocação seguinte.
@@ -768,8 +777,24 @@ async function runExtractionPass(opts: {
     console.warn(`PAM: extração (${label}) truncada (stop_reason=${loop.finalStopReason}) — a rede vai re-dividir se houver >1 doc.`);
     return { truncated: true, data: [] };
   }
+  // Falha da API numa continuação: accumulatedText é PARCIAL. Interpretá-lo produziria um
+  // "JSON inválido" que esconde a causa verdadeira. Erro nomeado, com a causa da API.
+  if (loop.apiFailed) {
+    throw new Error(`Extração (${label}): falha na API Anthropic — ${loop.apiError} (resposta parcial, ${(loop.accumulatedText || "").length} chars; parse não tentado).`);
+  }
+  const replyText = loop.accumulatedText || "[]";
   let arr: any;
-  try { arr = extractJson(loop.accumulatedText || "[]"); } catch (e) {
+  try { arr = extractJson(replyText); } catch (e) {
+    // Log rico (mesmo formato do parecer final, :1268): sem head/tail/stop_reason um JSON
+    // malformado é indistinguível de uma resposta cortada e fica indiagnosticável depois.
+    console.error(`PAM: EXTRAÇÃO PARSE FALHOU (${label}) —`, JSON.stringify({
+      message: (e as any)?.message,
+      stop_reason: loop.finalStopReason,
+      iterations_used: loop.iterationsUsed,
+      reply_length: replyText.length,
+      reply_head: replyText.slice(0, 600),
+      reply_tail: replyText.slice(-600),
+    }));
     throw new Error(`Extração (${label}): JSON inválido — ${(e as any)?.message}`);
   }
   return { truncated: false, data: Array.isArray(arr) ? arr : [arr] };
@@ -881,6 +906,11 @@ serve(async (req) => {
     const certificates: Array<{ name: string; path: string; size?: number }> = Array.isArray(rec.certificates) ? rec.certificates : [];
     const manufacturer_docs: Array<{ name: string; path: string; size?: number }> = Array.isArray(rec.manufacturer_docs) ? rec.manufacturer_docs : [];
 
+    // ARRANQUE — primeira linha de CADA invocação (inclui as encadeadas). Sem isto, uma
+    // passagem que morra cedo não deixa rasto nenhum e a autópsia fica impossível.
+    const hopIn = Number(body._hop) || 0;
+    console.log(`PAM ARRANQUE: build=${PAM_BUILD} | hop=${hopIn} | continuation=${isContinuation} | approval=${approval_id} | status_lido=${rec.status} | certs=${certificates.length} mfg=${manufacturer_docs.length}`);
+
     console.log("PAM: Request received:", JSON.stringify({
       approval_id, obra_id, material_category, user_id,
       has_mqt: !!rec.mqt_file_path,
@@ -934,15 +964,41 @@ serve(async (req) => {
     const functionUrl = `${supabaseUrl}/functions/v1/analyze-material-approval`;
     let processedThisInvocation = 0;
     const overBudget = () => (Date.now() - t0) > SAFE_BUDGET_MS;
+    // Handoff para a passagem seguinte. TUDO o que possa correr mal aqui tem de ser
+    // ruidoso: um handoff perdido em silêncio deixa o registo preso em 'analyzing' para
+    // sempre, sem _error e sem forma de saber que parou. O throw sobe ao catch do
+    // background, que escreve _error e repõe 'pending' → falha visível e recuperável.
     const reinvoke = async (reason: string) => {
-      console.log(`PAM: orçamento de tempo (${Date.now() - t0}ms) — re-invocar para continuar (${reason}).`);
+      const hop = hopIn + 1;
+      console.log(`PAM HANDOFF: orçamento (${Date.now() - t0}ms) — passar para hop ${hop} (${reason}).`);
+      // Teto de encadeamento: sem isto, uma análise que não converge encadeia-se
+      // indefinidamente e consome tempo sem nunca declarar nada.
+      if (hop > MAX_HOPS) {
+        throw new Error(`Handoff abortado: ${hop} passagens encadeadas excedem o limite de ${MAX_HOPS} — a análise não está a convergir (razão da última: ${reason}).`);
+      }
       await writeProgress(supabase, approval_id, { current: 0, total: 0, label: `A continuar noutra passagem (${reason})…` });
-      const resp = await fetch(functionUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${supabaseKey}` },
-        body: JSON.stringify({ approval_id, fiscal_name, fiscal_company, _continuation: true }),
-      });
-      if (!resp.ok) throw new Error(`Re-invocação de continuação falhou (${resp.status}): ${(await resp.text().catch(() => "")).slice(0, 200)}`);
+      let resp: Response;
+      try {
+        resp = await fetch(functionUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${supabaseKey}` },
+          body: JSON.stringify({ approval_id, fiscal_name, fiscal_company, _continuation: true, _hop: hop }),
+          signal: AbortSignal.timeout(HANDOFF_TIMEOUT_MS),
+        });
+      } catch (hopErr: any) {
+        const nm = hopErr?.name;
+        const why = (nm === "TimeoutError" || nm === "AbortError")
+          ? `sem resposta em ${HANDOFF_TIMEOUT_MS}ms`
+          : (hopErr?.message || String(hopErr));
+        throw new Error(`Handoff falhou (hop ${hop}, ${reason}): ${why}`);
+      }
+      if (!resp.ok) {
+        throw new Error(`Handoff falhou (hop ${hop}, ${reason}): HTTP ${resp.status} — ${(await resp.text().catch(() => "")).slice(0, 300)}`);
+      }
+      // ATENÇÃO: 2xx confirma só que a passagem seguinte ACEITOU (respond-early, 202).
+      // NÃO confirma que ela concluiu — se morrer no background, quem fala é o ARRANQUE
+      // dela nos logs (ou a ausência dele).
+      console.log(`PAM HANDOFF: hop ${hop} aceite (HTTP ${resp.status}) — esta passagem termina aqui.`);
     };
 
     // 6. Retrieval MOVIDO para antes da montagem: contratuais da KB (Via 2) têm de ser
@@ -1045,7 +1101,24 @@ serve(async (req) => {
       : { data: [] as any[], error: null };
     if (doneErr) throw new Error(`Falha ao ler contractual_extractions: ${doneErr.message}`);
     const doneContractual = new Map<string, any[]>();
-    for (const r of (doneRows || [])) doneContractual.set(r.doc_path, Array.isArray(r.extraction) ? r.extraction : [r.extraction]);
+    // A coluna `extraction` é TEXT: o PostgREST devolve STRING, não array. Sem parse, o
+    // Array.isArray dava sempre false e guardávamos a string JSON inteira como "um item" —
+    // a consolidação recebia um blob duplamente escapado em vez de estrutura navegável.
+    // Normaliza para o MESMO formato que :1140 guarda (array de objectos), venha text ou jsonb.
+    for (const r of (doneRows || [])) {
+      let ex: unknown = r.extraction;
+      if (typeof ex === "string") {
+        // Ruidoso: uma extração persistida ilegível não pode passar por boa nem ser silenciada.
+        try { ex = JSON.parse(ex); } catch (e) {
+          throw new Error(`Extração contratual persistida ilegível (doc_path=${r.doc_path}): ${(e as any)?.message}`);
+        }
+      }
+      doneContractual.set(r.doc_path, Array.isArray(ex) ? ex : [ex]);
+    }
+    // HERANÇA — o que esta passagem recebeu já feito e o que lhe resta. Numa autópsia, é
+    // isto que diz se o encadeamento estava a progredir ou a repetir-se.
+    const pendingContratuais = contractualDocs.filter((c) => !doneContractual.has(c.path)).map((c) => c.name);
+    console.log(`PAM HERANÇA: hop=${hopIn} | contratuais já persistidas=${doneContractual.size}/${contractualDocs.length} | por processar=[${pendingContratuais.join("; ") || "nenhuma"}]`);
 
     for (const c of contractualDocs) {
       if (doneContractual.has(c.path)) continue; // reutiliza extração já persistida (voa)
@@ -1054,16 +1127,32 @@ serve(async (req) => {
       if (!url) { skippedContractuais.push({ name: c.name, reason: "signed URL falhou" }); continue; }
       const isImg = isImageName(c.name);
       const cb = { name: c.name, url, isImage: isImg, pages: pdfPages(isImg, c.pages), path: c.path, label: c.label };
+      // Contagem REAL do documento (null = desconhecida). cb.pages é o custo de ORÇAMENTO
+      // (sentinela UNKNOWN_PDF_PAGES quando desconhecida) e NUNCA deve ser registado como
+      // se fosse a contagem: gravá-lo faz a tabela mentir (4 docs distintos com "85pp").
+      const realPages = (typeof c.pages === "number" && c.pages > 0) ? c.pages : null;
       await writeProgress(supabase, approval_id, { current: doneContractual.size + 1, total: contractualDocs.length, label: `A ler contratual: ${c.name}…` });
       const build = (bs: (typeof cb)[]) => [...content, { type: bs[0].isImage ? "image" : "document", source: { type: "url", url: bs[0].url } }, { type: "text", text: `[${bs[0].label}]` }, { type: "text", text: CONTRACTUAL_EXTRACTION_INSTRUCTION }];
-      const ex = await extractGroupAdaptive([cb], build, { apiKey: anthropicKey, system: CONTRACTUAL_EXTRACTION_SYSTEM, maxTokens: 16000, label: `contratual ${c.name}` });
+      let ex: any[];
+      try {
+        ex = await extractGroupAdaptive([cb], build, { apiKey: anthropicKey, system: CONTRACTUAL_EXTRACTION_SYSTEM, maxTokens: 16000, label: `contratual ${c.name}` });
+      } catch (exErr: any) {
+        // Um documento que falhe a extração NÃO mata a análise inteira. Fica DECLARADO em
+        // documents_not_analyzed (:1292) e _ingestion.contratuais.skipped (:1285), além do
+        // console.error — ruidoso e visível no relatório, mas não bloqueante.
+        console.error(`PAM: contratual "${c.name}" FALHOU a extração — ${exErr?.message || String(exErr)}`);
+        skippedContractuais.push({ name: c.name, reason: `extração falhou: ${exErr?.message || String(exErr)}` });
+        processedThisInvocation++; // conta como trabalho feito: não re-tenta em ciclo
+        continue;
+      }
       const { error: upErr } = await supabase.from("contractual_extractions").upsert(
-        { obra_id, user_id, doc_name: c.name, doc_path: c.path, bucket: c.bucket, pages: cb.pages, extraction: ex, updated_at: new Date().toISOString() },
+        { obra_id, user_id, doc_name: c.name, doc_path: c.path, bucket: c.bucket, pages: realPages, extraction: ex, updated_at: new Date().toISOString() },
         { onConflict: "obra_id,doc_path" });
+      // Falha de persistência é SISTÉMICA (schema/BD), não do documento — continua a rebentar.
       if (upErr) throw new Error(`Falha a persistir extração contratual "${c.name}": ${upErr.message}`);
       doneContractual.set(c.path, ex);
       processedThisInvocation++;
-      console.log(`PAM: contratual "${c.name}" extraído e persistido (+${Date.now() - t0}ms).`);
+      console.log(`PAM: contratual "${c.name}" extraído e persistido (${realPages ?? "?"}pp reais) (+${Date.now() - t0}ms).`);
     }
 
     // ========================================================================
@@ -1100,7 +1189,15 @@ serve(async (req) => {
 
     // FASE FINAL (web_search → parecer). Exige uma invocação com tempo — se sobra pouco,
     // re-invoca para a final arrancar fresca. Depois injecta os textos das extrações.
-    if ((Date.now() - t0) > (WALL_CLOCK_MS - FINAL_RESERVE_MS)) { await reinvoke("parecer final"); return; }
+    // A passagem final é ATÓMICA e NÃO persistida: ou cabe inteira nesta invocação, ou
+    // perde-se por completo. Por isso corre SEMPRE numa invocação dedicada — se esta já
+    // gastou tempo em extrações, re-invoca para o parecer arrancar com o wall-clock inteiro
+    // (~400s) em vez do resto. Converge: com tudo já persistido, processedThisInvocation=0.
+    const elapsedBeforeFinal = Date.now() - t0;
+    if (processedThisInvocation > 0 || elapsedBeforeFinal > (WALL_CLOCK_MS - FINAL_RESERVE_MS)) {
+      await reinvoke(`parecer final (esta passagem gastou ${elapsedBeforeFinal}ms em ${processedThisInvocation} extrações)`);
+      return;
+    }
     await writeProgress(supabase, approval_id, { current: docBlocks.length, total: docBlocks.length, label: "A consolidar o parecer final…" });
     const allContractualEx = contractualDocs.filter((c) => doneContractual.has(c.path)).flatMap((c) => doneContractual.get(c.path)!);
     if (allContractualEx.length > 0) content.push({ type: "text", text: `DOCUMENTOS CONTRATUAIS — EXTRAÇÕES ESTRUTURADAS (leitura integral persistida; TRATA-AS COMO OS PRÓPRIOS MQT/CE/CTE para o confronto contratual e para mqt_articles_by_phase / cte_sections):\n${JSON.stringify(allContractualEx, null, 2)}` });
@@ -1222,6 +1319,11 @@ Responde SEMPRE em português europeu.`;
       toolChoice: hasKnowledge ? { type: "auto" } : undefined,
       maxIterations: 5,
       logPrefix: "[PAM loop]",
+      // Aborta ANTES do wall-clock da plataforma, deixando FINAL_ABORT_MARGIN_MS para o
+      // catch registar a falha. Era exactamente isto que faltava: sem timeout, a passagem
+      // final excedeu os 400s, o worker foi morto ("shutdown/WallClockTime") e o catch
+      // nunca correu — sem _error, sem repor 'pending', lock preso e falha SILENCIOSA.
+      timeoutMs: Math.max(60_000, WALL_CLOCK_MS - (Date.now() - t0) - FINAL_ABORT_MARGIN_MS),
     });
 
     const accumulatedText = loopResult.accumulatedText;
@@ -1292,7 +1394,12 @@ Responde SEMPRE em português europeu.`;
     analysis.documents_not_analyzed = [...skippedContractuais, ...skippedCerts, ...skippedMfg];
 
     // Update the approval record
-    await supabase
+    // Única escrita do parecer em todo o fluxo. Sem verificação, uma falha aqui era
+    // silenciada: o log dizia "Analysis complete", o status ficava por actualizar e o
+    // trabalho todo perdia-se sem rasto. Fail-loud → o catch do BG regista _error e repõe
+    // 'pending'. O .select("id") apanha o caso de 0 linhas afectadas (registo eliminado
+    // durante a análise), que um erro de BD não sinaliza.
+    const { data: saved, error: saveErr } = await supabase
       .from("material_approvals")
       .update({
         status: analysis.recommendation,
@@ -1300,7 +1407,10 @@ Responde SEMPRE em português europeu.`;
         ai_recommendation: analysis.justification,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", approval_id);
+      .eq("id", approval_id)
+      .select("id");
+    if (saveErr) throw new Error(`Falha a gravar o parecer final (approval ${approval_id}): ${saveErr.message}`);
+    if (!saved || saved.length === 0) throw new Error(`Parecer NÃO gravado: o registo ${approval_id} já não existe (eliminado durante a análise?).`);
 
     // Save summary to Eng. Silva memory
     try {
