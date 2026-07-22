@@ -71,10 +71,13 @@ export function buildOfficialPamData(a: PamAnalysisInput, obraName: string): Off
   if (!hs.material?.trim()) faltam.push('header_sintese.material');
   if (!a.mqt_articles_by_phase?.length) faltam.push('mqt_articles_by_phase');
   if (!a.cte_sections?.length) faltam.push('cte_sections');
-  if (!a.supporting_documents?.length) faltam.push('supporting_documents');
   if (faltam.length) {
     throw new Error(`Resumo PAM: campos em falta no ai_analysis — ${faltam.join(', ')}. Corrigir a analise / re-analisar (nunca inventar).`);
   }
+
+  // Regra de negócio: NENHUMA secção fica vazia — sem conteúdo, declara-se a constatação.
+  const numero = extrairNumero(a.pam_reference!);
+  const parecer = mapParecer(hs.veredito!);
 
   // Secção 1 — lista plana -> grupos aninhados por fase+revisão, na ordem de aparição.
   const grupos: OfficialPamData['seccao1']['grupos'] = [];
@@ -101,18 +104,29 @@ export function buildOfficialPamData(a: PamAnalysisInput, obraName: string): Off
     return { seccao: (s.section || '').trim(), requisito: (s.requirement || '').trim(), verificacao: verif };
   });
 
-  // Secção 3 — prosa " · " + ponto final.
-  const seccao3 = a.supporting_documents!.map(d => {
-    const det = [d.norm, d.scope, d.validity ? `val. ${d.validity}` : '']
-      .filter(x => x && String(x).trim()).map(x => String(x).trim()).join(', ');
-    return `${(d.number || '').trim()}${det ? ` (${det})` : ''}`;
-  }).join(' · ') + '.';
+  // Secção 3 — prosa " · " + ponto final; constatação se não houver documentos de suporte.
+  const sup = a.supporting_documents || [];
+  const seccao3 = sup.length
+    ? sup.map(d => {
+        const det = [d.norm, d.scope, d.validity ? `val. ${d.validity}` : '']
+          .filter(x => x && String(x).trim()).map(x => String(x).trim()).join(', ');
+        return `${(d.number || '').trim()}${det ? ` (${det})` : ''}`;
+      }).join(' · ') + '.'
+    : 'Não foram identificados documentos que suportem a aprovação.';
 
   // Secção 4 — prosa; vazio se não houver documentos sem aplicação (agrupamento já vem do modelo).
   const semApl = a.documents_without_application || [];
   const seccao4 = semApl.length
     ? semApl.map(d => `${(d.document || '').trim()}${d.reason ? ` (${String(d.reason).trim()})` : ''}`).join(' · ') + '.'
-    : '';
+    : `Todos os documentos entregues se aplicam ao PAM ${numero}.`;
+
+  // Secção 5 — condições; constatação (ajustada ao veredicto) quando não há nenhuma.
+  const conds = a.conditions || [];
+  const seccao5 = conds.length ? conds : [
+    parecer === 'REPROVADO' ? 'Sem condições — pedido reprovado.'
+    : parecer === 'APROVADO' ? 'Sem condições — aprovação sem reservas.'
+    : 'Sem condições específicas registadas.',
+  ];
 
   // Subtítulo — campos null omitem-se, sem " · " a mais.
   const cruzados = (a.documents_crossed || []).filter(Boolean).map(x => String(x).trim()).join(' + ');
@@ -124,14 +138,14 @@ export function buildOfficialPamData(a: PamAnalysisInput, obraName: string): Off
   ].filter((x): x is string => !!x).join(' · ');
 
   return {
-    numero_pam: extrairNumero(a.pam_reference!),
+    numero_pam: numero,
     subtitulo,
-    parecer: mapParecer(hs.veredito!),
+    parecer,
     parecer_texto: `— ${hs.base_analise!.trim()} Material: ${hs.material!.trim()}`,
     seccao1: { grupos },
     seccao2: { linhas },
     seccao3,
     seccao4,
-    seccao5: a.conditions || [],
+    seccao5,
   };
 }
