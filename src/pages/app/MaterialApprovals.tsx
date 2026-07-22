@@ -14,7 +14,8 @@ import { toast } from 'sonner';
 import {
   FileCheck, Plus, Upload, ChevronDown, ChevronUp, Trash2, CheckCircle2, AlertTriangle, XCircle, Clock, Loader2, Building2, ArrowLeft, FileText, Award, Factory, X, Download, ScrollText, FileSignature, ImageIcon, BookOpen, Brain, Mail, Copy, RotateCcw,
 } from 'lucide-react';
-import { generateMaterialApprovalPDF, generateMaterialApprovalExecutive } from '@/utils/material-approval-pdf';
+import { generateMaterialApprovalPDF } from '@/utils/material-approval-pdf';
+import { buildOfficialPamData } from '@/utils/pam-resumo-adapter';
 import { countPdfPages } from '@/utils/pdf-page-count';
 
 const CATEGORIES = [
@@ -465,6 +466,46 @@ export default function MaterialApprovals() {
   const removeLogo = () => {
     setPdfLogo(null);
     localStorage.removeItem('pam_fiscal_logo');
+  };
+
+  // Resumo OFICIAL: adaptador -> POST /api/gerar_resumo_pam (gerador congelado ReportLab)
+  // -> download. Qualquer falha é VISÍVEL com causa concreta; nunca silêncio, nunca jsPDF
+  // como fallback (um PDF do formato errado seria pior que um erro).
+  const handleResumoOficial = async (a: Approval) => {
+    if (!selectedObra) { toast.error('Selecione a obra antes de gerar o resumo.'); return; }
+    const tid = toast.loading('A gerar o resumo oficial…');
+    try {
+      // Lança com a lista de campos em falta se o ai_analysis estiver incompleto.
+      const oficial = buildOfficialPamData(a.ai_analysis, selectedObra.nome);
+      const res = await fetch('/api/gerar_resumo_pam', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(oficial),
+      });
+      if (!res.ok) {
+        let detalhe = `HTTP ${res.status}`;
+        try {
+          const err = await res.json();
+          if (Array.isArray(err?.campos)) detalhe = `Dados em falta na análise: ${err.campos.join(', ')}`;
+          else if (err?.detalhe) detalhe = `${err.erro || 'Erro do servidor'}: ${err.detalhe}`;
+          else if (err?.erro) detalhe = err.erro;
+        } catch { /* corpo não-JSON — fica o HTTP status */ }
+        throw new Error(detalhe);
+      }
+      const blob = await res.blob();
+      if (blob.type && !blob.type.includes('pdf')) throw new Error(`Resposta não é um PDF (${blob.type}).`);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `PAM${oficial.numero_pam}_Resumo.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Resumo oficial gerado.', { id: tid });
+    } catch (e: any) {
+      toast.error(`Não foi possível gerar o resumo: ${e?.message || e}`, { id: tid });
+    }
   };
 
   const handlePdfExport = () => {
@@ -1163,15 +1204,7 @@ export default function MaterialApprovals() {
                             size="sm"
                             variant="default"
                             className="gap-1 text-xs"
-                            onClick={() => {
-                              if (!selectedObra) return;
-                              generateMaterialApprovalExecutive(
-                                a, a.ai_analysis, selectedObra.nome,
-                                pdfFiscalName, pdfFiscalCompany,
-                                pdfLogo || undefined, pdfClientLogo || undefined
-                              );
-                              toast.success('Resumo executivo gerado.');
-                            }}
+                            onClick={(e) => { e.stopPropagation(); handleResumoOficial(a); }}
                           >
                             <FileText className="w-3 h-3" /> Resumo 1pg
                           </Button>
