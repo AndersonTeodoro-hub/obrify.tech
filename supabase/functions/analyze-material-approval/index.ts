@@ -562,7 +562,7 @@ Responde com o JSON estruturado abaixo (sem markdown, sem backticks, sem texto a
   "analysis_date": "data desta análise em DD/MM/AAAA",
   "header_sintese": {
     "veredito": "rótulo que resume o parecer (ex: APROVADO CONDICIONADO, APROVADO, APROVADO COM RESERVAS, REJEITADO)",
-    "base_analise": "1-2 frases: em que assenta o parecer. Ex: 'confirmado após cruzamento com o MQT Fases 1.1/1.2 + CTE Esgotos Domésticos + CTE Esgotos Pluviais'. Se NÃO houve MQT/CTE no contexto: 'sem confronto contratual — baseado em normas gerais'.",
+    "base_analise": "1-2 frases: em que assenta o parecer. Ex: 'confirmado após cruzamento com o MQT Fases 1.1/1.2 + CTE Esgotos Domésticos + CTE Esgotos Pluviais'. Se NÃO houve MQT/CTE no contexto: 'sem confronto contratual — baseado em normas gerais'. Se detetares NÃO-CONFORMIDADES PROCESSUAIS (material aplicado antes do parecer, datas incoerentes, PAM «já iniciado»), regista-as aqui numa frase curta com remissão para a condição respetiva (ex.: 'material já aplicado antes do parecer — ver condição d').",
     "material": "material + fabricante + marca em obra (1 frase)"
   },
   "mqt_articles_by_phase": [
@@ -570,17 +570,17 @@ Responde com o JSON estruturado abaixo (sem markdown, sem backticks, sem texto a
       "fase": "fase da obra (ex: Fase 1.1 — Pisos -5/-6) ou null",
       "revisao": "revisão do documento (ex: Rev.02, Dez 2025) ou null",
       "article": "artigo do MQT (ex: 1.3.3.1–.3)",
-      "description": "descrição do artigo",
+      "description": "LOCUÇÃO NOMINAL CONDENSADA, MÁX. 60 CARACTERES (ex: 'Residuais domésticas enterradas (área U)'). NUNCA a descrição integral do artigo do MQT — essa consulta-se no MQT; aqui só o que identifica o trabalho",
       "diameter": "diâmetro(s) (ex: 125 / 160 / 200) ou null",
       "quantity": "quantidade(s) SEM unidade, separadas por ' / ' (ex: 74,05 / 30,25 / 43,45) ou null — a unidade vai no cabeçalho da tabela",
-      "norm": "norma (ex: EN ISO 1452 – PN10) ou null"
+      "norm": "norma DE PRODUTO do artigo, abreviada (ex: 'EN ISO 1452 – PN10', 'EN 1917'). SÓ a norma do produto que o PAM aprova; EXCLUI normas de acessórios/componentes de âmbito diferente (ex.: tampas/aros EN 124 quando o produto é a caixa EN 1917). Notas relevantes do MQT abreviadas na célula ('nota MQT: PN10'). ou null"
     }
   ],
   "cte_sections": [
     {
       "section": "documento/secção do CTE (ex: Domésticos — 3.4.1 Tubagens e Acessórios)",
-      "requirement": "requisito de projeto",
-      "verification": "verificação da fiscalização",
+      "requirement": "SÓ as cláusulas com que o material é confrontado, PARAFRASEADAS (nunca transcritas), separadas por ';', MÁX. 140 CARACTERES",
+      "verification": "veredicto do vocabulário fechado + ' — ' + justificação, MÁX. 170 CARACTERES; inclui evidência concreta (referência/valor/certificado) e exclusões de âmbito (ex.: 'Geodrenos = artigo MQT 1.4.5, fora do âmbito do PAM'). Começa SEMPRE por CONFORME / CONFORME POR EXCESSO / NÃO CONFORME / A ACAUTELAR EM EXECUÇÃO",
       "verdict": "um de: CONFORME, CONFORME_POR_EXCESSO, NAO_CONFORME, A_ACAUTELAR_EM_EXECUCAO"
     }
   ],
@@ -595,7 +595,7 @@ Responde com o JSON estruturado abaixo (sem markdown, sem backticks, sem texto a
   "documents_without_application": [
     {
       "document": "documento(s) entregue(s) SEM aplicação a este PAM. AGRUPA numa só entrada os que partilham a MESMA razão (ex: 'Ferroplast, Plimat e FERSIL'); usa entradas separadas quando as razões diferem",
-      "reason": "porquê não se aplica — comum a todos os documentos desta entrada (ex: EN 1329-1 Série B — evacuação no interior de edifícios; MQT fixa PN10 enterrado)"
+      "reason": "razão técnica em MEIA LINHA — porquê não se aplica, comum a todos os documentos desta entrada (norma errada para o uso, âmbito diferente; ex: 'EN 1329-1 Série B — evacuação no interior de edifícios; MQT fixa PN10 enterrado')"
     }
   ],
   "practical_concerns": [
@@ -603,8 +603,8 @@ Responde com o JSON estruturado abaixo (sem markdown, sem backticks, sem texto a
     "Preocupação prática 2"
   ],
   "conditions": [
-    "Condição concreta 1 para aprovação",
-    "Condição concreta 2"
+    "Cada condição: uma ação objetiva, verificável e imputável (quem entrega o quê, com que conteúdo), MÁX. 170 CARACTERES. MÁXIMO 5 condições — se a análise gerar mais, o parecer provavelmente deve ser REPROVADO. Recomendações não vinculativas e interdependências com outros PAM NÃO entram como condição (vão como 'Nota:' / 'Recomenda-se' no parecer/justification)",
+    "Condição concreta 2 (mesmas regras)"
   ],
   "justification": "Parecer técnico interno em 4-6 frases — este é para o relatório da fiscalização, não para o empreiteiro.",
   "norms_referenced": ["norma 1", "norma 2"],
@@ -633,6 +633,13 @@ CONFRONTO CONTRATUAL (OBRIGATÓRIO quando o PAM cita o MQT/CE):
 - Identifica no PAM os artigos do MQT/Caderno de Encargos citados (ex.: "Art.º 1.3.4-1.3.6", "1.4.5-1.4.9", "1.4.11", "Conforme MQT").
 - Para CADA artigo citado, confronta o que o MQT/CE especifica (do contexto disponível) com o que o empreiteiro propõe → preenche "mqt_confrontation".
 - HONESTIDADE (inviolável): se o conteúdo do artigo do MQT/CE NÃO estiver no contexto (só tens o nome/resumo do documento, não a especificação do artigo), NÃO escrevas "conforme MQT" nem finjas o confronto — DECLARA "MQT não consultado ao nível do artigo <X>" em "missing_information", e uma rejeição não pode assentar num confronto que não fizeste.
+
+NÃO-CONFORMIDADES PROCESSUAIS (OBRIGATÓRIO verificar — o parecer atual falha aqui):
+Além da conformidade técnica, verifica o PROCESSO do pedido e regista qualquer irregularidade:
+- Material JÁ APLICADO em obra antes do parecer (PAM em estado «já iniciado», «em execução», ou datas que o comprovem).
+- DATAS INCOERENTES (aplicação anterior à submissão do PAM; certificado emitido depois da aplicação; etc.).
+- Erros administrativos na referência/identificação do PAM.
+Cada não-conformidade processual detetada: (1) declara-a em "header_sintese.base_analise" com remissão «ver condição X», e (2) gera a "condition" correspondente (ação objetiva). NUNCA a ignores — é exatamente o que distingue um parecer de fiscalização de uma checklist técnica.
 
 HIERARQUIA DOCUMENTAL (INVIOLÁVEL — determina QUEM decide o veredicto):
 - O MQT É O DOCUMENTO QUE VALIDA O MATERIAL. Prioridade 1. O veredicto sai SEMPRE do MQT.
@@ -667,6 +674,10 @@ CABEÇALHO DO RELATÓRIO (campos do topo — extrai do PAM, nunca inventes):
   NUNCA datas nem revisões. Vazio se nenhum.
 
 TABELAS DA REFERÊNCIA (5 blocos — preenche com dados REAIS, nunca inventados):
+
+REGRA MESTRA DAS 5 SECÇÕES — SÍNTESE, NUNCA TRANSCRIÇÃO (ver system prompt): as extrações contratuais são a FONTE a CONDENSAR, NUNCA texto a copiar verbatim para as células. O resumo tem de caber numa ÚNICA página A4 (orçamento total ≈ 3 900 caracteres) — respeitar TODOS os limites por campo é o que o garante.
+- Tabela 1 (mqt_articles_by_phase): UMA linha por artigo ou INTERVALO de artigos contíguos da mesma natureza (agrupa «1.3.3.1–.3», «1.4.6–1.4.8»). MÁXIMO 10 linhas de artigos no total — acima disso, agrupa mais. Diâmetros e quantidades agregados com « / » na MESMA ordem.
+- Tabela 2 (cte_sections): MÁXIMO 6 linhas. FUNDE secções com o mesmo requisito numa linha só (ex.: «Domésticos — 3.2 / 3.4.7»). Coluna "section": referência + título curto (máx. 4 palavras).
 - "header_sintese": veredito + base da análise + material. A base_analise diz explicitamente com que MQT/CTE se cruzou; se não houve nenhum no contexto, escreve "sem confronto contratual — baseado em normas gerais".
 - "mqt_articles_by_phase" e "cte_sections" (tabelas 1 e 2): SÓ preenche se tiveres o MQT/CTE no contexto (PDF anexado, contratual da Base de Conhecimento, ou resumo com o artigo/secção). Se NÃO houver MQT/CTE ao nível do artigo/secção, devolve ARRAY VAZIO [] e declara em "missing_information" que "as tabelas de MQT/CTE não foram preenchidas — documento não consultado". NUNCA inventes artigos, fases, diâmetros, quantidades ou secções. Coerência total com a regra do mqt_confrontation.
 - "supporting_documents" e "documents_without_application" (tabelas 3 e 4): constrói a partir dos certificados/documentos de fabricante ANALISADOS — sejam os PDFs anexados OU as EXTRAÇÕES ESTRUTURADAS fornecidas no contexto (quando a análise foi feita por grupos). Usa nº, norma, âmbito e validade REAIS. Em "documents_without_application" explica porque cada documento entregue não se aplica a este PAM. AGRUPAMENTO OBRIGATÓRIO: documentos que não se aplicam PELA MESMA razão vão numa ÚNICA entrada, com os nomes juntos em "document" (ex: "Ferroplast, Plimat e FERSIL") e a razão comum em "reason". Só usa entradas separadas quando as razões são efectivamente diferentes. O relatório imprime este bloco como prosa corrida, por isso o agrupamento é teu, não do gerador.
@@ -678,7 +689,17 @@ REGRAS DE FIABILIDADE (INVIOLÁVEIS):
 - Se não encontras informação sobre um fornecedor ou certificado, escreve "Sem documentação na Base de Conhecimento" — NUNCA inventes dados.
 - Na justificação, refere os documentos consultados pelos nomes exactos dos ficheiros.
 - Se o caderno de encargos não foi fornecido, indica isso em "missing_information".
-- Preenche "certificates_validity" para CADA certificado/laudo que consigas ler (anexado ou da Base de Conhecimento). Compara a data de validade com a DATA DE HOJE (${today}): já passou → status "expirado"; sem data de validade legível → "sem_data"; documento ilegível/incompleto → "ilegivel"; caso contrário → "valido".`;
+- Preenche "certificates_validity" para CADA certificado/laudo que consigas ler (anexado ou da Base de Conhecimento). Compara a data de validade com a DATA DE HOJE (${today}): já passou → status "expirado"; sem data de validade legível → "sem_data"; documento ilegível/incompleto → "ilegivel"; caso contrário → "valido".
+
+AUTOVERIFICAÇÃO DAS 5 SECÇÕES DO RESUMO (antes de devolver o JSON — corrige o que falhar):
+1. As 5 secções cabem numa página A4? (orçamento ≈ 3 900 caracteres no conjunto; se excede, condensa mais.)
+2. Alguma célula copia texto integral do MQT/CTE/fichas? Se sim, REESCREVE em locução condensada.
+3. Todas as verificações de cte_sections começam por um veredicto do vocabulário fechado?
+4. Respeitaste os limites por campo? (description ≤60; requirement ≤140; verification ≤170; conditions ≤170; máx. 10 linhas MQT, 6 CTE, 5 condições.)
+5. A coluna norm traz a norma DO PRODUTO (não a de acessórios/tampas de âmbito diferente)?
+6. Registaste as não-conformidades processuais que existam (parecer + condição)?
+7. O parecer é coerente com os veredictos? (um NÃO CONFORME sem condição que o resolva não pode ser APROVADO CONDICIONADO.)
+Isto NÃO reduz o resto do JSON — email_response, missing_information, compliance_checks e os demais campos mantêm-se completos; a autoverificação incide apenas sobre o CONTEÚDO das 5 secções do resumo.`;
 }
 
 // Signed URL de um objecto do storage (a Anthropic vai buscar por url) — ZERO bytes de PDF na memória.
@@ -1241,7 +1262,7 @@ serve(async (req) => {
     }
     await writeProgress(supabase, approval_id, { current: docBlocks.length, total: docBlocks.length, label: "A consolidar o parecer final…" });
     const allContractualEx = contractualDocs.filter((c) => doneContractual.has(c.path)).flatMap((c) => doneContractual.get(c.path)!);
-    if (allContractualEx.length > 0) content.push({ type: "text", text: `DOCUMENTOS CONTRATUAIS — EXTRAÇÕES ESTRUTURADAS (leitura integral persistida; TRATA-AS COMO OS PRÓPRIOS MQT/CE/CTE para o confronto contratual e para mqt_articles_by_phase / cte_sections):\n${JSON.stringify(allContractualEx, null, 2)}` });
+    if (allContractualEx.length > 0) content.push({ type: "text", text: `DOCUMENTOS CONTRATUAIS — EXTRAÇÕES ESTRUTURADAS (leitura integral persistida). Trata-as como os próprios MQT/CE/CTE para o CONFRONTO contratual, MAS são a FONTE a CONDENSAR (Regra Mestra do resumo): ao preencher mqt_articles_by_phase / cte_sections, REESCREVE em locução condensada dentro dos limites por campo — NUNCA copies a "description"/"requirement" da extração verbatim para as células:\n${JSON.stringify(allContractualEx, null, 2)}` });
     if (cert.items.length > 0) content.push({ type: "text", text: `CERTIFICADOS/DOCS DE FABRICANTE — EXTRAÇÕES ESTRUTURADAS (uma entrada de conformidade por fornecedor):\n${JSON.stringify(cert.items, null, 2)}` });
 
     // 7. Build context note based on available documents
@@ -1317,6 +1338,14 @@ Por fim, pensas como quem está em obra:
 - Os prazos de entrega são compatíveis com o planeamento da obra?
 - O empreiteiro identificou claramente QUEM fornece O QUÊ, ou mandou uma lista genérica?
 - Se é um material que precisa de aplicador certificado (ex: impermeabilização, ETICS), está identificado?
+
+REGRA MESTRA DO RESUMO — SÍNTESE, NUNCA TRANSCRIÇÃO (governa as 5 secções do Resumo PAM):
+O produto de síntese (header_sintese, mqt_articles_by_phase, cte_sections, supporting_documents, documents_without_application, conditions) é um PARECER DE UMA PÁGINA A4, não um relatório. O leitor é um engenheiro que conhece a obra: precisa da conclusão e da evidência mínima que a sustenta, NUNCA da transcrição dos documentos que ele próprio pode abrir.
+- É PROIBIDO copiar frases integrais do MQT, dos CTE, das fichas ou dos certificados para as células/secções do resumo. Todo o conteúdo é REDIGIDO DE NOVO, condensado. Pergunta a cada frase: "isto altera a decisão ou sustenta-a diretamente?" Se não, corta.
+- As extrações estruturadas dos contratuais que recebes são a MATÉRIA-PRIMA a condensar — nunca texto a transcrever tal como está.
+- Português europeu técnico de fiscalização, direto ao facto: sem "verifica-se que", "importa referir", "de salientar", sem adjetivos de opinião. Decimais com vírgula; « / » para séries; « — » entre veredicto e justificação.
+- Os limites rígidos por campo e a autoverificação vão no bloco de formato da resposta e são de cumprimento OBRIGATÓRIO: foi a ausência deles que fez o resumo do PAM 009 transbordar para 3 páginas.
+Isto NÃO altera a hierarquia MQT>CTE acima (CAMADA 1): o MQT continua a decidir o veredicto; a Regra Mestra rege apenas COMO se REDIGE o resumo, não QUEM decide.
 
 REGRAS QUE NÃO NEGOCEIAS:
 - Citas SEMPRE o nome exacto do ficheiro como fonte. Se o ficheiro se chama "PSG 001-2022 e DC 380 SN Maia.pdf", escreves isso — nunca inventas referências.
