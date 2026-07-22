@@ -79,22 +79,22 @@ export function buildOfficialPamData(a: PamAnalysisInput, obraName: string): Off
   const numero = extrairNumero(a.pam_reference!);
   const parecer = mapParecer(hs.veredito!);
 
-  // Secção 1 — lista plana -> grupos aninhados por fase+revisão, na ordem de aparição.
-  const grupos: OfficialPamData['seccao1']['grupos'] = [];
-  const idxPorTitulo: Record<string, number> = {};
-  for (const r of a.mqt_articles_by_phase!) {
-    const fase = (r.fase || '').trim();
-    const rev = (r.revisao || '').trim();
-    const titulo = rev ? `${fase} (${rev})` : (fase || 'Sem fase');
-    if (!(titulo in idxPorTitulo)) { idxPorTitulo[titulo] = grupos.length; grupos.push({ titulo, artigos: [] }); }
-    grupos[idxPorTitulo[titulo]].artigos.push({
+  // Secção 1 — DECISÃO DE NEGÓCIO (temporária, até se resolver a revisão vigente dos MQT):
+  // o Resumo oficial NÃO cita fase/revisão — antes omitir do que citar revisão errada num
+  // documento oficial. Todos os artigos entram num ÚNICO grupo, na ordem de aparição.
+  // O gerador congelado (.py, não alterável) emite sempre 1 linha de subsecção por grupo:
+  // com título vazio, sai uma faixa cinzenta fina sem texto de fase. fase/revisao continuam
+  // no ai_analysis (mqt_articles_by_phase) para o restante output — só deixam de ser exibidos.
+  const grupos: OfficialPamData['seccao1']['grupos'] = [{
+    titulo: '',
+    artigos: a.mqt_articles_by_phase!.map(r => ({
       artigo: r.article ?? '',
       descricao: r.description ?? '',
       diametros: r.diameter ?? '',
       quantidades: r.quantity ?? '',
       norma: r.norm ?? '',
-    });
-  }
+    })),
+  }];
 
   // Secção 2 — veredicto embutido no início da verificação (mesma lógica anti-duplicação do jsPDF).
   const linhas = a.cte_sections!.map(s => {
