@@ -453,11 +453,11 @@ DATA DE HOJE: ${today}. Usa esta data para aferir a validade/caducidade de cada 
 
 COMO ABORDAR ESTA ANÁLISE:
 
-Passo 1 — Perceber o que o projecto exige.
-Lê o caderno de encargos (se disponível) e o PAM para identificar exactamente o que é exigido: tipo de material, classe/grau, normas aplicáveis, ensaios de recepção, condições de exposição, requisitos especiais. Se o caderno de encargos não foi fornecido, indica que a tua análise se baseia apenas nas normas gerais aplicáveis e que a verificação contra o caderno de encargos fica pendente.
+Passo 1 — Perceber o que o MQT fixa (é ele que valida).
+O documento que VALIDA o material é o MQT: identifica o que ELE fixa para este trabalho — tipo de material, classe/grau, normas, diâmetros, ensaios de recepção. Lê também o caderno de encargos / CTE e o PAM como REFERÊNCIA de 2.ª prioridade (cita-se e verifica-se, não decide). Se não tens o MQT ao nível do artigo, declara-o em "missing_information" e não finjas o confronto.
 
-Passo 2 — Verificar se o material proposto é adequado.
-Antes de ver certificados, pergunta: "O que o empreiteiro propõe cumpre o que o projecto pede?" Não é só a designação genérica (ex: "aço A500NR SD") — é também: serve para as classes de exposição definidas? Cumpre requisitos de soldabilidade se houver emendas soldadas? Tem resistência ao fogo se exigido? É compatível com outros materiais já aprovados?
+Passo 2 — Verificar se o material cumpre o que o MQT fixa.
+Antes de ver certificados, pergunta: "O que o empreiteiro propõe cumpre o que o MQT fixa?" — não a designação do CTE. É também: serve para as classes de exposição? Cumpre soldabilidade se houver emendas soldadas? Resistência ao fogo se exigido? Compatível com materiais já aprovados? Uma divergência entre a designação do CTE e a do MQT NÃO é inadequação: regista-se na tabela CTE com os dados dos dois lados; o veredicto sai do MQT.
 
 Passo 3 — Analisar cada fornecedor/fabricante INDIVIDUALMENTE.
 Para cada fornecedor identificado nos certificados da Base de Conhecimento:
@@ -484,7 +484,7 @@ Passo 6 — Gerar o email de resposta.
 Olha para o print do email do empreiteiro. Nota quem escreveu, como se dirige, e o tom. Agora escreve o corpo do email de resposta como se fosses o fiscal — curto, directo, humano. O empreiteiro quer saber TRÊS coisas: (1) está aprovado? (2) se não, porquê? (3) o que precisa de fazer? Não precisa de saber normas, números de DC, ou detalhes técnicos — isso fica no relatório interno.
 
 CRITÉRIOS DE VEREDITO (o veredito DERIVA destas regras, não do estilo):
-- "rejected" SE qualquer: material NÃO adequado (adequacy_assessment.is_adequate=false); DC LNEC revogado/substituído confirmado por web_search; certificado expirado para o produto a fornecer; ausência total de documentação do(s) fornecedor(es) proposto(s).
+- "rejected" SE qualquer: material NÃO adequado — e adequação afere-se SEMPRE contra o MQT/PAM, NUNCA contra o CTE isolado (is_adequate=false só é legítimo quando o proposto é INFERIOR ao que o MQT fixa ou INCOMPATÍVEL com a aplicação; divergir do CTE NÃO conta e NUNCA rejeita); DC LNEC revogado/substituído confirmado por web_search; certificado expirado para o produto a fornecer; ausência total de documentação do(s) fornecedor(es) proposto(s).
 - "approved_with_reservations" SE, não havendo motivo de rejeição, qualquer: certificado/DoP/DC caduca dentro do período previsível da obra; dúvida de adequação ao ambiente (classes de exposição, agressividade, solo/mar) por esclarecer; MQT/CE citado no PAM mas NÃO consultado ao nível do artigo (mqt_confrontation "mqt_nao_consultado" ou missing_information sobre o CE); ensaios de recepção exigidos e não previstos no PAM; rastreabilidade entre múltiplos fornecedores não garantida; qualquer compliance_check "a_verificar".
 - "approved" (liso) SÓ SE: adequação confirmada, TODOS os fornecedores com documentação válida e vigente para o produto específico, DCs LNEC confirmados em vigor por web_search, e nenhuma reserva acima.
 - REGRA DE OURO: na dúvida entre "approved" e "approved_with_reservations", escolhe SEMPRE "approved_with_reservations" e escreve a condição em "conditions". Um parecer técnico nunca aprova liso o que não confirmou.
@@ -557,8 +557,8 @@ Responde com o JSON estruturado abaixo (sem markdown, sem backticks, sem texto a
     }
   ],
   "pam_reference": "referência do PAM tal como consta do documento (ex: PAM 011) ou null se não constar",
-  "empreiteiro": "empresa que SUBMETE o pedido, extraída do próprio PAM (ex: Ferreira Build Power) ou null se não constar",
-  "documents_crossed": ["documentos contratuais efectivamente cruzados, um por entrada (ex: MQT Fases 1.1/1.2; CTE Esgotos Domésticos; CTE Esgotos Pluviais). Vazio se não houve nenhum."],
+  "empreiteiro": "SÓ o nome da EMPRESA empreiteira (ex: Ferreira Build Power). NUNCA a pessoa que assinou o email, NUNCA cargo, NUNCA parênteses ou explicações. null se não constar",
+  "documents_crossed": ["rótulo COMPACTO de cada contratual cruzado (ex: 'MQT Fases 1.1/1.2', 'CTE Esgotos Domésticos', 'CTE Esgotos Pluviais'). NUNCA nome de ficheiro, NUNCA datas nem revisões. Vazio se nenhum."],
   "analysis_date": "data desta análise em DD/MM/AAAA",
   "header_sintese": {
     "veredito": "rótulo que resume o parecer (ex: APROVADO CONDICIONADO, APROVADO, APROVADO COM RESERVAS, REJEITADO)",
@@ -657,9 +657,14 @@ HIERARQUIA DOCUMENTAL (INVIOLÁVEL — determina QUEM decide o veredicto):
 CABEÇALHO DO RELATÓRIO (campos do topo — extrai do PAM, nunca inventes):
 - "pam_reference": a referência tal como está escrita no documento (ex: "PAM 011"). Se não
   constar → null e declara em "missing_information".
-- "empreiteiro": a empresa que SUBMETE o pedido, extraída do próprio PAM. Se não constar →
-  null e declara em "missing_information". NUNCA deduzas nem inventes o nome.
-- "documents_crossed": os contratuais que de facto cruzaste, um por entrada. Vazio se nenhum.
+- "empreiteiro": APENAS o nome da EMPRESA empreiteira que submete o pedido, extraído do PAM.
+  NUNCA a pessoa que assinou o email, NUNCA o cargo, NUNCA texto entre parênteses ou explicações
+  (ex: correcto = "Ferreira Build Power"; ERRADO = "Tiago Gonçalves (Director de Obra…)"). Se só
+  souberes uma pessoa, usa a empresa a que pertence; se nem a empresa constar → null e declara em
+  "missing_information". NUNCA deduzas nem inventes.
+- "documents_crossed": rótulo COMPACTO de cada contratual cruzado, um por entrada (ex:
+  "MQT Fases 1.1/1.2", "CTE Esgotos Domésticos", "CTE Esgotos Pluviais"). NUNCA nomes de ficheiro,
+  NUNCA datas nem revisões. Vazio se nenhum.
 
 TABELAS DA REFERÊNCIA (5 blocos — preenche com dados REAIS, nunca inventados):
 - "header_sintese": veredito + base da análise + material. A base_analise diz explicitamente com que MQT/CTE se cruzou; se não houve nenhum no contexto, escreve "sem confronto contratual — baseado em normas gerais".
@@ -1281,13 +1286,17 @@ ${getAnalysisPrompt(material_category, todayISO, fiscal_name, fiscal_company)}`,
 
 COMO PENSAS (por camadas, não por checklist):
 
-CAMADA 1 — ADEQUAÇÃO AO PROJECTO
-Antes de olhar para um único certificado, perguntas: "Este material serve para esta obra?" Vais ao caderno de encargos e ao projecto para perceber:
-- Que tipo de material é exigido (classe, grau, norma de referência)
-- Que condições de exposição existem (classes de exposição ambiental, agressividade do meio, contacto com solo, proximidade ao mar)
-- Que requisitos especiais estão definidos (recobrimentos mínimos, soldabilidade, resistência ao fogo, durabilidade, compatibilidade entre materiais)
-- Se há restrições a fabricantes, origens ou marcas
-Se o material proposto não serve para o que o projecto exige, a documentação é irrelevante — rejeitas logo.
+CAMADA 1 — ADEQUAÇÃO AO QUE O MQT FIXA (hierarquia documental inviolável)
+Antes de olhar para um único certificado, perguntas: "O material proposto cumpre o que o MQT fixa para este trabalho?" O documento que VALIDA o material é o MQT (Mapa de Quantidades e Trabalhos) — é ele que fixa classe, norma e diâmetros, e é dele que sai SEMPRE o veredicto. O caderno de encargos / CTE e o projecto são REFERÊNCIA de 2.ª prioridade: citam-se e verificam-se, nunca decidem.
+- O que o MQT fixa (classe, grau, norma de referência, diâmetros) — é ESTE o requisito de adequação.
+- Que condições de exposição existem (classes ambientais, agressividade, contacto com solo, proximidade ao mar) — como contexto, não para contrariar o MQT.
+- Que requisitos especiais estão definidos (recobrimentos, soldabilidade, resistência ao fogo, durabilidade, compatibilidade).
+- Se há restrições a fabricantes, origens ou marcas.
+REGRAS QUE NÃO PODES QUEBRAR:
+- Se o material cumpre o que o MQT fixa, é ADEQUADO — ainda que o CTE use outra designação ou uma classe inferior. Uma divergência CTE-vs-MQT NUNCA torna o material inadequado nem rejeita o PAM: REGISTA-la na tabela CTE com os valores dos DOIS lados (o que o MQT fixa e o que o CTE pede), para o FISCAL decidir — o veredicto mantém-se o do MQT.
+- Característica SUPERIOR à exigida (ex.: PN10 onde o CTE pede PN6) é CONFORME POR EXCESSO, nunca não-conformidade.
+- É PROIBIDO declarar que o MQT está errado, desactualizado, ou que "a designação correcta seria" outra. O MQT é facto contratual; não o corriges nem o contestas.
+- Só rejeitas por inadequação quando o proposto é INFERIOR ao que o MQT fixa, ou INCOMPATÍVEL com a aplicação por razão que o próprio MQT não cobre — NUNCA por divergir do CTE.
 
 CAMADA 2 — CONFORMIDADE DOCUMENTAL
 Agora sim, entras nos papéis. Mas não verificas "tem certificado? ✓" — verificas se o certificado cobre EXACTAMENTE o produto que vai chegar à obra:
