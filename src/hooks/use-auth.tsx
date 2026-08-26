@@ -6,7 +6,15 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
-  signUp: (email: string, password: string, fullName?: string) => Promise<{ error: Error | null }>;
+  // redirectTo: para onde o link de confirmação de email devolve o utilizador
+  // (por defeito, a raiz). session: vem null quando o projecto exige confirmação
+  // de email — quem chama tem de poder distinguir "já entrou" de "falta confirmar".
+  signUp: (
+    email: string,
+    password: string,
+    fullName?: string,
+    redirectTo?: string,
+  ) => Promise<{ error: Error | null; session: Session | null }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
 }
@@ -40,21 +48,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const signUp = async (email: string, password: string, fullName?: string) => {
+  const signUp = async (
+    email: string,
+    password: string,
+    fullName?: string,
+    redirectTo?: string,
+  ) => {
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          emailRedirectTo: window.location.origin,
+          emailRedirectTo: redirectTo || window.location.origin,
           data: {
             full_name: fullName,
           },
         },
       });
-      return { error };
+      return { error, session: data?.session ?? null };
     } catch (error) {
-      return { error: error as Error };
+      return { error: error as Error, session: null };
     }
   };
 

@@ -23,7 +23,8 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
-import { Copy, Check, Building2 } from 'lucide-react';
+import { Copy, Check, Building2, AlertTriangle } from 'lucide-react';
+import { requiresOrgWideConfirmation } from './invite-scope';
 
 interface Site {
   id: string;
@@ -53,38 +54,94 @@ export function InviteMemberModal({ open, onOpenChange, orgId, onInviteSent, loc
   const [loading, setLoading] = useState(false);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [orgName, setOrgName] = useState<string>('');
+  // Confirmação explícita de convite sem obra: sem isto, o envio fica bloqueado.
+  const [orgWideConfirmed, setOrgWideConfirmed] = useState(false);
 
   // Pré-scoped a uma obra → 'admin' é incoerente (admin = org inteira, site_ids: []).
   // Removê-lo evita que o branch admin no submit apague o scope silenciosamente.
   const availableRoles = lockedSite ? roles.filter((r) => r !== 'admin') : roles;
 
+  const isAdminRole = selectedRole === 'admin';
+  const needsOrgWideConfirm = requiresOrgWideConfirmation({
+    role: selectedRole,
+    lockedSiteId: lockedSite?.id ?? null,
+    selectedSites,
+  });
+
   useEffect(() => {
     if (open && orgId) {
       if (!lockedSite) fetchSites();
+      fetchOrgName();
       // Reset form
       setEmail('');
       setSelectedRole('viewer');
       setSelectedSites(lockedSite ? [lockedSite.id] : []);
       setInviteLink(null);
       setCopied(false);
+      setOrgWideConfirmed(false);
     }
   }, [open, orgId, lockedSite?.id]);
 
+  // O nome da organização é o dado que faltava para perceber o alcance do convite
+  // (um convite pode sair para a org errada, que nem obras tem).
+  const fetchOrgName = async () => {
+    if (!orgId) return;
+
+    const { data, error } = await supabase
+      .from('organizations')
+      .select('name')
+      .eq('id', orgId)
+      .single();
+
+    if (error) {
+      console.error('Erro a ler o nome da organização:', error);
+      setOrgName('');
+      return;
+    }
+
+    setOrgName(data?.name ?? '');
+  };
+
   const fetchSites = async () => {
     if (!orgId) return;
-    
-    const { data } = await supabase
+
+    const { data, error } = await supabase
       .from('sites')
       .select('id, name')
       .eq('org_id', orgId)
       .order('name');
-    
+
+    if (error) {
+      console.error('Erro a listar obras da organização:', error);
+      toast({
+        title: t('common.error'),
+        description: t('team.sitesLoadFailed', 'Não foi possível listar as obras desta organização.'),
+        variant: 'destructive',
+      });
+      setSites([]);
+      return;
+    }
+
     setSites(data || []);
   };
 
   const handleSubmit = async () => {
     if (!email || !orgId || !user) return;
-    
+
+    // Guarda ruidosa: nunca criar um convite sem obra por distracção.
+    if (needsOrgWideConfirm && !orgWideConfirmed) {
+      toast({
+        title: t('team.orgWideNotConfirmedTitle', 'Convite sem obra'),
+        description: t(
+          'team.orgWideNotConfirmed',
+          'Escolha pelo menos uma obra, ou confirme que o convite dá acesso a toda a organização.',
+        ),
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -266,6 +323,63 @@ export function InviteMemberModal({ open, onOpenChange, orgId, onInviteSent, loc
                 </ScrollArea>
               </div>
             ) : null}
+
+            {/* Org sem obras: antes era `null` — o convite saía org-wide sem que
+                nada o dissesse. Passa a ser explícito. */}
+            {!lockedSite && !isAdminRole && sites.length === 0 && (
+              <div className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                <p className="text-xs text-amber-700 dark:text-amber-500">
+                  {t(
+                    'team.noSitesInOrg',
+                    'Esta organização não tem nenhuma obra. O convite dará acesso à organização, mas não a qualquer obra. Confirme que está na organização certa.',
+                  )}
+                </p>
+              </div>
+            )}
+
+            {/* Resumo do alcance — sempre visível, com o nome da organização. */}
+            <div className="rounded-md border bg-muted/40 p-3 text-xs">
+              <p className="font-medium">{t('team.scopeSummaryTitle', 'Este convite dá acesso a:')}</p>
+              {lockedSite ? (
+                <p className="mt-1 text-muted-foreground">
+                  {t('team.scopeSite', 'Apenas à obra')} <strong>{lockedSite.name}</strong>
+                  {orgName ? ` (${orgName})` : ''}
+                </p>
+              ) : isAdminRole ? (
+                <p className="mt-1 text-muted-foreground">
+                  {t('team.scopeAdmin', 'Toda a organização')} <strong>{orgName || '—'}</strong>
+                  {' — '}
+                  {t('team.scopeAdminNote', 'administrador é sempre ao nível da organização.')}
+                </p>
+              ) : selectedSites.length > 0 ? (
+                <p className="mt-1 text-muted-foreground">
+                  {selectedSites.length} {t('team.scopeSites', 'obra(s) de')}{' '}
+                  <strong>{orgName || '—'}</strong>
+                </p>
+              ) : (
+                <p className="mt-1 text-muted-foreground">
+                  {t('team.scopeOrgWide', 'Toda a organização')} <strong>{orgName || '—'}</strong>
+                  {sites.length === 0 ? ` — ${t('team.scopeNoSites', 'que não tem obras')}` : ''}
+                </p>
+              )}
+            </div>
+
+            {/* Sem obra escolhida: exigir confirmação explícita antes de enviar. */}
+            {needsOrgWideConfirm && (
+              <label className="flex cursor-pointer items-start gap-2 rounded-md border p-3">
+                <Checkbox
+                  checked={orgWideConfirmed}
+                  onCheckedChange={(v) => setOrgWideConfirmed(v === true)}
+                />
+                <span className="text-xs">
+                  {t(
+                    'team.orgWideConfirm',
+                    'Confirmo que este convite não é para uma obra específica e dá acesso a toda a organização.',
+                  )}
+                </span>
+              </label>
+            )}
           </div>
         )}
 
@@ -279,9 +393,9 @@ export function InviteMemberModal({ open, onOpenChange, orgId, onInviteSent, loc
               <Button variant="outline" onClick={() => onOpenChange(false)}>
                 {t('common.cancel')}
               </Button>
-              <Button 
-                onClick={handleSubmit} 
-                disabled={!email || loading}
+              <Button
+                onClick={handleSubmit}
+                disabled={!email || loading || (needsOrgWideConfirm && !orgWideConfirmed)}
               >
                 {loading ? t('common.loading') : t('team.inviteMember')}
               </Button>

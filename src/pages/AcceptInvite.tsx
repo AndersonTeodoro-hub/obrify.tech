@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/hooks/use-auth';
@@ -31,6 +31,11 @@ const roleColors: Record<string, string> = {
   viewer: 'bg-muted text-muted-foreground border-border',
 };
 
+// Intenção de aceitar, registada no signup feito NESTE ecrã. Vive em localStorage
+// (e não em sessionStorage) porque o link de confirmação de email abre tipicamente
+// noutro separador — sessionStorage é por separador e perder-se-ia.
+const PENDING_ACCEPT_KEY = 'obrify.pendingInviteToken';
+
 export default function AcceptInvite() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
@@ -51,6 +56,8 @@ export default function AcceptInvite() {
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
+  // Impede o auto-resgate de disparar duas vezes (StrictMode monta o efeito 2x).
+  const autoAcceptTried = useRef(false);
 
   useEffect(() => {
     // Login-first: a policy SELECT viva exige email do convite == email autenticado.
@@ -128,8 +135,15 @@ export default function AcceptInvite() {
 
     try {
       if (isSignUp) {
-        const { error } = await signUp(email, password, fullName);
+        // Regista a intenção ANTES do signup: o resgate é retomado assim que houver
+        // sessão — imediata, ou depois da confirmação de email (ver efeito abaixo).
+        if (token) localStorage.setItem(PENDING_ACCEPT_KEY, token);
+
+        // O link de confirmação tem de devolver a ESTA página, não à raiz: é aqui
+        // que o convite é resgatado.
+        const { error, session } = await signUp(email, password, fullName, window.location.href);
         if (error) {
+          localStorage.removeItem(PENDING_ACCEPT_KEY);
           toast({
             title: t('common.error'),
             description: error.message,
@@ -137,10 +151,23 @@ export default function AcceptInvite() {
           });
           return;
         }
-        toast({
-          title: t('auth.checkEmail'),
-          description: t('auth.confirmationSent'),
-        });
+
+        // Dizer sempre o que falta: com sessão o resgate corre já; sem sessão, o
+        // convidado tem de saber que o convite só fica aceite depois de confirmar.
+        toast(
+          session
+            ? {
+                title: t('invite.accountCreated', 'Conta criada'),
+                description: t('invite.acceptingNow', 'A aceitar o convite...'),
+              }
+            : {
+                title: t('invite.signupPending', 'Conta criada — falta confirmar o email'),
+                description: t(
+                  'invite.signupPendingDesc',
+                  'Abra o link de confirmação que enviámos. Volta a esta página e o convite é aceite automaticamente. Sem esse passo, não tem acesso à obra.',
+                ),
+              },
+        );
       } else {
         const { error } = await signIn(email, password);
         if (error) {
@@ -158,7 +185,21 @@ export default function AcceptInvite() {
   };
 
   const acceptInvitation = async () => {
-    if (!user || !invitation || !token) return;
+    if (!user || !invitation || !token) {
+      // Nunca sair em silêncio: o convidado tem de perceber porque não avançou.
+      console.error('acceptInvitation: contexto em falta', {
+        hasUser: !!user, hasInvitation: !!invitation, hasToken: !!token,
+      });
+      toast({
+        title: t('common.error'),
+        description: t(
+          'invite.missingContext',
+          'Sessão ou convite em falta. Recarregue a página e tente de novo.',
+        ),
+        variant: 'destructive',
+      });
+      return;
+    }
 
     setAccepting(true);
     try {
@@ -207,6 +248,18 @@ export default function AcceptInvite() {
       setAccepting(false);
     }
   };
+
+  // Retoma o resgate depois do signup feito neste ecrã: quando a sessão chega
+  // (imediata ou após confirmação de email) e o convite já foi lido, a intenção
+  // registada dispara a aceitação uma única vez. Erros continuam a sair pela
+  // mesma acceptInvitation — sem caminho de erro duplicado.
+  useEffect(() => {
+    if (!user || !invitation || !token || autoAcceptTried.current) return;
+    if (localStorage.getItem(PENDING_ACCEPT_KEY) !== token) return;
+    autoAcceptTried.current = true;
+    localStorage.removeItem(PENDING_ACCEPT_KEY);
+    acceptInvitation();
+  }, [user?.id, invitation?.id, token]);
 
   // Spinner enquanto: (1) sessão por resolver — evita decidir/flicker antes de saber
   // se há user; (2) fetch do convite a correr; (3) já há user mas o convite ainda
@@ -301,8 +354,11 @@ export default function AcceptInvite() {
                   </>
                 )}
               </Button>
-              <Button 
-                variant="outline" 
+              <p className="text-xs text-muted-foreground text-center">
+                {t('invite.pendingAccept', 'O acesso só é concedido depois de aceitar este convite.')}
+              </p>
+              <Button
+                variant="outline"
                 className="w-full"
                 onClick={() => navigate('/auth')}
               >
