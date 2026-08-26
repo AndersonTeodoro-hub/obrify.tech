@@ -4,6 +4,7 @@ import { getCorsHeaders } from "../_shared/cors.ts";
 import { voyageEmbed } from "../_shared/embeddings/voyage-client.ts";
 import { searchKnowledgeSemantic } from "../_shared/knowledge/semanticSearch.ts";
 import { buildSilvaSystemPrompt, type SilvaMode } from "../_shared/silvaPersona.ts";
+import { buildTriagemSystemPrompt, parseTriagemResponse, type ResultadoTriagem } from "../_shared/patologiasTriagem.ts";
 
 type NivelCat = {
   id: string;
@@ -495,43 +496,64 @@ serve(async (req) => {
         m.notas ? `Notas do fiscal: ${m.notas}.` : "",
       ].filter(Boolean).join(" ");
 
-      const captionSystem =
-        "És o Eng. Silva, director de fiscalização de obra. Escreves a legenda de uma " +
-        "fotografia para um relatório fotográfico diário. Regras: português europeu; " +
-        "tom técnico de fiscal sénior; NO MÁXIMO DUAS frases; descreve o elemento e o " +
-        "estado/observação relevante para fiscalização (não faças descrição genérica de " +
-        "imagem nem listas). Usa os metadados apenas como contexto — não os repitas em bruto. " +
-        "Responde só com a legenda, sem aspas nem prefixos.";
+      // Modelo por env (regra 7); default = escolha de custo do Estágio 1 (D3).
+      const triagemModel = Deno.env.get("SILVA_TRIAGEM_MODEL") ?? "claude-haiku-4-5-20251001";
+      const systemTriagem = buildTriagemSystemPrompt();
+      const userText = `Metadados (contexto/calibração, NÃO descrevem a foto): ${ctx || "(sem metadados)"}\nProduz o JSON com descricao + anomalia.`;
 
-      const capResp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "x-api-key": apiKeyCap, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-5-20250929",
-          max_tokens: 150,
-          temperature: 0.4,
-          system: captionSystem,
-          messages: [{ role: "user", content: [
-            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: image } },
-            { type: "text", text: `Contexto: ${ctx || "(sem metadados)"}\nEscreve a legenda (máx. 2 frases).` },
-          ]}],
-        }),
-      });
-      if (!capResp.ok) {
-        const errBody = await capResp.text();
-        console.error(`ENG-SILVA-CHAT[caption]: Anthropic ${capResp.status}:`, errBody);
-        return new Response(JSON.stringify({ error: `Anthropic ${capResp.status}` }),
-          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const callTriagemModel = async (): Promise<string> => {
+        const r = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "x-api-key": apiKeyCap, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+          body: JSON.stringify({
+            model: triagemModel,
+            max_tokens: 700,     // descrição 2-4 frases + bloco anomalia; 150 truncava e quebrava o JSON
+            temperature: 0,      // factual e reproduzível; reduz confabulação (defeito 1)
+            system: systemTriagem,
+            messages: [{ role: "user", content: [
+              { type: "image", source: { type: "base64", media_type: "image/jpeg", data: image } },
+              { type: "text", text: userText },
+            ]}],
+          }),
+        });
+        if (!r.ok) {
+          const errBody = await r.text();
+          console.error(`ENG-SILVA-CHAT[triagem]: Anthropic ${r.status}:`, errBody);
+          throw new Error(`Anthropic ${r.status}`);
+        }
+        const j = await r.json();
+        return (j.content?.[0]?.text || "").trim() as string;
+      };
+
+      // Validação (secção 4.4): parse com retry 1x; 2ª falha -> triagem_falhou +
+      // aproveitar o texto como descrição. Nenhuma foto fica sem descrição.
+      let rawText = "";
+      let parsed: ResultadoTriagem | null = null;
+      for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
+        try {
+          rawText = await callTriagemModel();
+          parsed = parseTriagemResponse(rawText);
+        } catch (e) {
+          console.error(`ENG-SILVA-CHAT[triagem]: tentativa ${attempt + 1} falhou:`, e instanceof Error ? e.message : e);
+        }
       }
-      const capJson = await capResp.json();
-      const caption = (capJson.content?.[0]?.text || "").trim();
-      if (!caption) {
-        console.error("ENG-SILVA-CHAT[caption]: resposta sem texto:", JSON.stringify(capJson).slice(0, 1000));
-        return new Response(JSON.stringify({ error: "Sem legenda gerada" }),
-          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+      if (parsed) {
+        return new Response(JSON.stringify({
+          descricao: parsed.descricao,
+          anomalia: parsed.anomalia,
+          triagem_estado: "ok",
+          caption: parsed.descricao,   // compat: cliente antigo lê 'caption'
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
-      return new Response(JSON.stringify({ caption }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+      console.error("ENG-SILVA-CHAT[triagem]: triagem_falhou, a devolver melhor-esforço");
+      return new Response(JSON.stringify({
+        descricao: rawText,
+        anomalia: { detetada: false, tipo: null, confianca: "baixa", evidencia_visivel: "" },
+        triagem_estado: "triagem_falhou",
+        caption: rawText,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     // ── FIM MODO LEGENDA ─────────────────────────────────────────────────
 
@@ -734,7 +756,7 @@ serve(async (req) => {
       ? "\n\nANCORAGEM (regra permanente): só podes afirmar factos, valores ou a EXISTÊNCIA de documentos/obras/entidades se estiverem explicitamente no contexto acima (BASE DE CONHECIMENTO ou documentos anexados). Sem esse contexto, assume que NÃO tens o documento — nunca o inventes, mesmo sob insistência do fiscal."
       : "";
     const base = useSilvaPersona
-      ? buildSilvaSystemPrompt({ mode: mode as SilvaMode, catalogo: buildCatalogo(niveisCat), analysisContext })
+      ? buildSilvaSystemPrompt({ mode: mode as SilvaMode, catalogo: buildCatalogo(niveisCat), analysisContext: analysisContext ?? undefined })
       : clientSystem;
     let systemPrompt = base + scopeNote + knowledgeContext + noResultsNote + groundingRule;
     if (useSilvaPersona && clientSystem) systemPrompt += "\n\n" + clientSystem;

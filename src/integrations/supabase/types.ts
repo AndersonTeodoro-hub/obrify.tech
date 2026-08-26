@@ -469,6 +469,98 @@ export type Database = {
           },
         ]
       }
+      anomalias: {
+        Row: {
+          analise: Json | null
+          captura_id: string
+          confianca_triagem: string
+          criado_em: string
+          estado: string
+          gravidade_aparente: string | null
+          id: string
+          requer_urgencia: boolean
+          site_id: string
+          tipo: string
+        }
+        Insert: {
+          analise?: Json | null
+          captura_id: string
+          confianca_triagem: string
+          criado_em?: string
+          estado?: string
+          gravidade_aparente?: string | null
+          id?: string
+          requer_urgencia?: boolean
+          site_id: string
+          tipo: string
+        }
+        Update: {
+          analise?: Json | null
+          captura_id?: string
+          confianca_triagem?: string
+          criado_em?: string
+          estado?: string
+          gravidade_aparente?: string | null
+          id?: string
+          requer_urgencia?: boolean
+          site_id?: string
+          tipo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "anomalias_captura_id_fkey"
+            columns: ["captura_id"]
+            isOneToOne: true
+            referencedRelation: "captures"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "anomalias_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      anomalias_feedback: {
+        Row: {
+          anomalia_id: string
+          decidido_em: string
+          decisao: string
+          fiscal_id: string
+          id: string
+          observacoes: string | null
+          tipo_corrigido: string | null
+        }
+        Insert: {
+          anomalia_id: string
+          decidido_em?: string
+          decisao: string
+          fiscal_id: string
+          id?: string
+          observacoes?: string | null
+          tipo_corrigido?: string | null
+        }
+        Update: {
+          anomalia_id?: string
+          decidido_em?: string
+          decisao?: string
+          fiscal_id?: string
+          id?: string
+          observacoes?: string | null
+          tipo_corrigido?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "anomalias_feedback_anomalia_id_fkey"
+            columns: ["anomalia_id"]
+            isOneToOne: false
+            referencedRelation: "anomalias"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       areas: {
         Row: {
           created_at: string
@@ -579,6 +671,75 @@ export type Database = {
             columns: ["capture_id"]
             isOneToOne: false
             referencedRelation: "captures"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      capture_contexts: {
+        Row: {
+          ambiente: string | null
+          archived_at: string | null
+          atividade: string | null
+          cota: number | null
+          created_at: string
+          created_by: string
+          especialidade: string | null
+          fase: string | null
+          id: string
+          label: string
+          last_used_at: string | null
+          nivel_id: string | null
+          piso: string | null
+          site_id: string
+          updated_at: string
+        }
+        Insert: {
+          ambiente?: string | null
+          archived_at?: string | null
+          atividade?: string | null
+          cota?: number | null
+          created_at?: string
+          created_by: string
+          especialidade?: string | null
+          fase?: string | null
+          id?: string
+          label: string
+          last_used_at?: string | null
+          nivel_id?: string | null
+          piso?: string | null
+          site_id: string
+          updated_at?: string
+        }
+        Update: {
+          ambiente?: string | null
+          archived_at?: string | null
+          atividade?: string | null
+          cota?: number | null
+          created_at?: string
+          created_by?: string
+          especialidade?: string | null
+          fase?: string | null
+          id?: string
+          label?: string
+          last_used_at?: string | null
+          nivel_id?: string | null
+          piso?: string | null
+          site_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "capture_contexts_nivel_id_fkey"
+            columns: ["nivel_id"]
+            isOneToOne: false
+            referencedRelation: "eng_silva_niveis"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "capture_contexts_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
             referencedColumns: ["id"]
           },
         ]
@@ -772,75 +933,6 @@ export type Database = {
           },
         ]
       }
-      capture_contexts: {
-        Row: {
-          ambiente: string | null
-          archived_at: string | null
-          atividade: string | null
-          cota: number | null
-          created_at: string
-          created_by: string
-          especialidade: string | null
-          fase: string | null
-          id: string
-          label: string
-          last_used_at: string | null
-          nivel_id: string | null
-          piso: string | null
-          site_id: string
-          updated_at: string
-        }
-        Insert: {
-          ambiente?: string | null
-          archived_at?: string | null
-          atividade?: string | null
-          cota?: number | null
-          created_at?: string
-          created_by: string
-          especialidade?: string | null
-          fase?: string | null
-          id?: string
-          label: string
-          last_used_at?: string | null
-          nivel_id?: string | null
-          piso?: string | null
-          site_id: string
-          updated_at?: string
-        }
-        Update: {
-          ambiente?: string | null
-          archived_at?: string | null
-          atividade?: string | null
-          cota?: number | null
-          created_at?: string
-          created_by?: string
-          especialidade?: string | null
-          fase?: string | null
-          id?: string
-          label?: string
-          last_used_at?: string | null
-          nivel_id?: string | null
-          piso?: string | null
-          site_id?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "capture_contexts_site_id_fkey"
-            columns: ["site_id"]
-            isOneToOne: false
-            referencedRelation: "sites"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "capture_contexts_nivel_id_fkey"
-            columns: ["nivel_id"]
-            isOneToOne: false
-            referencedRelation: "eng_silva_niveis"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       captures: {
         Row: {
           ai_analyzed: boolean | null
@@ -863,6 +955,8 @@ export type Database = {
           site_id: string
           size_bytes: number | null
           source_type: Database["public"]["Enums"]["capture_source"]
+          triagem_anomalia: Json | null
+          triagem_estado: string
           updated_at: string
           user_id: string
         }
@@ -887,6 +981,8 @@ export type Database = {
           site_id: string
           size_bytes?: number | null
           source_type?: Database["public"]["Enums"]["capture_source"]
+          triagem_anomalia?: Json | null
+          triagem_estado?: string
           updated_at?: string
           user_id: string
         }
@@ -911,6 +1007,8 @@ export type Database = {
           site_id?: string
           size_bytes?: number | null
           source_type?: Database["public"]["Enums"]["capture_source"]
+          triagem_anomalia?: Json | null
+          triagem_estado?: string
           updated_at?: string
           user_id?: string
         }
@@ -930,20 +1028,68 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "captures_site_id_fkey"
-            columns: ["site_id"]
-            isOneToOne: false
-            referencedRelation: "sites"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "captures_nivel_id_fkey"
             columns: ["nivel_id"]
             isOneToOne: false
             referencedRelation: "eng_silva_niveis"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "captures_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
         ]
+      }
+      contractual_extractions: {
+        Row: {
+          bucket: string | null
+          created_at: string
+          doc_key: string | null
+          doc_name: string
+          doc_path: string | null
+          extraction: string
+          id: string
+          model: string | null
+          obra_id: string
+          pages: number | null
+          source: string | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          bucket?: string | null
+          created_at?: string
+          doc_key?: string | null
+          doc_name: string
+          doc_path?: string | null
+          extraction: string
+          id?: string
+          model?: string | null
+          obra_id: string
+          pages?: number | null
+          source?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          bucket?: string | null
+          created_at?: string
+          doc_key?: string | null
+          doc_name?: string
+          doc_path?: string | null
+          extraction?: string
+          id?: string
+          model?: string | null
+          obra_id?: string
+          pages?: number | null
+          source?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
       }
       documents: {
         Row: {
@@ -1517,6 +1663,60 @@ export type Database = {
           },
         ]
       }
+      incompaticheck_analysis_runs: {
+        Row: {
+          error_message: string | null
+          finished_at: string | null
+          id: string
+          obra_id: string
+          project_id: string | null
+          stage: string
+          started_at: string | null
+          stats: Json | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          obra_id: string
+          project_id?: string | null
+          stage: string
+          started_at?: string | null
+          stats?: Json | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          obra_id?: string
+          project_id?: string | null
+          stage?: string
+          started_at?: string | null
+          stats?: Json | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "incompaticheck_analysis_runs_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_obras"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incompaticheck_analysis_runs_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       incompaticheck_chat: {
         Row: {
           content: string
@@ -1548,6 +1748,273 @@ export type Database = {
             columns: ["obra_id"]
             isOneToOne: false
             referencedRelation: "incompaticheck_obras"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      incompaticheck_cross_findings: {
+        Row: {
+          confidence: number
+          constructability_note: string | null
+          created_at: string | null
+          description: string
+          element_a_id: string
+          element_b_id: string | null
+          especialidade_a: string
+          especialidade_b: string
+          id: string
+          impact: string | null
+          location: string | null
+          obra_id: string
+          recommendation: string | null
+          run_id: string | null
+          severity: string
+          status: string
+          tipo_conflito: string
+          title: string
+          user_id: string
+        }
+        Insert: {
+          confidence: number
+          constructability_note?: string | null
+          created_at?: string | null
+          description: string
+          element_a_id: string
+          element_b_id?: string | null
+          especialidade_a: string
+          especialidade_b: string
+          id?: string
+          impact?: string | null
+          location?: string | null
+          obra_id: string
+          recommendation?: string | null
+          run_id?: string | null
+          severity: string
+          status?: string
+          tipo_conflito: string
+          title: string
+          user_id: string
+        }
+        Update: {
+          confidence?: number
+          constructability_note?: string | null
+          created_at?: string | null
+          description?: string
+          element_a_id?: string
+          element_b_id?: string | null
+          especialidade_a?: string
+          especialidade_b?: string
+          id?: string
+          impact?: string | null
+          location?: string | null
+          obra_id?: string
+          recommendation?: string | null
+          run_id?: string | null
+          severity?: string
+          status?: string
+          tipo_conflito?: string
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "incompaticheck_cross_findings_element_a_id_fkey"
+            columns: ["element_a_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_elements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incompaticheck_cross_findings_element_b_id_fkey"
+            columns: ["element_b_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_elements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incompaticheck_cross_findings_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_obras"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incompaticheck_cross_findings_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_analysis_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      incompaticheck_doc_inventory: {
+        Row: {
+          analyzed_at: string | null
+          confidence: number | null
+          created_at: string | null
+          doc_type: string
+          error_message: string | null
+          escala: string | null
+          especialidade: string
+          id: string
+          num_paginas: number | null
+          obra_id: string
+          pisos: string[] | null
+          processing_status: string
+          project_id: string
+          sistema_eixos: string | null
+          summary: string | null
+          user_id: string
+          zonas: string[] | null
+        }
+        Insert: {
+          analyzed_at?: string | null
+          confidence?: number | null
+          created_at?: string | null
+          doc_type: string
+          error_message?: string | null
+          escala?: string | null
+          especialidade: string
+          id?: string
+          num_paginas?: number | null
+          obra_id: string
+          pisos?: string[] | null
+          processing_status?: string
+          project_id: string
+          sistema_eixos?: string | null
+          summary?: string | null
+          user_id: string
+          zonas?: string[] | null
+        }
+        Update: {
+          analyzed_at?: string | null
+          confidence?: number | null
+          created_at?: string | null
+          doc_type?: string
+          error_message?: string | null
+          escala?: string | null
+          especialidade?: string
+          id?: string
+          num_paginas?: number | null
+          obra_id?: string
+          pisos?: string[] | null
+          processing_status?: string
+          project_id?: string
+          sistema_eixos?: string | null
+          summary?: string | null
+          user_id?: string
+          zonas?: string[] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "incompaticheck_doc_inventory_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_obras"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incompaticheck_doc_inventory_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: true
+            referencedRelation: "incompaticheck_projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      incompaticheck_elements: {
+        Row: {
+          confidence: number
+          cota_base: number | null
+          cota_raw: string | null
+          cota_topo: number | null
+          created_at: string | null
+          dimensions: Json | null
+          eixo_ref: string | null
+          element_ref: string | null
+          element_type: string
+          especialidade: string
+          id: string
+          inventory_id: string | null
+          material: string | null
+          obra_id: string
+          piso: string | null
+          position: Json | null
+          project_id: string
+          raw_evidence: string
+          route: Json | null
+          source_page: number
+          source_zone: string | null
+          user_id: string
+        }
+        Insert: {
+          confidence: number
+          cota_base?: number | null
+          cota_raw?: string | null
+          cota_topo?: number | null
+          created_at?: string | null
+          dimensions?: Json | null
+          eixo_ref?: string | null
+          element_ref?: string | null
+          element_type: string
+          especialidade: string
+          id?: string
+          inventory_id?: string | null
+          material?: string | null
+          obra_id: string
+          piso?: string | null
+          position?: Json | null
+          project_id: string
+          raw_evidence: string
+          route?: Json | null
+          source_page: number
+          source_zone?: string | null
+          user_id: string
+        }
+        Update: {
+          confidence?: number
+          cota_base?: number | null
+          cota_raw?: string | null
+          cota_topo?: number | null
+          created_at?: string | null
+          dimensions?: Json | null
+          eixo_ref?: string | null
+          element_ref?: string | null
+          element_type?: string
+          especialidade?: string
+          id?: string
+          inventory_id?: string | null
+          material?: string | null
+          obra_id?: string
+          piso?: string | null
+          position?: Json | null
+          project_id?: string
+          raw_evidence?: string
+          route?: Json | null
+          source_page?: number
+          source_zone?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "incompaticheck_elements_inventory_id_fkey"
+            columns: ["inventory_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_doc_inventory"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incompaticheck_elements_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_obras"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incompaticheck_elements_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_projects"
             referencedColumns: ["id"]
           },
         ]
@@ -1598,6 +2065,7 @@ export type Database = {
       }
       incompaticheck_obras: {
         Row: {
+          analysis_context: string | null
           cidade: string | null
           created_at: string | null
           fiscal: string | null
@@ -1607,6 +2075,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          analysis_context?: string | null
           cidade?: string | null
           created_at?: string | null
           fiscal?: string | null
@@ -1616,6 +2085,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          analysis_context?: string | null
           cidade?: string | null
           created_at?: string | null
           fiscal?: string | null
@@ -1802,6 +2272,105 @@ export type Database = {
             columns: ["obra_id"]
             isOneToOne: false
             referencedRelation: "incompaticheck_obras"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      incompaticheck_self_findings: {
+        Row: {
+          confidence: number
+          created_at: string | null
+          description: string
+          element_a_id: string
+          element_b_id: string | null
+          especialidade: string
+          id: string
+          impact: string | null
+          location: string | null
+          obra_id: string
+          project_id: string
+          recommendation: string | null
+          run_id: string | null
+          severity: string
+          status: string
+          tipo_problema: string
+          title: string
+          user_id: string
+        }
+        Insert: {
+          confidence: number
+          created_at?: string | null
+          description: string
+          element_a_id: string
+          element_b_id?: string | null
+          especialidade: string
+          id?: string
+          impact?: string | null
+          location?: string | null
+          obra_id: string
+          project_id: string
+          recommendation?: string | null
+          run_id?: string | null
+          severity: string
+          status?: string
+          tipo_problema: string
+          title: string
+          user_id: string
+        }
+        Update: {
+          confidence?: number
+          created_at?: string | null
+          description?: string
+          element_a_id?: string
+          element_b_id?: string | null
+          especialidade?: string
+          id?: string
+          impact?: string | null
+          location?: string | null
+          obra_id?: string
+          project_id?: string
+          recommendation?: string | null
+          run_id?: string | null
+          severity?: string
+          status?: string
+          tipo_problema?: string
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "incompaticheck_self_findings_element_a_id_fkey"
+            columns: ["element_a_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_elements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incompaticheck_self_findings_element_b_id_fkey"
+            columns: ["element_b_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_elements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incompaticheck_self_findings_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_obras"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incompaticheck_self_findings_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incompaticheck_self_findings_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "incompaticheck_analysis_runs"
             referencedColumns: ["id"]
           },
         ]
@@ -2149,6 +2718,7 @@ export type Database = {
           mqt_name: string | null
           mqt_page_count: number | null
           obra_id: string
+          pam_page_count: number | null
           pdm_file_path: string
           pdm_file_size: number | null
           pdm_name: string
@@ -2185,6 +2755,7 @@ export type Database = {
           mqt_name?: string | null
           mqt_page_count?: number | null
           obra_id: string
+          pam_page_count?: number | null
           pdm_file_path: string
           pdm_file_size?: number | null
           pdm_name: string
@@ -2221,6 +2792,7 @@ export type Database = {
           mqt_name?: string | null
           mqt_page_count?: number | null
           obra_id?: string
+          pam_page_count?: number | null
           pdm_file_path?: string
           pdm_file_size?: number | null
           pdm_name?: string
@@ -2990,17 +3562,17 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "sites_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "sites_incompaticheck_obra_id_fkey"
             columns: ["incompaticheck_obra_id"]
             isOneToOne: false
             referencedRelation: "incompaticheck_obras"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sites_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -3085,6 +3657,10 @@ export type Database = {
         Args: { _site_id: string; _user_id: string }
         Returns: boolean
       }
+      can_capture_site: {
+        Args: { _site_id: string; _user_id: string }
+        Returns: boolean
+      }
       create_organization_with_membership: {
         Args: { _description?: string; _name: string }
         Returns: string
@@ -3131,26 +3707,50 @@ export type Database = {
         Args: { _org_id: string; _user_id: string }
         Returns: boolean
       }
+      is_site_member: {
+        Args: { _site_id: string; _user_id: string }
+        Returns: boolean
+      }
       match_knowledge_embeddings: {
         Args: {
           match_count?: number
           match_obra_id: string
           match_threshold?: number
           match_user_id: string
+          p_fase?: string
+          p_nivel_id?: string
           query_embedding: string
         }
         Returns: {
           chunk_text: string
           chunk_type: string
+          cota: number
           document_name: string
           document_type: string
+          fase: string
           id: string
           knowledge_id: string
+          nivel_id: string
+          piso: string
           similarity: number
           specialty: string
         }[]
       }
       redeem_invitation: { Args: { _token: string }; Returns: Json }
+      upsert_contractual_extraction: {
+        Args: {
+          p_bucket: string
+          p_doc_key: string
+          p_doc_name: string
+          p_doc_path: string
+          p_extraction: string
+          p_model: string
+          p_obra_id: string
+          p_pages: number
+          p_source: string
+        }
+        Returns: undefined
+      }
     }
     Enums: {
       ai_detection_type:

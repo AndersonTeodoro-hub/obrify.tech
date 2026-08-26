@@ -208,6 +208,29 @@ export async function generatePhotoReportDOCX(
     }));
   }
 
+  // Anomalias Sinalizadas — Verificação Requerida (E4, dados só da triagem)
+  const anomaliasDocx = photoImages.filter(p => p.anomalia?.detetada);
+  if (anomaliasDocx.length > 0) {
+    children.push(new Paragraph({
+      heading: HeadingLevel.HEADING_2,
+      children: [new TextRun({ text: 'Anomalias Sinalizadas — Verificação Requerida', bold: true, size: 22, color: '333333' })],
+      spacing: { before: 200, after: 100 },
+    }));
+    for (const p of anomaliasDocx) {
+      const a = p.anomalia!;
+      children.push(new Paragraph({
+        children: [new TextRun({ text: `${a.tipo ?? 'outra'} · confiança ${a.confianca}`, bold: true, size: 18 })],
+        spacing: { before: 100 },
+      }));
+      if (p.location) children.push(new Paragraph({ children: [new TextRun({ text: `Local: ${p.location}`, size: 15 })] }));
+      if (a.evidencia_visivel) children.push(new Paragraph({ children: [new TextRun({ text: `Evidência: ${a.evidencia_visivel}`, size: 15 })] }));
+    }
+    children.push(new Paragraph({
+      children: [new TextRun({ text: 'As anomalias listadas são deteções automáticas preliminares. A confirmação, classificação e decisão sobre ações corretivas são da exclusiva responsabilidade da Fiscalização.', italics: true, size: 14, color: '6E6E6E' })],
+      spacing: { before: 100, after: 200 },
+    }));
+  }
+
   // Signatures
   children.push(new Paragraph({
     children: [new TextRun({ text: '' })],
