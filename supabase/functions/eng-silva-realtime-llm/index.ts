@@ -1,15 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getCorsHeaders } from "../_shared/cors.ts";
+import { SPIKE_PERSONA_VOZ } from "../_shared/silvaPersona.ts";
 
 // Mesmo modelo já usado nas outras functions do projeto.
 const CLAUDE_MODEL = "claude-sonnet-4-5-20250929";
 const MAX_TOKENS = 800;
-
-// Persona MÍNIMA do spike (deliberadamente sem retrieval/fases/contexto).
-const SPIKE_PERSONA =
-  "És o Eng. Silva, engenheiro civil sénior português. Conversa natural, respostas " +
-  "de 1-3 frases, português europeu, tom directo e cordial. Este é um teste técnico " +
-  "de voz — responde a qualquer pergunta de forma breve e natural.";
 
 // Mapeia messages OpenAI -> { system extra, messages Anthropic }.
 // O system da OpenAI (se vier) é concatenado ao nosso; user/assistant passam direto.
@@ -76,7 +71,7 @@ serve(async (req) => {
       status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
-  const systemPrompt = systemExtra ? `${SPIKE_PERSONA}\n\n${systemExtra}` : SPIKE_PERSONA;
+  const systemPrompt = systemExtra ? `${SPIKE_PERSONA_VOZ}\n\n${systemExtra}` : SPIKE_PERSONA_VOZ;
 
   // --- Chamada Anthropic em streaming ---
   let upstream: Response;
