@@ -6,7 +6,6 @@ export interface PhotoForExport {
   description: string;
   location: string;
   sort_order: number;
-  anomalia?: { detetada: boolean; tipo: string | null; confianca: string; evidencia_visivel: string } | null;
 }
 
 export interface PhotoReportData {
@@ -246,57 +245,6 @@ export function generatePhotoReportPDF(
       ensureSpace(5);
       doc.text(line, ML, y);
       y += 4.5;
-    }
-    y += 6;
-  }
-
-  // ── Anomalias Sinalizadas — Verificação Requerida (E4, dados só da triagem) ──
-  const anomalias = photoImages.filter(p => p.anomalia?.detetada);
-  if (anomalias.length > 0) {
-    ensureSpace(20);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor(33, 33, 33);
-    doc.text('Anomalias Sinalizadas — Verificação Requerida', ML, y);
-    y += 7;
-
-    for (const p of anomalias) {
-      const a = p.anomalia!;
-      const blockH = 26;
-      ensureSpace(blockH);
-      try {
-        doc.addImage(p.base64, 'JPEG', ML, y, 30, 22);
-      } catch {
-        doc.setDrawColor(200, 200, 200);
-        doc.rect(ML, y, 30, 22);
-      }
-      const tx = ML + 34;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.setTextColor(33, 33, 33);
-      doc.text(`${a.tipo ?? 'outra'}  ·  confiança ${a.confianca}`, tx, y + 4);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.setTextColor(60, 60, 60);
-      if (p.location) doc.text(doc.splitTextToSize(`Local: ${p.location}`, CW - 34), tx, y + 9);
-      if (a.evidencia_visivel) {
-        let ey = y + 14;
-        for (const l of doc.splitTextToSize(`Evidência: ${a.evidencia_visivel}`, CW - 34)) {
-          doc.text(l, tx, ey);
-          ey += 3.2;
-        }
-      }
-      y += blockH;
-    }
-
-    // Rodapé fixo da secção (textual)
-    ensureSpace(12);
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(7.5);
-    doc.setTextColor(110, 110, 110);
-    for (const l of doc.splitTextToSize('As anomalias listadas são deteções automáticas preliminares. A confirmação, classificação e decisão sobre ações corretivas são da exclusiva responsabilidade da Fiscalização.', CW)) {
-      doc.text(l, ML, y);
-      y += 3.4;
     }
     y += 6;
   }

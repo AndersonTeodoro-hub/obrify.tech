@@ -37,19 +37,7 @@ type CaptureMeta = {
   notes?: string | null;
   captured_at?: string | null;
 };
-// Resultado da triagem (Estágio 1) devolvido pelo eng-silva-chat.
-export type TriagemAnomalia = {
-  detetada: boolean;
-  tipo: string | null;
-  confianca: 'baixa' | 'media' | 'alta';
-  evidencia_visivel: string;
-};
-// Taxonomia fechada para o Select de reclassificação (espelha _shared/patologiasTriagem.ts).
-const TAXONOMIA_ANOMALIAS = [
-  'fissuracao', 'humidade', 'betao_defeituoso', 'desalinhamento',
-  'revestimento', 'impermeabilizacao', 'corrosao', 'execucao_divergente', 'outra',
-] as const;
-type PhotoMeta = { file_path: string; description: string; location: string; sort_order: number; capture?: CaptureMeta; anomalia?: TriagemAnomalia | null; triagem_estado?: string; anomalia_id?: string | null };
+type PhotoMeta = { file_path: string; description: string; location: string; sort_order: number; capture?: CaptureMeta };
 type Report = {
   id: string; obra_id: string; user_id: string; report_date: string;
   weather: string | null; workers_count: string | null; equipment: string | null;
@@ -62,10 +50,6 @@ type LocalPhoto = {
   description: string; location: string; sort_order: number;
   capture?: CaptureMeta;
   captionStatus?: 'idle' | 'pending' | 'done' | 'error';
-  anomalia?: TriagemAnomalia | null;
-  triagem_estado?: string;
-  anomalia_id?: string | null;   // id na tabela anomalias (E5), quando capture-backed
-  anomalia_estado?: string;      // display pós-decisão do fiscal
 };
 
 export default function PhotoReports() {
@@ -108,9 +92,6 @@ export default function PhotoReports() {
   const [batchFase, setBatchFase] = useState('');
   const [batchPiso, setBatchPiso] = useState('');
   const [batchDate, setBatchDate] = useState('');
-
-  // Validação de anomalia (E5): índice em edição + modo/valores do painel inline.
-  const [decide, setDecide] = useState<{ idx: number; mode: 'reclassificar' | 'descartar'; tipo: string; motivo: string } | null>(null);
 
   // Load obras
   useEffect(() => {
@@ -206,9 +187,6 @@ export default function PhotoReports() {
         sort_order: p.sort_order,
         capture: p.capture,
         captionStatus: 'idle',
-        anomalia: p.anomalia ?? null,
-        triagem_estado: p.triagem_estado,
-        anomalia_id: p.anomalia_id ?? null,
       });
     }
     setPhotos(existingPhotos);
@@ -348,9 +326,6 @@ export default function PhotoReports() {
             location: photo.location,
             sort_order: photo.sort_order,
             capture: photo.capture,
-            anomalia: photo.anomalia ?? null,
-            triagem_estado: photo.triagem_estado,
-            anomalia_id: photo.anomalia_id ?? null,
           });
         } else if (photo.file_path) {
           photosMeta.push({
@@ -359,9 +334,6 @@ export default function PhotoReports() {
             location: photo.location,
             sort_order: photo.sort_order,
             capture: photo.capture,
-            anomalia: photo.anomalia ?? null,
-            triagem_estado: photo.triagem_estado,
-            anomalia_id: photo.anomalia_id ?? null,
           });
         }
       }
@@ -457,7 +429,6 @@ export default function PhotoReports() {
           description: p.description,
           location: p.location,
           sort_order: p.sort_order,
-          anomalia: p.anomalia ?? null,
         });
       } catch {
         // skip failed downloads
@@ -585,9 +556,7 @@ export default function PhotoReports() {
   };
 
   // ── Gerar legendas com o Eng. Silva (modo caption) ──
-  const captionOne = async (photo: LocalPhoto): Promise<{
-    descricao: string; anomalia: TriagemAnomalia; triagem_estado: string;
-  }> => {
+  const captionOne = async (photo: LocalPhoto): Promise<string> => {
     const blob = photo.file
       ? photo.file
       : (await supabase.storage.from('photo-reports').download(photo.file_path!)).data;
@@ -609,50 +578,8 @@ export default function PhotoReports() {
     const { data, error } = await supabase.functions.invoke('eng-silva-chat', {
       body: { mode: 'caption', image: base64, meta, user_id: user!.id },
     });
-    if (error || !data?.descricao) throw new Error(error?.message || 'Silva não devolveu triagem');
-    return {
-      descricao: data.descricao as string,
-      anomalia: data.anomalia as TriagemAnomalia,
-      triagem_estado: (data.triagem_estado as string) ?? 'ok',
-    };
-  };
-
-  // site_id da captura (leitura pontual; RLS de captures cobre o acesso).
-  const siteIdForCapture = async (capId: string): Promise<string> => {
-    const { data, error } = await supabase.from('captures').select('site_id').eq('id', capId).single();
-    if (error || !data?.site_id) throw new Error('site_id da captura indisponível');
-    return data.site_id as string;
-  };
-
-  // Decisão do fiscal (E5): grava em anomalias_feedback e atualiza o estado da anomalia.
-  // Reclassificar atualiza SÓ o estado; o tipo corrigido vive no feedback (dataset).
-  const decideAnomaly = async (
-    index: number,
-    decisao: 'confirmada' | 'reclassificada' | 'descartada',
-    tipoCorrigido?: string | null,
-    observacoes?: string | null,
-  ) => {
-    const photo = photos[index];
-    if (!photo.anomalia_id) {
-      toast.error('Sem anomalia persistida nesta foto (gere a triagem numa captura).');
-      return;
-    }
-    try {
-      const { error: fErr } = await (supabase as any).from('anomalias_feedback').insert({
-        anomalia_id: photo.anomalia_id, fiscal_id: user!.id, decisao,
-        tipo_corrigido: tipoCorrigido ?? null, observacoes: observacoes ?? null,
-      });
-      if (fErr) throw fErr;
-      const { error: uErr } = await (supabase as any).from('anomalias')
-        .update({ estado: decisao }).eq('id', photo.anomalia_id);
-      if (uErr) throw uErr;
-      setPhotos((prev) => prev.map((p, idx) => (idx === index ? { ...p, anomalia_estado: decisao } : p)));
-      setDecide(null);
-      toast.success(`Anomalia ${decisao}.`);
-    } catch (e: any) {
-      console.error('decideAnomaly:', e);
-      toast.error('Falha ao registar decisão: ' + e.message);
-    }
+    if (error || !data?.caption) throw new Error(error?.message || 'Silva não devolveu legenda');
+    return data.caption as string;
   };
 
   const generateCaptions = async (onlyFailed = false) => {
@@ -670,39 +597,9 @@ export default function PhotoReports() {
     for (const { i } of targets) {
       setPhotos((prev) => prev.map((p, idx) => (idx === i ? { ...p, captionStatus: 'pending' } : p)));
       try {
-        const res = await captionOne(photos[i]);
-        let anomaliaId: string | null = photos[i].anomalia_id ?? null;
-        // E3: persistir triagem só em fotos com capture_id (D4). Falha aqui NÃO impede
-        // a descrição de ser gravada — o relatório nunca bloqueia.
-        const capId = photos[i].capture?.capture_id;
-        if (capId) {
-          try {
-            const { error: upErr } = await (supabase as any).from('captures')
-              .update({ triagem_anomalia: res.anomalia, triagem_estado: res.triagem_estado })
-              .eq('id', capId);
-            if (upErr) throw upErr;
-            if (res.anomalia?.detetada) {
-              const { data: anomRow, error: aErr } = await (supabase as any).from('anomalias')
-                .upsert({
-                  captura_id: capId,
-                  site_id: await siteIdForCapture(capId),
-                  tipo: res.anomalia.tipo ?? 'outra',
-                  confianca_triagem: res.anomalia.confianca,
-                }, { onConflict: 'captura_id' })
-                .select('id').single();
-              if (aErr) throw aErr;
-              anomaliaId = anomRow?.id ?? null;
-            }
-          } catch (persistErr: any) {
-            console.error('Persistência triagem (foto', i, '):', persistErr);
-            toast.error(`Triagem gravada só como legenda (foto ${i + 1}): ${persistErr.message}`);
-          }
-        }
+        const caption = await captionOne(photos[i]);
         setPhotos((prev) =>
-          prev.map((p, idx) => (idx === i ? {
-            ...p, description: res.descricao, anomalia: res.anomalia,
-            triagem_estado: res.triagem_estado, anomalia_id: anomaliaId, captionStatus: 'done',
-          } : p)),
+          prev.map((p, idx) => (idx === i ? { ...p, description: caption, captionStatus: 'done' } : p)),
         );
         ok++;
       } catch (err: any) {
@@ -1003,51 +900,6 @@ export default function PhotoReports() {
                           <Input placeholder="Piso" value={photo.capture?.piso || ''} onChange={e => updatePhotoCapture(index, { piso: e.target.value || null })} />
                           <Input type="date" value={capDate} onChange={e => updatePhotoCapture(index, { captured_at: e.target.value ? new Date(e.target.value + 'T12:00:00').toISOString() : null })} />
                         </div>
-                        {photo.triagem_estado === 'triagem_falhou' && (
-                          <p className="text-[11px] text-destructive">Triagem falhou — descrição em melhor-esforço; sem rastreio de anomalia.</p>
-                        )}
-                        {photo.anomalia?.detetada && (
-                          <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-2 space-y-1.5">
-                            <p className="text-xs font-semibold text-foreground">
-                              Anomalia: {photo.anomalia.tipo} · confiança {photo.anomalia.confianca}
-                              {photo.anomalia_estado && <span className="ml-1 text-muted-foreground">({photo.anomalia_estado})</span>}
-                            </p>
-                            {photo.anomalia.evidencia_visivel && (
-                              <p className="text-[11px] text-muted-foreground">{photo.anomalia.evidencia_visivel}</p>
-                            )}
-                            {!photo.anomalia_id ? (
-                              <p className="text-[11px] text-muted-foreground">Guarde/gere a triagem numa captura para poder validar.</p>
-                            ) : decide?.idx === index ? (
-                              <div className="space-y-1.5">
-                                {decide.mode === 'reclassificar' ? (
-                                  <Select value={decide.tipo} onValueChange={(v) => setDecide({ ...decide, tipo: v })}>
-                                    <SelectTrigger className="h-8"><SelectValue placeholder="Tipo correto" /></SelectTrigger>
-                                    <SelectContent>
-                                      {TAXONOMIA_ANOMALIAS.map((tName) => <SelectItem key={tName} value={tName}>{tName}</SelectItem>)}
-                                    </SelectContent>
-                                  </Select>
-                                ) : (
-                                  <Input placeholder="Motivo (opcional)" value={decide.motivo} onChange={(e) => setDecide({ ...decide, motivo: e.target.value })} />
-                                )}
-                                <div className="flex gap-1">
-                                  <Button size="sm" onClick={() => decideAnomaly(
-                                    index,
-                                    decide.mode === 'reclassificar' ? 'reclassificada' : 'descartada',
-                                    decide.mode === 'reclassificar' ? decide.tipo : null,
-                                    decide.mode === 'descartar' ? (decide.motivo || null) : null,
-                                  )} disabled={decide.mode === 'reclassificar' && !decide.tipo}>Aplicar</Button>
-                                  <Button size="sm" variant="ghost" onClick={() => setDecide(null)}>Cancelar</Button>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="flex flex-wrap gap-1">
-                                <Button size="sm" variant="outline" onClick={() => decideAnomaly(index, 'confirmada')}>Confirmar</Button>
-                                <Button size="sm" variant="outline" onClick={() => setDecide({ idx: index, mode: 'reclassificar', tipo: photo.anomalia?.tipo ?? '', motivo: '' })}>Reclassificar</Button>
-                                <Button size="sm" variant="ghost" onClick={() => setDecide({ idx: index, mode: 'descartar', tipo: '', motivo: '' })}>Descartar</Button>
-                              </div>
-                            )}
-                          </div>
-                        )}
                       </div>
                     </div>
                   );
