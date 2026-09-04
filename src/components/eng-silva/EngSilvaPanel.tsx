@@ -134,7 +134,7 @@ export function EngSilvaPanel({
     if (location.pathname.includes('/non-conformities')) return 'Não-Conformidades';
     if (location.pathname.includes('/reports')) return 'Relatórios';
     if (location.pathname.includes('/material-approvals')) return 'Aprovação de Materiais';
-    return 'Obrify';
+    return 'DDN-Obrify';
   };
 
   // Auto-scroll

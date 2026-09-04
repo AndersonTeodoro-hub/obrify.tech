@@ -40,7 +40,7 @@
     "welcomeBack": "Bem-vindo de volta",
     "createAccount": "Criar nova conta",
     "enterCredentials": "Introduza as suas credenciais para aceder à plataforma",
-    "fillDataToStart": "Preencha os dados para começar a usar o Obrify",
+    "fillDataToStart": "Preencha os dados para começar a usar o DDN-Obrify",
     "email": "Email",
     "emailPlaceholder": "seu@email.com",
     "password": "Password",
@@ -101,7 +101,7 @@
     "socialLoginError": "Erro ao fazer login com Google"
   },
   "brand": {
-    "name": "Obrify",
+    "name": "DDN-Obrify",
     "tagline": "Fiscalização Inteligente",
     "heroTitle": "Transforme a forma como",
     "heroTitleHighlight": "fiscaliza as suas obras",
@@ -133,7 +133,7 @@
   },
   "dashboard": {
     "title": "Dashboard",
-    "welcome": "Bem-vindo ao Obrify",
+    "welcome": "Bem-vindo ao DDN-Obrify",
     "welcomeDesc": "Aqui terá uma visão geral de todas as suas obras e atividades.",
     "noOrganization": "Ainda não pertence a nenhuma organização",
     "createFirstOrg": "Criar Primeira Organização",
@@ -776,7 +776,7 @@
     }
   },
   "onboarding": {
-    "welcomeTitle": "Bem-vindo ao Obrify",
+    "welcomeTitle": "Bem-vindo ao DDN-Obrify",
     "welcomeDesc": "A plataforma inteligente de fiscalização de obras",
     "stat1Value": "94%",
     "stat1Label": "Menos tempo em relatórios",
@@ -798,10 +798,10 @@
     "keyboardShortcutsDesc": "Seja mais produtivo",
     "version": "Versão",
     "releaseNotes": "Notas de versão",
-    "discoverSitePulse": "Descobrir Obrify"
+    "discoverSitePulse": "Descobrir DDN-Obrify"
   },
   "agent": {
-    "greeting": "Olá! Sou o Obrify, o teu assistente de fiscalização. Posso ajudar-te a consultar obras, ver não-conformidades, gerar relatórios e muito mais. O que precisas?",
+    "greeting": "Olá! Sou o DDN-Obrify, o teu assistente de fiscalização. Posso ajudar-te a consultar obras, ver não-conformidades, gerar relatórios e muito mais. O que precisas?",
     "thinking": "A pensar...",
     "error": "Ocorreu um erro. Tenta novamente.",
     "tooManyRequests": "Demasiados pedidos. Tenta novamente em breve.",
@@ -818,7 +818,7 @@
     "navigatingTo": "A navegar para {{path}}",
     "history": "Histórico",
     "historyEmpty": "Ainda sem conversas",
-    "historyEmptyDesc": "Começa a falar com o Obrify!",
+    "historyEmptyDesc": "Começa a falar com o DDN-Obrify!",
     "suggestions": {
       "openNCs": "Ver NCs abertas",
       "siteSummary": "Resumo das obras",
@@ -894,8 +894,8 @@
     }
   },
   "share": {
-    "title": "Obrify - Fiscalização de Obras Inteligente",
-    "text": "Conhece o Obrify - Plataforma de Fiscalização de Obras Inteligente",
+    "title": "DDN-Obrify - Fiscalização de Obras Inteligente",
+    "text": "Conhece o DDN-Obrify - Plataforma de Fiscalização de Obras Inteligente",
     "copied": "Link copiado para a área de transferência!",
     "button": "Partilhar"
   }

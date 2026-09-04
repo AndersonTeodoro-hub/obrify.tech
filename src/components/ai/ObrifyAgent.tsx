@@ -285,7 +285,7 @@ export function ObrifyAgent({ open: controlledOpen, onOpenChange }: ObrifyAgentP
         <button
           onClick={handleOpen}
           className="fixed bottom-6 right-6 z-50 h-14 w-14 rounded-full bg-gradient-to-br from-accent-500 to-accent-600 text-white shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-200 flex items-center justify-center"
-          aria-label="Abrir Obrify Agent"
+          aria-label="Abrir DDN-Obrify Agent"
         >
           <Sparkles className="h-6 w-6" />
           {(showBadge || (alertCount && alertCount > 0)) && (
@@ -306,7 +306,7 @@ export function ObrifyAgent({ open: controlledOpen, onOpenChange }: ObrifyAgentP
             <div className="flex items-center gap-2">
               <Bot className="h-5 w-5 text-accent-600" />
               <SheetTitle className="text-base font-semibold">
-                Obrify Agent
+                DDN-Obrify Agent
               </SheetTitle>
               {expertMode && (
                 <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 border-amber-500 text-amber-600 dark:text-amber-400">

@@ -196,8 +196,8 @@ export default function AuthPage() {
           <div className="w-full max-w-[400px]">
             {/* Logo */}
             <div className="flex items-center gap-3 mb-10">
-              <img src="/images/obrify-logo.jpeg" alt="Obrify" className="w-10 h-10 rounded-xl shadow-lg object-cover" />
-              <span className="text-xl font-bold text-foreground">Obrify</span>
+              <img src="/images/obrify-logo.jpeg" alt="DDN-Obrify" className="w-10 h-10 rounded-xl shadow-lg object-cover" />
+              <span className="text-xl font-bold text-foreground">DDN-Obrify</span>
             </div>
 
             {isLogin ? (
@@ -340,7 +340,7 @@ export default function AuthPage() {
               </>
             )}
 
-            <p className="text-center text-xs text-muted-foreground mt-8">© 2026 Obrify</p>
+            <p className="text-center text-xs text-muted-foreground mt-8">© 2026 DDN-Obrify</p>
           </div>
         </div>
       </div>

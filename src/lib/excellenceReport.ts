@@ -211,7 +211,7 @@ export async function generateExcellenceReport(opts: ExcellenceOpts): Promise<vo
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
     doc.setFontSize(8); doc.setTextColor(150, 150, 150);
-    doc.text(`Obrify IncompatiCheck - ${new Date().toLocaleDateString('pt-PT')}`, margin, pageHeight - 8);
+    doc.text(`DDN-Obrify IncompatiCheck - ${new Date().toLocaleDateString('pt-PT')}`, margin, pageHeight - 8);
     doc.text(`Pagina ${i} de ${pageCount}`, pageWidth - margin, pageHeight - 8, { align: 'right' });
   }
 

@@ -1300,7 +1300,7 @@ export function useIncompaticheck() {
     // Footer
     doc.setFontSize(7);
     doc.setTextColor(150, 150, 150);
-    doc.text(`Obrify IncompatiCheck — ${new Date().toLocaleDateString('pt-PT')}`, margin, 289);
+    doc.text(`DDN-Obrify IncompatiCheck — ${new Date().toLocaleDateString('pt-PT')}`, margin, 289);
     doc.text('Pagina 1 de 1', pageWidth - margin, 289, { align: 'right' });
 
     doc.save(`Resumo_Executivo_${obraAtiva.nome.replace(/\s+/g, '_')}_${Date.now()}.pdf`);

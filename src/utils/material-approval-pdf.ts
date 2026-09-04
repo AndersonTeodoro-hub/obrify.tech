@@ -88,7 +88,7 @@ function footers(doc: jsPDF, fiscalCompany?: string) {
   const n = doc.getNumberOfPages();
   for (let i = 1; i <= n; i++) {
     doc.setPage(i); doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(148, 163, 184);
-    doc.text(S(fiscalCompany ? `${fiscalCompany} - Fiscalizacao de Obras` : 'Obrify - Fiscalizacao de Obras'), ML, FOOTER_Y);
+    doc.text(S(fiscalCompany ? `${fiscalCompany} - Fiscalizacao de Obras` : 'DDN-Obrify - Fiscalizacao de Obras'), ML, FOOTER_Y);
     doc.text(`Pagina ${i} de ${n}`, PAGE_W - MR, FOOTER_Y, { align: 'right' });
   }
 }

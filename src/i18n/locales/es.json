@@ -35,7 +35,7 @@
     "welcomeBack": "Bienvenido de nuevo",
     "createAccount": "Crear nueva cuenta",
     "enterCredentials": "Introduzca sus credenciales para acceder a la plataforma",
-    "fillDataToStart": "Complete los datos para empezar a usar Obrify",
+    "fillDataToStart": "Complete los datos para empezar a usar DDN-Obrify",
     "email": "Email",
     "emailPlaceholder": "su@email.com",
     "password": "Contraseña",
@@ -92,7 +92,7 @@
     "socialLoginError": "Error al iniciar sesión con Google"
   },
   "brand": {
-    "name": "Obrify",
+    "name": "DDN-Obrify",
     "tagline": "Inspección Inteligente",
     "heroTitle": "Transforme la forma en que",
     "heroTitleHighlight": "inspecciona sus obras",
@@ -123,7 +123,7 @@
   },
   "dashboard": {
     "title": "Dashboard",
-    "welcome": "Bienvenido a Obrify",
+    "welcome": "Bienvenido a DDN-Obrify",
     "welcomeDesc": "Aquí tendrá una visión general de todas sus obras y actividades.",
     "noOrganization": "Aún no pertenece a ninguna organización",
     "createFirstOrg": "Crear Primera Organización",
@@ -251,7 +251,7 @@
     "fr": "Français"
   },
   "agent": {
-    "greeting": "¡Hola! Soy Obrify, tu asistente de inspección. Puedo ayudarte a consultar obras, ver no conformidades, generar informes y mucho más. ¿Qué necesitas?",
+    "greeting": "¡Hola! Soy DDN-Obrify, tu asistente de inspección. Puedo ayudarte a consultar obras, ver no conformidades, generar informes y mucho más. ¿Qué necesitas?",
     "thinking": "Pensando...",
     "error": "Ocurrió un error. Inténtalo de nuevo.",
     "tooManyRequests": "Demasiadas solicitudes. Inténtalo en breve.",
@@ -268,7 +268,7 @@
     "navigatingTo": "Navegando a {{path}}",
     "history": "Historial",
     "historyEmpty": "Sin conversaciones aún",
-    "historyEmptyDesc": "¡Empieza a hablar con Obrify!",
+    "historyEmptyDesc": "¡Empieza a hablar con DDN-Obrify!",
     "suggestions": {
       "openNCs": "Ver NCs abiertas",
       "siteSummary": "Resumen de obras",
@@ -344,8 +344,8 @@
     }
   },
   "share": {
-    "title": "Obrify - Inspección de Obras Inteligente",
-    "text": "Conoce Obrify - Plataforma de Inspección de Obras Inteligente",
+    "title": "DDN-Obrify - Inspección de Obras Inteligente",
+    "text": "Conoce DDN-Obrify - Plataforma de Inspección de Obras Inteligente",
     "copied": "¡Enlace copiado al portapapeles!",
     "button": "Compartir"
   }

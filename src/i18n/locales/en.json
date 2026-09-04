@@ -40,7 +40,7 @@
     "welcomeBack": "Welcome back",
     "createAccount": "Create new account",
     "enterCredentials": "Enter your credentials to access the platform",
-    "fillDataToStart": "Fill in the details to start using Obrify",
+    "fillDataToStart": "Fill in the details to start using DDN-Obrify",
     "email": "Email",
     "emailPlaceholder": "your@email.com",
     "password": "Password",
@@ -101,7 +101,7 @@
     "socialLoginError": "Error signing in with Google"
   },
   "brand": {
-    "name": "Obrify",
+    "name": "DDN-Obrify",
     "tagline": "Smart Inspection",
     "heroTitle": "Transform the way you",
     "heroTitleHighlight": "inspect your sites",
@@ -133,7 +133,7 @@
   },
   "dashboard": {
     "title": "Dashboard",
-    "welcome": "Welcome to Obrify",
+    "welcome": "Welcome to DDN-Obrify",
     "welcomeDesc": "Here you will have an overview of all your sites and activities.",
     "noOrganization": "You don't belong to any organization yet",
     "createFirstOrg": "Create First Organization",
@@ -776,7 +776,7 @@
     }
   },
   "onboarding": {
-    "welcomeTitle": "Welcome to Obrify",
+    "welcomeTitle": "Welcome to DDN-Obrify",
     "welcomeDesc": "The smart construction inspection platform",
     "stat1Value": "94%",
     "stat1Label": "Less time on reports",
@@ -798,10 +798,10 @@
     "keyboardShortcutsDesc": "Be more productive",
     "version": "Version",
     "releaseNotes": "Release notes",
-    "discoverSitePulse": "Discover Obrify"
+    "discoverSitePulse": "Discover DDN-Obrify"
   },
   "agent": {
-    "greeting": "Hello! I'm Obrify, your inspection assistant. I can help you check sites, view non-conformities, generate reports and more. What do you need?",
+    "greeting": "Hello! I'm DDN-Obrify, your inspection assistant. I can help you check sites, view non-conformities, generate reports and more. What do you need?",
     "thinking": "Thinking...",
     "error": "An error occurred. Please try again.",
     "tooManyRequests": "Too many requests. Please try again shortly.",
@@ -818,7 +818,7 @@
     "navigatingTo": "Navigating to {{path}}",
     "history": "History",
     "historyEmpty": "No conversations yet",
-    "historyEmptyDesc": "Start talking to Obrify!",
+    "historyEmptyDesc": "Start talking to DDN-Obrify!",
     "suggestions": {
       "openNCs": "View open NCs",
       "siteSummary": "Sites summary",
@@ -894,8 +894,8 @@
     }
   },
   "share": {
-    "title": "Obrify - Smart Construction Inspection",
-    "text": "Check out Obrify - Smart Construction Inspection Platform",
+    "title": "DDN-Obrify - Smart Construction Inspection",
+    "text": "Check out DDN-Obrify - Smart Construction Inspection Platform",
     "copied": "Link copied to clipboard!",
     "button": "Share"
   }

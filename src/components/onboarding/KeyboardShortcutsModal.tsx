@@ -12,7 +12,7 @@ interface KeyboardShortcutsModalProps {
 }
 
 const shortcuts = [
-  { keys: ['Ctrl', 'K'], action: 'Abrir Obrify Agent' },
+  { keys: ['Ctrl', 'K'], action: 'Abrir DDN-Obrify Agent' },
   { keys: ['Ctrl', '↵'], action: 'Enviar mensagem (no agente)' },
   { keys: ['Esc'], action: 'Fechar painel / modal' },
   { keys: ['Ctrl', 'N'], action: 'Novo item' },
