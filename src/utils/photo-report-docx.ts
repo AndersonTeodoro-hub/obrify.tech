@@ -4,7 +4,7 @@ import {
   Header, Footer, PageNumber, NumberFormat,
   ShadingType,
 } from 'docx';
-import type { PhotoForExport, PhotoReportData } from './photo-report-pdf';
+import type { PhotoForExport, PhotoReportData, DocumentIdentity, OpenNC } from './photo-report-pdf';
 
 function base64ToUint8Array(base64: string): Uint8Array {
   const raw = base64.includes(',') ? base64.split(',')[1] : base64;
@@ -28,6 +28,8 @@ export async function generatePhotoReportDOCX(
   photoImages: PhotoForExport[],
   logoBase64?: string | null,
   clientLogoBase64?: string | null,
+  docIdentity?: DocumentIdentity | null,
+  openNCs?: OpenNC[] | null,
 ) {
   const dateFormatted = new Date(report.report_date + 'T00:00:00').toLocaleDateString('pt-PT', {
     day: '2-digit', month: 'long', year: 'numeric',
@@ -51,6 +53,13 @@ export async function generatePhotoReportDOCX(
   }
   headerRuns.push(new TextRun({ text: 'RELATÓRIO FOTOGRÁFICO DIÁRIO', bold: true, size: 24 }));
   headerChildren.push(new Paragraph({ children: headerRuns }));
+  if (docIdentity?.documentNumber) {
+    const idLine = `Doc. ${docIdentity.documentNumber}${docIdentity.version ? ` · v${docIdentity.version}` : ''}${docIdentity.status === 'final' ? ' · FINAL' : ' · RASCUNHO'}`;
+    headerChildren.push(new Paragraph({
+      children: [new TextRun({ text: idLine, size: 16, color: '5A5A5A' })],
+      alignment: AlignmentType.RIGHT,
+    }));
+  }
   if (clientLogoBase64) {
     try {
       headerChildren.push(new Paragraph({
@@ -193,6 +202,24 @@ export async function generatePhotoReportDOCX(
       }));
       children.push(new Paragraph({ spacing: { after: 100 } }));
     }
+  }
+
+  // Não-conformidades abertas na obra (ligação ao registo de NC)
+  if (openNCs && openNCs.length > 0) {
+    children.push(new Paragraph({
+      heading: HeadingLevel.HEADING_2,
+      children: [new TextRun({ text: 'Não-Conformidades Abertas nesta Obra', bold: true, size: 22, color: '333333' })],
+      spacing: { before: 200, after: 100 },
+    }));
+    for (const nc of openNCs) {
+      children.push(new Paragraph({
+        children: [new TextRun({
+          text: `• ${nc.title} — ${nc.severity.toUpperCase()} — ${nc.status}${nc.due_date ? ` (prazo ${nc.due_date})` : ''}`,
+          size: 17,
+        })],
+      }));
+    }
+    children.push(new Paragraph({ spacing: { after: 200 } }));
   }
 
   // Observations

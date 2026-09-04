@@ -154,7 +154,7 @@ const MAX_FILES = 30;
 
 // Contexto pegajoso: última obra/especialidade/fase/nível escolhidos pelo fiscal.
 const STICKY_KEY = 'obrify_capture_context';
-type StickyCtx = { siteId?: string; especialidade?: string; fase?: string; nivelId?: string; contextId?: string };
+type StickyCtx = { siteId?: string; especialidade?: string; fase?: string; nivelId?: string; contextId?: string; capturePointId?: string };
 function loadSticky(): StickyCtx {
   try {
     return JSON.parse(localStorage.getItem(STICKY_KEY) || '{}') as StickyCtx;
@@ -179,6 +179,10 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
   const [contextSearch, setContextSearch] = useState('');
   const [captureType, setCaptureType] = useState<CaptureCategory>('photo');
   const [notes, setNotes] = useState('');
+  // Ponto de captura fixo georreferenciado (planta do piso). Fica persistente entre
+  // sessões via contexto pegajoso — o fiscal marca o ponto uma vez e as capturas
+  // seguintes nesse local ficam automaticamente associadas a ele.
+  const [capturePointId, setCapturePointId] = useState<string>(sticky.capturePointId || '');
 
   // Input escondido para abrir a câmara imediatamente ao escolher um contexto
   const quickInputRef = useRef<HTMLInputElement>(null);
@@ -256,6 +260,28 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
   const niveisFiltrados = niveis.filter(
     (n) => (!especialidade || n.specialty === especialidade) && (!fase || n.fase === fase),
   );
+
+  // Pontos de captura fixos georreferenciados na planta desta obra (floors > areas >
+  // capture_points). Religação do fluxo principal de captura ao modelo georreferenciado
+  // (estava desligado: o insert forçava capture_point_id a null incondicionalmente).
+  const { data: capturePoints = [] } = useQuery({
+    queryKey: ['capture-points-for-site', selectedSite],
+    queryFn: async () => {
+      if (!selectedSite) return [];
+      const { data, error } = await supabase
+        .from('capture_points')
+        .select('id, code, description, area:areas!inner(id, name, floor:floors!inner(id, name, site_id))')
+        .eq('area.floor.site_id', selectedSite)
+        .order('code');
+      if (error) {
+        console.error('Erro a carregar pontos de captura:', error);
+        toast.error('Erro ao carregar pontos de captura: ' + error.message);
+        return [];
+      }
+      return (data || []) as any[];
+    },
+    enabled: !!selectedSite,
+  });
 
   // Contextos de captura da obra (não arquivados), ordenados por uso recente
   const { data: contexts = [] } = useQuery({
@@ -450,10 +476,11 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
             progress: 80,
           });
 
-          // Fase 3: Insert na BD (por site_id directo; ponto de captura já não é obrigatório)
+          // Fase 3: Insert na BD (por site_id directo; ponto de captura é opcional mas,
+          // quando seleccionado, liga a foto ao ponto fixo georreferenciado na planta)
           const { error: insertError } = await supabase.from('captures').insert({
             site_id: selectedSite,
-            capture_point_id: null,
+            capture_point_id: capturePointId || null,
             user_id: user.id,
             file_path: filePath,
             source_type: CATEGORY_TO_SOURCE[captureType],
@@ -502,7 +529,7 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
       // Persistir contexto pegajoso para a próxima captura
       localStorage.setItem(
         STICKY_KEY,
-        JSON.stringify({ siteId: selectedSite, especialidade, fase, nivelId, contextId }),
+        JSON.stringify({ siteId: selectedSite, especialidade, fase, nivelId, contextId, capturePointId }),
       );
       // Marcar uso recente do contexto (ordenação na lista de captura rápida)
       if (contextId && successCount > 0) {
@@ -612,6 +639,7 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
                 setNivelId('');
                 setContextId('');
                 setContextSearch('');
+                setCapturePointId('');
               }}
               disabled={isUploading}
             >
@@ -627,6 +655,29 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
               </SelectContent>
             </Select>
           </div>
+
+          {/* Ponto de captura fixo georreferenciado (planta do piso) — opcional, mas
+              persistente: uma vez escolhido para esta obra, fica pegajoso entre sessões. */}
+          {selectedSite && capturePoints.length > 0 && (
+            <div className="space-y-2">
+              <Label>Ponto de captura na planta (opcional)</Label>
+              <Select value={capturePointId} onValueChange={setCapturePointId} disabled={isUploading}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Sem ponto fixo" />
+                </SelectTrigger>
+                <SelectContent>
+                  {capturePoints.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.code}{p.area?.name ? ` — ${p.area.name}` : ''}{p.area?.floor?.name ? ` (${p.area.floor.name})` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Todas as capturas feitas agora ficam associadas a este ponto, para comparação temporal futura.
+              </p>
+            </div>
+          )}
 
           {/* Badge grande e sempre visível: contexto/fase que a PRÓXIMA foto herda */}
           {selectedSite && (
@@ -811,6 +862,7 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
               <SmartCaptureButtons
                 onFilesSelected={handleFilesSelected}
                 disabled={isUploading || needsStickyConfirm}
+                onCaptureTypeSelect={(type) => setCaptureType(type)}
               />
             </div>
           )}

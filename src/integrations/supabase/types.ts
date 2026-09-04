@@ -746,6 +746,7 @@ export type Database = {
       }
       capture_points: {
         Row: {
+          angle_sequence: string[]
           area_id: string
           code: string
           color: string | null
@@ -761,6 +762,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          angle_sequence?: string[]
           area_id: string
           code: string
           color?: string | null
@@ -776,6 +778,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          angle_sequence?: string[]
           area_id?: string
           code?: string
           color?: string | null
@@ -891,6 +894,7 @@ export type Database = {
           prompt_used: string | null
           recommendations: Json | null
           severity: string | null
+          site_id: string | null
           user_id: string
         }
         Insert: {
@@ -906,6 +910,7 @@ export type Database = {
           prompt_used?: string | null
           recommendations?: Json | null
           severity?: string | null
+          site_id?: string | null
           user_id: string
         }
         Update: {
@@ -921,6 +926,7 @@ export type Database = {
           prompt_used?: string | null
           recommendations?: Json | null
           severity?: string | null
+          site_id?: string | null
           user_id?: string
         }
         Relationships: [
@@ -931,6 +937,13 @@ export type Database = {
             referencedRelation: "captures"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "capture_silva_assessments_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
         ]
       }
       captures: {
@@ -938,6 +951,7 @@ export type Database = {
           ai_analyzed: boolean | null
           ai_analyzed_at: string | null
           ambiente: string | null
+          angle_label: string | null
           atividade: string | null
           capture_point_id: string | null
           captured_at: string | null
@@ -964,6 +978,7 @@ export type Database = {
           ai_analyzed?: boolean | null
           ai_analyzed_at?: string | null
           ambiente?: string | null
+          angle_label?: string | null
           atividade?: string | null
           capture_point_id?: string | null
           captured_at?: string | null
@@ -990,6 +1005,7 @@ export type Database = {
           ai_analyzed?: boolean | null
           ai_analyzed_at?: string | null
           ambiente?: string | null
+          angle_label?: string | null
           atividade?: string | null
           capture_point_id?: string | null
           captured_at?: string | null
@@ -1055,6 +1071,7 @@ export type Database = {
           model: string | null
           obra_id: string
           pages: number | null
+          site_id: string | null
           source: string | null
           updated_at: string | null
           user_id: string | null
@@ -1070,6 +1087,7 @@ export type Database = {
           model?: string | null
           obra_id: string
           pages?: number | null
+          site_id?: string | null
           source?: string | null
           updated_at?: string | null
           user_id?: string | null
@@ -1085,11 +1103,20 @@ export type Database = {
           model?: string | null
           obra_id?: string
           pages?: number | null
+          site_id?: string | null
           source?: string | null
           updated_at?: string | null
           user_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "contractual_extractions_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       documents: {
         Row: {
@@ -1311,6 +1338,7 @@ export type Database = {
           knowledge_id: string
           metadata: Json | null
           obra_id: string
+          site_id: string | null
           user_id: string
         }
         Insert: {
@@ -1323,6 +1351,7 @@ export type Database = {
           knowledge_id: string
           metadata?: Json | null
           obra_id: string
+          site_id?: string | null
           user_id: string
         }
         Update: {
@@ -1335,6 +1364,7 @@ export type Database = {
           knowledge_id?: string
           metadata?: Json | null
           obra_id?: string
+          site_id?: string | null
           user_id?: string
         }
         Relationships: [
@@ -1343,6 +1373,13 @@ export type Database = {
             columns: ["knowledge_id"]
             isOneToOne: false
             referencedRelation: "eng_silva_project_knowledge"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "eng_silva_knowledge_embeddings_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
             referencedColumns: ["id"]
           },
         ]
@@ -1379,6 +1416,7 @@ export type Database = {
           id: string
           obra_id: string
           piso: string | null
+          site_id: string | null
           specialty: string
           tipo: string | null
           user_id: string
@@ -1390,6 +1428,7 @@ export type Database = {
           id?: string
           obra_id: string
           piso?: string | null
+          site_id?: string | null
           specialty: string
           tipo?: string | null
           user_id: string
@@ -1401,11 +1440,20 @@ export type Database = {
           id?: string
           obra_id?: string
           piso?: string | null
+          site_id?: string | null
           specialty?: string
           tipo?: string | null
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "eng_silva_niveis_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       eng_silva_project_knowledge: {
         Row: {
@@ -1421,6 +1469,7 @@ export type Database = {
           num_pages: number | null
           obra_id: string
           processed: boolean | null
+          site_id: string | null
           specialty: string
           summary: string
           updated_at: string | null
@@ -1439,6 +1488,7 @@ export type Database = {
           num_pages?: number | null
           obra_id: string
           processed?: boolean | null
+          site_id?: string | null
           specialty: string
           summary?: string
           updated_at?: string | null
@@ -1457,6 +1507,7 @@ export type Database = {
           num_pages?: number | null
           obra_id?: string
           processed?: boolean | null
+          site_id?: string | null
           specialty?: string
           summary?: string
           updated_at?: string | null
@@ -1468,6 +1519,13 @@ export type Database = {
             columns: ["nivel_id"]
             isOneToOne: false
             referencedRelation: "eng_silva_niveis"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "eng_silva_project_knowledge_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
             referencedColumns: ["id"]
           },
         ]
@@ -2724,6 +2782,7 @@ export type Database = {
           pdm_name: string
           pdm_page_count: number | null
           reviewer_notes: string | null
+          site_id: string | null
           status: string | null
           updated_at: string | null
           user_id: string
@@ -2761,6 +2820,7 @@ export type Database = {
           pdm_name: string
           pdm_page_count?: number | null
           reviewer_notes?: string | null
+          site_id?: string | null
           status?: string | null
           updated_at?: string | null
           user_id: string
@@ -2798,11 +2858,20 @@ export type Database = {
           pdm_name?: string
           pdm_page_count?: number | null
           reviewer_notes?: string | null
+          site_id?: string | null
           status?: string | null
           updated_at?: string | null
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "material_approvals_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       memberships: {
         Row: {
@@ -3008,59 +3077,86 @@ export type Database = {
       }
       photo_reports: {
         Row: {
+          client_logo_base64: string | null
           contractor: string | null
           created_at: string
+          document_number: string | null
           equipment: string | null
+          fiscal_company: string | null
+          fiscal_logo_base64: string | null
+          fiscal_name: string | null
           id: string
-          obra_id: string
+          issued_at: string | null
           observations: string | null
           photos: Json | null
           report_date: string
+          site_id: string
           status: string
+          temperature_c: number | null
           updated_at: string
           user_id: string
+          version: number
           weather: string | null
+          weather_conditions: string[]
           workers_count: string | null
           works_done: string | null
         }
         Insert: {
+          client_logo_base64?: string | null
           contractor?: string | null
           created_at?: string
+          document_number?: string | null
           equipment?: string | null
+          fiscal_company?: string | null
+          fiscal_logo_base64?: string | null
+          fiscal_name?: string | null
           id?: string
-          obra_id: string
+          issued_at?: string | null
           observations?: string | null
           photos?: Json | null
           report_date: string
+          site_id: string
           status?: string
+          temperature_c?: number | null
           updated_at?: string
           user_id: string
+          version?: number
           weather?: string | null
+          weather_conditions?: string[]
           workers_count?: string | null
           works_done?: string | null
         }
         Update: {
+          client_logo_base64?: string | null
           contractor?: string | null
           created_at?: string
+          document_number?: string | null
           equipment?: string | null
+          fiscal_company?: string | null
+          fiscal_logo_base64?: string | null
+          fiscal_name?: string | null
           id?: string
-          obra_id?: string
+          issued_at?: string | null
           observations?: string | null
           photos?: Json | null
           report_date?: string
+          site_id?: string
           status?: string
+          temperature_c?: number | null
           updated_at?: string
           user_id?: string
+          version?: number
           weather?: string | null
+          weather_conditions?: string[]
           workers_count?: string | null
           works_done?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "photo_reports_obra_id_fkey"
-            columns: ["obra_id"]
+            foreignKeyName: "photo_reports_site_id_fkey"
+            columns: ["site_id"]
             isOneToOne: false
-            referencedRelation: "incompaticheck_obras"
+            referencedRelation: "sites"
             referencedColumns: ["id"]
           },
         ]
@@ -3701,6 +3797,10 @@ export type Database = {
           _site_id: string
           _user_id: string
         }
+        Returns: boolean
+      }
+      is_org_admin: {
+        Args: { _org_id: string; _user_id: string }
         Returns: boolean
       }
       is_org_member: {

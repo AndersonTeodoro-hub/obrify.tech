@@ -6,9 +6,14 @@ import { Button } from '@/components/ui/button';
 interface SmartCaptureButtonsProps {
   onFilesSelected: (files: File[]) => void;
   disabled?: boolean;
+  // Avisa o pai do tipo pretendido ANTES de abrir a câmara, para que o rádio
+  // "Tipo de captura" (que decide o source_type gravado) fique sincronizado com o
+  // botão físico premido — sem isto, tocar "Panorama" gravava phone_manual em vez
+  // de phone_360 sempre que o rádio ficava no valor por omissão ("photo").
+  onCaptureTypeSelect?: (type: 'photo' | 'panorama') => void;
 }
 
-export function SmartCaptureButtons({ onFilesSelected, disabled }: SmartCaptureButtonsProps) {
+export function SmartCaptureButtons({ onFilesSelected, disabled, onCaptureTypeSelect }: SmartCaptureButtonsProps) {
   const { t } = useTranslation();
   const photoInputRef = useRef<HTMLInputElement>(null);
   const panoramaInputRef = useRef<HTMLInputElement>(null);
@@ -47,7 +52,10 @@ export function SmartCaptureButtons({ onFilesSelected, disabled }: SmartCaptureB
         type="button"
         variant="outline"
         className="flex-1 h-20 flex-col gap-2 border-dashed border-2 border-accent/40 hover:border-accent hover:bg-accent/5"
-        onClick={() => photoInputRef.current?.click()}
+        onClick={() => {
+          onCaptureTypeSelect?.('photo');
+          photoInputRef.current?.click();
+        }}
         disabled={disabled}
       >
         <Camera className="w-6 h-6 text-accent" />
@@ -58,7 +66,10 @@ export function SmartCaptureButtons({ onFilesSelected, disabled }: SmartCaptureB
         type="button"
         variant="outline"
         className="flex-1 h-20 flex-col gap-2 border-dashed border-2 border-primary/40 hover:border-primary hover:bg-primary/5"
-        onClick={() => panoramaInputRef.current?.click()}
+        onClick={() => {
+          onCaptureTypeSelect?.('panorama');
+          panoramaInputRef.current?.click();
+        }}
         disabled={disabled}
       >
         <ScanLine className="w-6 h-6 text-primary" />

@@ -55,14 +55,18 @@ export default function Sites() {
 
   const orgIds = memberships?.map(m => m.org_id) || [];
 
+  // Não filtrar por orgIds no cliente: um fiscal convidado só por site_members (sem
+  // membership de organização) não aparece em `memberships`, mas tem acesso à obra via
+  // has_site_access(). A RLS de `sites` já devolve exactamente o conjunto correcto
+  // (admin de org -> todas as obras da org; outros -> só as obras a que pertencem).
   const { data: sites, isLoading } = useQuery({
-    queryKey: ['sites', orgIds],
+    queryKey: ['sites', user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('sites').select('*, organizations(name)').in('org_id', orgIds).order('created_at', { ascending: false });
+      const { data, error } = await supabase.from('sites').select('*, organizations(name)').order('created_at', { ascending: false });
       if (error) throw error;
       return data;
     },
-    enabled: orgIds.length > 0,
+    enabled: !!user?.id,
   });
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -138,6 +142,9 @@ export default function Sites() {
   }
 
   const hasOrganizations = memberships && memberships.length > 0;
+  // Um fiscal convidado só por site_members (sem membership de organização) não tem
+  // "organização", mas TEM obras — não pode cair no ecrã "sem organizações".
+  const hasAnyAccess = hasOrganizations || (sites && sites.length > 0);
 
   return (
     <div className="space-y-6">
@@ -153,7 +160,7 @@ export default function Sites() {
         )}
       </div>
 
-      {!hasOrganizations ? (
+      {!hasAnyAccess ? (
         <Card className="glass border-border/50">
           <CardContent className="flex flex-col items-center justify-center py-12">
             <HardHat className="w-16 h-16 text-muted-foreground/50 mb-4" />

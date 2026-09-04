@@ -17,6 +17,20 @@ export interface PhotoReportData {
   observations: string | null;
 }
 
+export interface DocumentIdentity {
+  documentNumber?: string | null;
+  version?: number | null;
+  issuedAt?: string | null;
+  status?: string;
+}
+
+export interface OpenNC {
+  title: string;
+  severity: string;
+  status: string;
+  due_date?: string | null;
+}
+
 // Layout constants
 const ML = 25;
 const MR = 25;
@@ -39,7 +53,9 @@ export function generatePhotoReportPDF(
   fiscalCompany: string,
   photoImages: PhotoForExport[],
   logoBase64?: string | null,
-  clientLogoBase64?: string | null
+  clientLogoBase64?: string | null,
+  docIdentity?: DocumentIdentity | null,
+  openNCs?: OpenNC[] | null,
 ) {
   const doc = new jsPDF('p', 'mm', 'a4');
   const dateFormatted = new Date(report.report_date + 'T00:00:00').toLocaleDateString('pt-PT', {
@@ -71,6 +87,15 @@ export function generatePhotoReportPDF(
     doc.setFontSize(10);
     doc.setTextColor(50, 50, 50);
     doc.text(`${obraName}  |  ${dateFormatted}`, titleX, MT + 13);
+
+    // Identidade do documento (nº / versão / estado) — nunca só em localStorage,
+    // gravada no próprio relatório.
+    if (docIdentity?.documentNumber) {
+      doc.setFontSize(8);
+      doc.setTextColor(90, 90, 90);
+      const idLine = `Doc. ${docIdentity.documentNumber}${docIdentity.version ? ` · v${docIdentity.version}` : ''}${docIdentity.status === 'final' ? ' · FINAL' : ' · RASCUNHO'}`;
+      doc.text(idLine, PAGE_W - MR, MT + 3, { align: 'right' });
+    }
 
     // Green separator line
     doc.setDrawColor(GREEN);
@@ -224,6 +249,30 @@ export function generatePhotoReportPDF(
       }
 
       y += rowHeight;
+    }
+    y += 4;
+  }
+
+  // ── Não-conformidades abertas na obra (ligação ao registo de NC) ──
+  if (openNCs && openNCs.length > 0) {
+    ensureSpace(16 + openNCs.length * 6);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(33, 33, 33);
+    doc.text('Não-Conformidades Abertas nesta Obra', ML, y);
+    y += 7;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    for (const nc of openNCs) {
+      ensureSpace(6);
+      doc.setTextColor(180, 60, 30);
+      doc.text('•', ML, y);
+      doc.setTextColor(50, 50, 50);
+      const line = `${nc.title} — ${nc.severity.toUpperCase()} — ${nc.status}${nc.due_date ? ` (prazo ${nc.due_date})` : ''}`;
+      for (const l of doc.splitTextToSize(line, CW - 5)) {
+        doc.text(l, ML + 4, y);
+        y += 4.2;
+      }
     }
     y += 4;
   }

@@ -21,6 +21,7 @@ interface CapturePoint {
   description: string | null;
   pos_x?: number | null;
   pos_y?: number | null;
+  angle_sequence?: string[] | null;
 }
 
 interface EditPointModalProps {
@@ -36,6 +37,9 @@ export function EditPointModal({ point, open, onOpenChange, onSuccess }: EditPoi
   const [description, setDescription] = useState('');
   const [posX, setPosX] = useState('');
   const [posY, setPosY] = useState('');
+  // Sequência de ângulos: um rótulo por linha (ex.: "Norte", "Sul", "Este", "Oeste").
+  // Guardado em capture_points.angle_sequence (text[]) — usado pela captura guiada.
+  const [angleSequenceText, setAngleSequenceText] = useState('');
 
   useEffect(() => {
     if (point) {
@@ -43,20 +47,30 @@ export function EditPointModal({ point, open, onOpenChange, onSuccess }: EditPoi
       setDescription(point.description || '');
       setPosX(point.pos_x?.toString() || '');
       setPosY(point.pos_y?.toString() || '');
+      setAngleSequenceText((point.angle_sequence || []).join('\n'));
     }
   }, [point]);
 
   const updateMutation = useMutation({
     mutationFn: async () => {
       if (!point) throw new Error('No point to update');
-      
-      const { error } = await supabase
+
+      const angleSequence = angleSequenceText
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+
+      // angle_sequence ainda não está nos tipos gerados do Supabase (coluna nova,
+      // migração manual pendente) — cast necessário até o Anderson correr o SQL e
+      // regenerar os tipos.
+      const { error } = await (supabase as any)
         .from('capture_points')
         .update({
           code,
           description: description || null,
           pos_x: posX ? parseFloat(posX) : null,
           pos_y: posY ? parseFloat(posY) : null,
+          angle_sequence: angleSequence,
         })
         .eq('id', point.id);
 
@@ -133,6 +147,20 @@ export function EditPointModal({ point, open, onOpenChange, onSuccess }: EditPoi
               </div>
             </div>
             <p className="text-xs text-muted-foreground">{t('siteDetail.pointPosHint')}</p>
+
+            <div className="grid gap-2">
+              <Label htmlFor="editPointAngleSequence">Sequência de ângulos (um por linha)</Label>
+              <Textarea
+                id="editPointAngleSequence"
+                value={angleSequenceText}
+                onChange={(e) => setAngleSequenceText(e.target.value)}
+                placeholder={'Norte\nSul\nEste\nOeste'}
+                rows={4}
+              />
+              <p className="text-xs text-muted-foreground">
+                Define a ordem de ângulos capturados automaticamente na "Sequência guiada" deste ponto. Deixe vazio se este ponto não usa sequência.
+              </p>
+            </div>
           </div>
 
           <DialogFooter>

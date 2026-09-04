@@ -1,8 +1,10 @@
 import { useTranslation } from 'react-i18next';
+import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
-import { Image, Video, View } from 'lucide-react';
+import { Image, Video, View, ImageOff, Loader2 } from 'lucide-react';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
 import { Card, CardContent } from '@/components/ui/card';
+import { supabase } from '@/integrations/supabase/client';
 import type { CaptureWithDetails, CaptureCategory } from '@/types/captures';
 import { SOURCE_TO_CATEGORY, captureTitle, captureLocationLabel } from '@/types/captures';
 
@@ -30,21 +32,63 @@ export function CaptureCard({ capture, onClick }: CaptureCardProps) {
 
   const captureDate = capture.captured_at || capture.created_at;
 
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageState, setImageState] = useState<'loading' | 'ok' | 'error'>('loading');
+
+  useEffect(() => {
+    let cancelled = false;
+    setImageState('loading');
+    setImageUrl(null);
+    supabase.storage
+      .from('captures')
+      .createSignedUrl(capture.file_path, 3600)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error || !data?.signedUrl) {
+          console.error('CaptureCard: falha ao gerar URL assinado', capture.id, error);
+          setImageState('error');
+          return;
+        }
+        setImageUrl(data.signedUrl);
+        setImageState('ok');
+      });
+    return () => { cancelled = true; };
+  }, [capture.file_path, capture.id]);
+
   return (
-    <Card 
+    <Card
       className="overflow-hidden rounded-xl cursor-pointer group border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-lg transition-all duration-300"
       onClick={onClick}
     >
       <CardContent className="p-0">
         <AspectRatio ratio={16 / 9}>
           <div className="relative w-full h-full bg-slate-100 dark:bg-slate-800">
-            {/* Placeholder image */}
-            <img
-              src={`https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=400&h=225&fit=crop`}
-              alt={captureTitle(capture)}
-              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-            />
-            
+            {/* Imagem real da captura (URL assinado do bucket "captures"). Falha visível, nunca placeholder silencioso. */}
+            {imageState === 'loading' && (
+              <div className="w-full h-full flex items-center justify-center">
+                <Loader2 className="w-6 h-6 text-slate-400 animate-spin" />
+              </div>
+            )}
+            {imageState === 'error' && (
+              <div className="w-full h-full flex flex-col items-center justify-center gap-1 text-slate-400 dark:text-slate-500">
+                <ImageOff className="w-6 h-6" />
+                <span className="text-[10px]">{t('captures.imageLoadError', 'Falha ao carregar imagem')}</span>
+              </div>
+            )}
+            {imageState === 'ok' && imageUrl && (
+              <img
+                src={imageUrl}
+                alt={captureTitle(capture)}
+                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                onLoad={() => setImageState('ok')}
+                onError={() => {
+                  console.error('CaptureCard: URL assinado gerado mas imagem falhou a carregar', capture.id, imageUrl);
+                  setImageState('error');
+                }}
+              />
+            )}
+            {/* Enquanto o estado é 'ok' mas a tag <img> ainda não confirmou onLoad, mantemos a imagem montada para disparar onLoad/onError */}
+
             {/* Type badge overlay */}
             <div className="absolute top-3 left-3">
               <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium backdrop-blur-sm ${TYPE_COLORS[category]}`}>

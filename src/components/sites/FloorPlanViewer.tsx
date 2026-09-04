@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ZoomIn, ZoomOut, RotateCcw, Pencil, Eye, Plus, X, Loader2, MapPin, Sparkles,
+  Camera, GitCompareArrows,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -14,6 +15,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { EditPointModal } from './EditPointModal';
+import { SequenceCaptureModal } from './SequenceCaptureModal';
+import { CapturePointComparisonModal } from './CapturePointComparisonModal';
 
 // Esquema de cores por tipo de elemento
 const ELEMENT_COLORS: Record<string, { color: string; label: string }> = {
@@ -37,6 +41,7 @@ interface CapturePoint {
   pos_y: number | null;
   element_type?: string | null;
   color?: string | null;
+  angle_sequence?: string[] | null;
 }
 
 interface FloorPlanViewerProps {
@@ -102,6 +107,11 @@ export function FloorPlanViewer({ siteId, floorId, floorName }: FloorPlanViewerP
 
   // Ponto seleccionado
   const [selectedPoint, setSelectedPoint] = useState<CapturePoint | null>(null);
+  // Acções sobre o ponto seleccionado: editar (incl. sequência de ângulos),
+  // captura guiada e comparação temporal (pontos 8-10 do âmbito).
+  const [showEditPointModal, setShowEditPointModal] = useState(false);
+  const [showSequenceModal, setShowSequenceModal] = useState(false);
+  const [showComparisonModal, setShowComparisonModal] = useState(false);
 
   // Filtros de legenda
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
@@ -158,9 +168,11 @@ export function FloorPlanViewer({ siteId, floorId, floorName }: FloorPlanViewerP
       const areaIds = areas.map(a => a.id);
       if (areaIds.length === 0) return [];
 
-      const { data } = await supabase
+      // angle_sequence ainda não está nos tipos gerados (coluna nova, migração
+      // manual pendente) — cast necessário até o Anderson correr o SQL.
+      const { data } = await (supabase as any)
         .from('capture_points')
-        .select('id, code, description, area_id, pos_x, pos_y, element_type, color')
+        .select('id, code, description, area_id, pos_x, pos_y, element_type, color, angle_sequence')
         .in('area_id', areaIds);
 
       return (data || []) as CapturePoint[];
@@ -597,6 +609,22 @@ export function FloorPlanViewer({ siteId, floorId, floorName }: FloorPlanViewerP
                     <span className="text-muted-foreground">Área</span>
                     <span>{areas.find(a => a.id === selectedPoint.area_id)?.name || '—'}</span>
                   </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Sequência de ângulos</span>
+                    <span>{selectedPoint.angle_sequence?.length ? `${selectedPoint.angle_sequence.length} ângulo(s)` : 'não definida'}</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5 pt-1">
+                  <Button variant="outline" size="sm" className="justify-start" onClick={() => setShowEditPointModal(true)}>
+                    <Pencil className="w-3.5 h-3.5 mr-2" /> Editar ponto / sequência
+                  </Button>
+                  <Button variant="outline" size="sm" className="justify-start" onClick={() => setShowSequenceModal(true)}>
+                    <Camera className="w-3.5 h-3.5 mr-2" /> Sequência guiada
+                  </Button>
+                  <Button variant="outline" size="sm" className="justify-start" onClick={() => setShowComparisonModal(true)}>
+                    <GitCompareArrows className="w-3.5 h-3.5 mr-2" /> Comparar no tempo
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -673,6 +701,34 @@ export function FloorPlanViewer({ siteId, floorId, floorName }: FloorPlanViewerP
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Editar ponto (inclui sequência de ângulos) */}
+      <EditPointModal
+        point={selectedPoint}
+        open={showEditPointModal}
+        onOpenChange={setShowEditPointModal}
+        onSuccess={() => {
+          setShowEditPointModal(false);
+          queryClient.invalidateQueries({ queryKey: ['floor-capture-points', floorId] });
+        }}
+      />
+
+      {/* Captura guiada por sequência de ângulos */}
+      <SequenceCaptureModal
+        point={selectedPoint}
+        siteId={siteId}
+        open={showSequenceModal}
+        onOpenChange={setShowSequenceModal}
+        onComplete={() => queryClient.invalidateQueries({ queryKey: ['point-capture-counts', floorId] })}
+      />
+
+      {/* Comparação temporal entre datas, por ângulo */}
+      <CapturePointComparisonModal
+        capturePointId={selectedPoint?.id || null}
+        pointCode={selectedPoint?.code}
+        open={showComparisonModal}
+        onOpenChange={setShowComparisonModal}
+      />
     </div>
   );
 }
