@@ -1416,6 +1416,7 @@ export type Database = {
           id: string
           obra_id: string
           piso: string | null
+          piso_id: string | null
           site_id: string | null
           specialty: string
           tipo: string | null
@@ -1428,6 +1429,7 @@ export type Database = {
           id?: string
           obra_id: string
           piso?: string | null
+          piso_id?: string | null
           site_id?: string | null
           specialty: string
           tipo?: string | null
@@ -1440,12 +1442,20 @@ export type Database = {
           id?: string
           obra_id?: string
           piso?: string | null
+          piso_id?: string | null
           site_id?: string | null
           specialty?: string
           tipo?: string | null
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "eng_silva_niveis_piso_id_fkey"
+            columns: ["piso_id"]
+            isOneToOne: false
+            referencedRelation: "eng_silva_pisos"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "eng_silva_niveis_site_id_fkey"
             columns: ["site_id"]
@@ -1454,6 +1464,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      eng_silva_pisos: {
+        Row: {
+          cota: number | null
+          created_at: string
+          id: string
+          obra_id: string
+          piso: string
+          tipo: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          cota?: number | null
+          created_at?: string
+          id?: string
+          obra_id: string
+          piso: string
+          tipo?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          cota?: number | null
+          created_at?: string
+          id?: string
+          obra_id?: string
+          piso?: string
+          tipo?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       eng_silva_project_knowledge: {
         Row: {

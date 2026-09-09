@@ -25,6 +25,16 @@ type Nivel = {
   piso: string | null;
   cota: number | null;
   tipo: string | null;
+  piso_id: string | null;
+};
+// Piso da obra: definido uma única vez por obra (eng_silva_pisos), fonte única de
+// piso/cota/tipo. As linhas de eng_silva_niveis (especialidade+fase) referenciam-no
+// por piso_id; piso/cota/tipo aí ficam denormalizados por trigger na BD.
+type Piso = {
+  id: string;
+  piso: string;
+  cota: number | null;
+  tipo: string | null;
 };
 
 // Especialidades canónicas do sistema (mesmas do Conhecimento do Projecto).
@@ -62,6 +72,10 @@ type FormState = {
 const EMPTY_FORM: FormState = {
   especialidade: '', fase: '', nivelId: '', ambiente: '', atividade: '', label: '', labelEdited: false,
 };
+
+// Chave de célula da matriz especialidade×fase usada para associar um piso a várias
+// combinações de uma vez (ver "Pisos da Obra").
+const cellKey = (specialty: string, fase: string) => `${specialty}::${fase}`;
 
 // Rótulo legível gerado a partir dos campos preenchidos + do nível resolvido
 // (piso/cota vêm sempre do catálogo, nunca de texto digitado no contexto).
@@ -101,8 +115,19 @@ export default function EstruturaObra() {
   const [nivelOpen, setNivelOpen] = useState(false);
   const [nivelEditing, setNivelEditing] = useState<Nivel | null>(null);
   const [nivelCtx, setNivelCtx] = useState<{ specialty: string; fase: string } | null>(null);
-  const [nivelForm, setNivelForm] = useState<{ cota: string; piso: string; tipo: string }>({ cota: '', piso: '', tipo: '' });
+  const [nivelForm, setNivelForm] = useState<{ pisoId: string }>({ pisoId: '' });
   const [savingNivel, setSavingNivel] = useState(false);
+
+  // Catálogo de pisos da obra (eng_silva_pisos) — definidos uma única vez por obra.
+  const [pisos, setPisos] = useState<Piso[]>([]);
+  const [loadingPisos, setLoadingPisos] = useState(false);
+  const [pisoOpen, setPisoOpen] = useState(false);
+  const [pisoEditing, setPisoEditing] = useState<Piso | null>(null);
+  const [pisoForm, setPisoForm] = useState<{ piso: string; cota: string; tipo: string }>({ piso: '', cota: '', tipo: '' });
+  const [savingPiso, setSavingPiso] = useState(false);
+  // Matriz especialidade×fase marcada no diálogo do piso — é isto que substitui a
+  // atribuição manual repetida por combinação (chaves via cellKey).
+  const [pisoCells, setPisoCells] = useState<Set<string>>(new Set());
 
   // Carregar obras (mundo captura: sites via memberships)
   useEffect(() => {
@@ -181,6 +206,23 @@ export default function EstruturaObra() {
     ),
     [niveis, f.especialidade, f.fase],
   );
+
+  // Todas as fases já existentes na obra (não filtradas por especialidade) — usadas
+  // como colunas da matriz de associação especialidade×fase no diálogo do piso.
+  const todasFasesCatalogo = useMemo(
+    () => [...new Set(niveis.map((n) => n.fase).filter(Boolean))].sort() as string[],
+    [niveis],
+  );
+
+  // Quantas combinações especialidade+fase estão hoje ligadas a cada piso — mostrado
+  // na lista de "Pisos da Obra" para o fiscal confirmar a associação sem abrir o editor.
+  const pisoUsageCount = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const n of niveis) {
+      if (n.piso_id) map[n.piso_id] = (map[n.piso_id] || 0) + 1;
+    }
+    return map;
+  }, [niveis]);
 
   const openNew = () => {
     setEditing(null);
@@ -293,7 +335,7 @@ export default function EstruturaObra() {
     setLoadingNiveis(true);
     const { data, error } = await supabase
       .from('eng_silva_niveis')
-      .select('id, specialty, fase, piso, cota, tipo')
+      .select('id, specialty, fase, piso, cota, tipo, piso_id')
       .eq('obra_id', obraId)
       .order('specialty');
     if (error) {
@@ -304,6 +346,26 @@ export default function EstruturaObra() {
     setLoadingNiveis(false);
   };
   useEffect(() => { loadNiveis(); /* eslint-disable-next-line */ }, [obraId]);
+
+  // Pisos da obra (eng_silva_pisos) — o fiscal define-os aqui uma única vez; as
+  // especialidades/fases abaixo apenas referenciam um destes, nunca reescrevem piso/cota.
+  const loadPisos = async () => {
+    if (!obraId) { setPisos([]); return; }
+    setLoadingPisos(true);
+    const { data, error } = await supabase
+      .from('eng_silva_pisos')
+      .select('id, piso, cota, tipo')
+      .eq('obra_id', obraId)
+      .order('cota', { ascending: false, nullsFirst: false })
+      .order('piso');
+    if (error) {
+      console.error('Erro ao carregar pisos da obra:', error);
+      toast.error('Erro ao carregar pisos da obra: ' + error.message);
+    }
+    setPisos((data as Piso[]) || []);
+    setLoadingPisos(false);
+  };
+  useEffect(() => { loadPisos(); /* eslint-disable-next-line */ }, [obraId]);
 
   // Criar fase: uma linha por especialidade escolhida (placeholder cota/piso/tipo a NULL).
   const saveFase = async () => {
@@ -321,7 +383,7 @@ export default function EstruturaObra() {
     // Evita recriar a linha-placeholder (sem piso/cota/tipo) desta fase+especialidade
     // se já existir — era esta falta de verificação que duplicava fases no catálogo.
     const already = new Set(
-      niveis.filter((n) => n.fase === fase && !n.piso && n.cota == null && !n.tipo).map((n) => n.specialty),
+      niveis.filter((n) => n.fase === fase && !n.piso_id && !n.piso && n.cota == null && !n.tipo).map((n) => n.specialty),
     );
     const toCreate = especialidades.filter((e) => !already.has(e));
     if (toCreate.length === 0) {
@@ -351,34 +413,28 @@ export default function EstruturaObra() {
   const openNovoNivel = (specialty: string, fase: string) => {
     setNivelEditing(null);
     setNivelCtx({ specialty, fase });
-    setNivelForm({ cota: '', piso: '', tipo: '' });
+    setNivelForm({ pisoId: '' });
     setNivelOpen(true);
   };
 
   const openEditNivel = (n: Nivel) => {
     setNivelEditing(n);
     setNivelCtx({ specialty: n.specialty, fase: n.fase || '' });
-    setNivelForm({ cota: n.cota != null ? String(n.cota) : '', piso: n.piso || '', tipo: n.tipo || '' });
+    setNivelForm({ pisoId: n.piso_id || '__none__' });
     setNivelOpen(true);
   };
 
+  // O nível (especialidade+fase) já não guarda piso/cota/tipo em texto livre —
+  // referencia um piso do catálogo da obra (piso_id). O valor denormalizado em
+  // eng_silva_niveis.piso/cota/tipo é escrito pela BD (trigger), nunca por aqui.
   const saveNivel = async () => {
     if (!user || !obraId || !nivelCtx) return;
-    let cotaNum: number | null = null;
-    if (nivelForm.cota.trim()) {
-      cotaNum = Number(nivelForm.cota.trim().replace(',', '.'));
-      if (Number.isNaN(cotaNum)) { toast.error('Cota inválida.'); return; }
-    }
-    if (!nivelForm.piso.trim() && cotaNum == null && !nivelForm.tipo.trim()) {
-      toast.error('Preencha pelo menos cota, piso ou tipo.');
+    if (!nivelForm.pisoId) {
+      toast.error('Escolha um piso do catálogo da obra (ou "Sem piso" para deixar por atribuir).');
       return;
     }
     setSavingNivel(true);
-    const payload = {
-      piso: nivelForm.piso.trim() || null,
-      cota: cotaNum,
-      tipo: nivelForm.tipo.trim() || null,
-    };
+    const payload = { piso_id: nivelForm.pisoId === '__none__' ? null : nivelForm.pisoId };
     let error;
     if (nivelEditing) {
       ({ error } = await supabase.from('eng_silva_niveis').update(payload).eq('id', nivelEditing.id));
@@ -403,6 +459,163 @@ export default function EstruturaObra() {
     const { error } = await supabase.from('eng_silva_niveis').delete().eq('id', n.id);
     if (error) { console.error('Apagar nível:', error); toast.error('Erro ao apagar: ' + error.message); return; }
     toast.success('Nível apagado.');
+    await loadNiveis();
+  };
+
+  // ---- Pisos da obra (eng_silva_pisos) ----
+  const openNovoPiso = () => {
+    setPisoEditing(null);
+    setPisoForm({ piso: '', cota: '', tipo: '' });
+    setPisoCells(new Set());
+    setPisoOpen(true);
+  };
+
+  const openEditPiso = (p: Piso) => {
+    setPisoEditing(p);
+    setPisoForm({ piso: p.piso, cota: p.cota != null ? String(p.cota) : '', tipo: p.tipo || '' });
+    // Pré-selecção exacta (não um rectângulo aproximado): só as combinações que
+    // hoje apontam mesmo para este piso ficam marcadas.
+    setPisoCells(new Set(
+      niveis.filter((n) => n.piso_id === p.id && n.fase).map((n) => cellKey(n.specialty, n.fase as string)),
+    ));
+    setPisoOpen(true);
+  };
+
+  const togglePisoCell = (specialty: string, fase: string) => {
+    const key = cellKey(specialty, fase);
+    setPisoCells((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleFaseColuna = (fase: string) => {
+    setPisoCells((prev) => {
+      const allChecked = especialidadesCatalogo.every((esp) => prev.has(cellKey(esp, fase)));
+      const next = new Set(prev);
+      for (const esp of especialidadesCatalogo) {
+        const key = cellKey(esp, fase);
+        if (allChecked) next.delete(key); else next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const toggleEspecialidadeLinha = (specialty: string) => {
+    setPisoCells((prev) => {
+      const allChecked = todasFasesCatalogo.every((fase) => prev.has(cellKey(specialty, fase)));
+      const next = new Set(prev);
+      for (const fase of todasFasesCatalogo) {
+        const key = cellKey(specialty, fase);
+        if (allChecked) next.delete(key); else next.add(key);
+      }
+      return next;
+    });
+  };
+
+  // Guarda o piso (dados próprios) e reconcilia a matriz especialidade×fase marcada
+  // com eng_silva_niveis: é isto que substitui a atribuição manual repetida por
+  // combinação — o fiscal marca aqui, de uma vez, todas as combinações deste piso.
+  const savePiso = async () => {
+    if (!user || !obraId) return;
+    const piso = pisoForm.piso.trim();
+    if (!piso) { toast.error('Indique o piso (ex: Piso -6).'); return; }
+    let cotaNum: number | null = null;
+    if (pisoForm.cota.trim()) {
+      cotaNum = Number(pisoForm.cota.trim().replace(',', '.'));
+      if (Number.isNaN(cotaNum)) { toast.error('Cota inválida.'); return; }
+    }
+    setSavingPiso(true);
+    const payload = { piso, cota: cotaNum, tipo: pisoForm.tipo.trim() || null };
+
+    let pisoId: string;
+    if (pisoEditing) {
+      const { error } = await supabase.from('eng_silva_pisos').update(payload).eq('id', pisoEditing.id);
+      if (error) {
+        setSavingPiso(false);
+        console.error('Guardar piso:', error);
+        toast.error('Erro ao guardar piso: ' + error.message);
+        return;
+      }
+      pisoId = pisoEditing.id;
+    } else {
+      const { data, error } = await supabase
+        .from('eng_silva_pisos')
+        .insert({ obra_id: obraId, user_id: user.id, ...payload })
+        .select('id')
+        .single();
+      if (error || !data) {
+        setSavingPiso(false);
+        console.error('Guardar piso:', error);
+        toast.error('Erro ao guardar piso: ' + (error?.message || 'sem resposta da BD'));
+        return;
+      }
+      pisoId = data.id;
+    }
+
+    const currentRows = niveis.filter((n) => n.piso_id === pisoId);
+    const current = new Set(currentRows.map((n) => cellKey(n.specialty, n.fase || '')));
+    const toAddKeys = [...pisoCells].filter((k) => !current.has(k));
+    const toRemoveRows = currentRows.filter((n) => !pisoCells.has(cellKey(n.specialty, n.fase || '')));
+
+    // Reutiliza o placeholder (sem piso) já existente para a combinação sempre que
+    // possível, em vez de duplicar linhas — só cria linha nova quando a combinação
+    // já está ocupada por outro piso (uma fase pode existir em vários pisos físicos).
+    const idsToReuse: string[] = [];
+    const toInsert: { obra_id: string; user_id: string; specialty: string; fase: string; piso_id: string }[] = [];
+    for (const key of toAddKeys) {
+      const [specialty, fase] = key.split('::');
+      const placeholder = niveis.find((n) => n.specialty === specialty && n.fase === fase && !n.piso_id);
+      if (placeholder) idsToReuse.push(placeholder.id);
+      else toInsert.push({ obra_id: obraId, user_id: user.id, specialty, fase, piso_id: pisoId });
+    }
+    // Ao desmarcar: se já existir outro placeholder para a mesma combinação, apaga a
+    // linha redundante em vez de criar dois placeholders para a mesma combinação
+    // (violaria idx_niveis_unique_placeholder); senão, a própria linha vira placeholder.
+    const idsToUnlink: string[] = [];
+    const idsToDelete: string[] = [];
+    for (const n of toRemoveRows) {
+      const hasOtherPlaceholder = niveis.some(
+        (o) => o.id !== n.id && o.specialty === n.specialty && o.fase === n.fase && !o.piso_id,
+      );
+      if (hasOtherPlaceholder) idsToDelete.push(n.id); else idsToUnlink.push(n.id);
+    }
+
+    const ops: Promise<{ error: { message: string } | null }>[] = [];
+    if (idsToReuse.length > 0) ops.push(supabase.from('eng_silva_niveis').update({ piso_id: pisoId }).in('id', idsToReuse));
+    if (toInsert.length > 0) ops.push(supabase.from('eng_silva_niveis').insert(toInsert));
+    if (idsToUnlink.length > 0) ops.push(supabase.from('eng_silva_niveis').update({ piso_id: null }).in('id', idsToUnlink));
+    if (idsToDelete.length > 0) ops.push(supabase.from('eng_silva_niveis').delete().in('id', idsToDelete));
+
+    const results = await Promise.all(ops);
+    setSavingPiso(false);
+    const failed = results.find((r) => r.error);
+    if (failed?.error) {
+      console.error('Associar especialidades/fases ao piso:', failed.error);
+      toast.error('Piso guardado, mas falhou a associação de especialidades/fases: ' + failed.error.message);
+      await loadPisos();
+      await loadNiveis();
+      return;
+    }
+
+    toast.success(pisoEditing ? 'Piso e associações atualizados.' : 'Piso criado e associado.');
+    setPisoOpen(false);
+    await loadPisos();
+    // Editar um piso já usado propaga piso/cota/tipo para os níveis ligados (trigger na BD).
+    await loadNiveis();
+  };
+
+  const removePiso = async (p: Piso) => {
+    const emUso = niveis.filter((n) => n.piso_id === p.id).length;
+    const aviso = emUso > 0
+      ? `Este piso está associado a ${emUso} nível(is). Ao apagar, esses níveis ficam sem piso atribuído. Continuar?`
+      : 'Apagar este piso?';
+    if (!window.confirm(aviso)) return;
+    const { error } = await supabase.from('eng_silva_pisos').delete().eq('id', p.id);
+    if (error) { console.error('Apagar piso:', error); toast.error('Erro ao apagar: ' + error.message); return; }
+    toast.success('Piso apagado.');
+    await loadPisos();
     await loadNiveis();
   };
 
@@ -508,6 +721,63 @@ export default function EstruturaObra() {
             </Card>
           ))}
         </div>
+      )}
+
+      {/* Pisos da Obra — definidos uma única vez, reutilizados por todas as especialidades/fases */}
+      {sites.length > 0 && (
+        <Card>
+          <CardContent className="p-4 space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-primary" />
+                <div>
+                  <h2 className="text-lg font-semibold text-foreground">Pisos da Obra</h2>
+                  <p className="text-xs text-muted-foreground">
+                    O piso pertence à obra, não à especialidade — defina-o aqui uma única vez,
+                    com a sua cota, e associe-lhe de uma vez todas as especialidades e fases que
+                    ali se trabalham (sem repetir a introdução por combinação).
+                  </p>
+                </div>
+              </div>
+              <Button size="sm" onClick={openNovoPiso} disabled={!obraId}>
+                <Plus className="w-4 h-4 mr-2" /> Novo Piso
+              </Button>
+            </div>
+
+            {!obraId ? (
+              <p className="text-sm text-muted-foreground">
+                Esta obra não está ligada a uma obra do IncompatiCheck — os pisos usam essa ligação.
+              </p>
+            ) : loadingPisos ? (
+              <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+            ) : pisos.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Ainda não há pisos definidos nesta obra. Comece por criar um piso.</p>
+            ) : (
+              <div className="space-y-1">
+                {pisos.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between gap-2 text-sm rounded-lg border p-2">
+                    <div className="min-w-0">
+                      <span className="text-foreground truncate block">
+                        {[p.piso, p.cota != null ? `(${String(p.cota).replace('.', ',')})` : '', p.tipo].filter(Boolean).join(' · ')}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground">
+                        {pisoUsageCount[p.id] || 0} combinação(ões) especialidade·fase associada(s)
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditPiso(p)} title="Editar piso">
+                        <Edit className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => removePiso(p)} title="Apagar piso">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {/* Catálogo de Fases e Níveis */}
@@ -638,25 +908,140 @@ export default function EstruturaObra() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>Cota</Label>
-                <Input value={nivelForm.cota} onChange={(e) => setNivelForm((s) => ({ ...s, cota: e.target.value }))} placeholder="ex: -21.45" />
-              </div>
+            {pisos.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Ainda não há pisos definidos nesta obra. Feche este diálogo e crie os pisos em
+                "Pisos da Obra" acima — definem-se uma única vez e ficam disponíveis para todas
+                as especialidades e fases.
+              </p>
+            ) : (
               <div className="space-y-1">
                 <Label>Piso</Label>
-                <Input value={nivelForm.piso} onChange={(e) => setNivelForm((s) => ({ ...s, piso: e.target.value }))} placeholder="ex: Piso -6" />
+                <Select value={nivelForm.pisoId} onValueChange={(v) => setNivelForm({ pisoId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar piso" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Sem piso (placeholder)</SelectItem>
+                    {pisos.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {[p.piso, p.cota != null ? `(${String(p.cota).replace('.', ',')})` : '', p.tipo].filter(Boolean).join(' · ')}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-            </div>
-            <div className="space-y-1">
-              <Label>Tipo</Label>
-              <Input value={nivelForm.tipo} onChange={(e) => setNivelForm((s) => ({ ...s, tipo: e.target.value }))} placeholder="ex: laje de fundação" />
-            </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setNivelOpen(false)} disabled={savingNivel}>Cancelar</Button>
             <Button onClick={saveNivel} disabled={savingNivel}>
               {savingNivel && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Guardar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Piso da Obra */}
+      <Dialog open={pisoOpen} onOpenChange={setPisoOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{pisoEditing ? 'Editar Piso' : 'Novo Piso'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Piso</Label>
+                <Input value={pisoForm.piso} onChange={(e) => setPisoForm((s) => ({ ...s, piso: e.target.value }))} placeholder="ex: Piso -6" />
+              </div>
+              <div className="space-y-1">
+                <Label>Cota</Label>
+                <Input value={pisoForm.cota} onChange={(e) => setPisoForm((s) => ({ ...s, cota: e.target.value }))} placeholder="ex: -21.45" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Tipo</Label>
+              <Input value={pisoForm.tipo} onChange={(e) => setPisoForm((s) => ({ ...s, tipo: e.target.value }))} placeholder="ex: laje de fundação" />
+            </div>
+
+            <div className="space-y-1">
+              <Label>Especialidades e fases que se trabalham neste piso</Label>
+              {especialidadesCatalogo.length === 0 || todasFasesCatalogo.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Ainda não há especialidades/fases nesta obra. Crie pelo menos uma fase em
+                  "Fases e Níveis" abaixo antes de associar especialidades a este piso.
+                </p>
+              ) : (
+                <>
+                  <div className="overflow-x-auto border rounded-lg max-h-[360px] overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-background">
+                        <tr>
+                          <th className="text-left p-1.5 font-medium">Especialidade</th>
+                          {todasFasesCatalogo.map((fase) => (
+                            <th key={fase} className="p-1.5 font-medium">
+                              <button
+                                type="button"
+                                className="flex flex-col items-center gap-0.5 mx-auto hover:text-primary"
+                                onClick={() => toggleFaseColuna(fase)}
+                                title={`Marcar/desmarcar Fase ${fase} para todas as especialidades`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  readOnly
+                                  checked={especialidadesCatalogo.every((esp) => pisoCells.has(cellKey(esp, fase)))}
+                                  className="h-3.5 w-3.5 rounded border-input pointer-events-none"
+                                />
+                                <span>Fase {fase}</span>
+                              </button>
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {especialidadesCatalogo.map((esp) => (
+                          <tr key={esp} className="border-t">
+                            <td className="p-1.5">
+                              <button
+                                type="button"
+                                className="flex items-center gap-1.5 hover:text-primary"
+                                onClick={() => toggleEspecialidadeLinha(esp)}
+                                title={`Marcar/desmarcar ${esp} em todas as fases`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  readOnly
+                                  checked={todasFasesCatalogo.every((fase) => pisoCells.has(cellKey(esp, fase)))}
+                                  className="h-3.5 w-3.5 rounded border-input pointer-events-none"
+                                />
+                                <span className="truncate">{esp}</span>
+                              </button>
+                            </td>
+                            {todasFasesCatalogo.map((fase) => (
+                              <td key={fase} className="text-center p-1.5">
+                                <input
+                                  type="checkbox"
+                                  checked={pisoCells.has(cellKey(esp, fase))}
+                                  onChange={() => togglePisoCell(esp, fase)}
+                                  className="h-3.5 w-3.5 rounded border-input"
+                                />
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Marque as combinações que se trabalham neste piso. Clique no nome de uma
+                    especialidade ou de uma fase para marcar/desmarcar a linha/coluna inteira.
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPisoOpen(false)} disabled={savingPiso}>Cancelar</Button>
+            <Button onClick={savePiso} disabled={savingPiso}>
+              {savingPiso && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Guardar
             </Button>
           </DialogFooter>
         </DialogContent>
