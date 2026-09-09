@@ -290,7 +290,7 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
       if (!selectedSite) return [];
       const { data, error } = await supabase
         .from('capture_contexts')
-        .select('id, especialidade, fase, piso, cota, ambiente, atividade, nivel_id, label')
+        .select('id, especialidade, fase, ambiente, atividade, nivel_id, label')
         .eq('site_id', selectedSite)
         .is('archived_at', null)
         .order('last_used_at', { ascending: false, nullsFirst: false });
@@ -313,8 +313,12 @@ export function NewCaptureModal({ open, onOpenChange }: NewCaptureModalProps) {
     const especialidadeV = ctxSel ? ctxSel.especialidade : (especialidade || null);
     const faseV = ctxSel ? ctxSel.fase : (fase || null);
     const nivelIdV = ctxSel ? ctxSel.nivel_id : (nivelId || null);
-    const pisoV = ctxSel ? ctxSel.piso : (nivelSel?.piso ?? null);
-    const cotaV = ctxSel ? ctxSel.cota : (nivelSel?.cota ?? null);
+    // Fonte única de piso/cota: eng_silva_niveis (via nivel_id). O contexto de
+    // captura já não guarda piso/cota como texto livre — resolve-se sempre pelo
+    // catálogo, quer o nível venha do contexto quer da selecção manual.
+    const nivelFromCtx = ctxSel && ctxSel.nivel_id ? niveis.find((n) => n.id === ctxSel.nivel_id) : null;
+    const pisoV = ctxSel ? (nivelFromCtx?.piso ?? null) : (nivelSel?.piso ?? null);
+    const cotaV = ctxSel ? (nivelFromCtx?.cota ?? null) : (nivelSel?.cota ?? null);
     const ambienteV = ctxSel ? ctxSel.ambiente : null;
     const atividadeV = ctxSel ? ctxSel.atividade : null;
     const label = ctxSel?.label

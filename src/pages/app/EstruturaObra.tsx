@@ -39,8 +39,6 @@ type Ctx = {
   site_id: string;
   especialidade: string | null;
   fase: string | null;
-  piso: string | null;
-  cota: number | null;
   ambiente: string | null;
   atividade: string | null;
   nivel_id: string | null;
@@ -52,8 +50,9 @@ type Ctx = {
 type FormState = {
   especialidade: string;
   fase: string;
-  piso: string;
-  cota: string;
+  // Piso/cota deixaram de ser texto livre do contexto — o contexto passa a
+  // referenciar uma linha do catálogo (eng_silva_niveis), fonte única de piso/cota.
+  nivelId: string;
   ambiente: string;
   atividade: string;
   label: string;
@@ -61,17 +60,17 @@ type FormState = {
 };
 
 const EMPTY_FORM: FormState = {
-  especialidade: '', fase: '', piso: '', cota: '', ambiente: '', atividade: '', label: '', labelEdited: false,
+  especialidade: '', fase: '', nivelId: '', ambiente: '', atividade: '', label: '', labelEdited: false,
 };
 
-// Rótulo legível gerado a partir dos campos preenchidos.
-function autoLabel(f: FormState): string {
-  const cotaFmt = f.cota.trim() ? `(${f.cota.trim().replace('.', ',')})` : '';
+// Rótulo legível gerado a partir dos campos preenchidos + do nível resolvido
+// (piso/cota vêm sempre do catálogo, nunca de texto digitado no contexto).
+function autoLabel(f: FormState, nivel: Nivel | null): string {
   return [
     f.especialidade.trim(),
     f.fase.trim() ? `Fase ${f.fase.trim()}` : '',
-    f.piso.trim(),
-    cotaFmt,
+    nivel?.piso || '',
+    nivel?.cota != null ? `(${String(nivel.cota).replace('.', ',')})` : '',
     f.ambiente.trim(),
     f.atividade.trim(),
   ].filter(Boolean).join(' · ');
@@ -141,7 +140,7 @@ export default function EstruturaObra() {
     setLoading(true);
     const { data, error } = await supabase
       .from('capture_contexts')
-      .select('id, site_id, especialidade, fase, piso, cota, ambiente, atividade, nivel_id, label, archived_at, last_used_at')
+      .select('id, site_id, especialidade, fase, ambiente, atividade, nivel_id, label, archived_at, last_used_at')
       .eq('site_id', siteId)
       .order('last_used_at', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false });
@@ -159,7 +158,29 @@ export default function EstruturaObra() {
     [contexts, showArchived],
   );
 
-  const currentLabel = f.labelEdited && f.label.trim() ? f.label.trim() : autoLabel(f);
+  const selectedNivel = niveis.find((n) => n.id === f.nivelId) || null;
+  const currentLabel = f.labelEdited && f.label.trim() ? f.label.trim() : autoLabel(f, selectedNivel);
+
+  // Opções do formulário do contexto — sempre a partir do catálogo (eng_silva_niveis),
+  // nunca texto livre, para não repetir o desalinhamento "Estrutura" vs "Estrutural".
+  const especialidadesCatalogo = useMemo(
+    () => [...new Set(niveis.map((n) => n.specialty))].sort(),
+    [niveis],
+  );
+  const fasesCatalogo = useMemo(
+    () => [...new Set(
+      niveis.filter((n) => !f.especialidade || n.specialty === f.especialidade).map((n) => n.fase).filter(Boolean),
+    )] as string[],
+    [niveis, f.especialidade],
+  );
+  const niveisCatalogo = useMemo(
+    () => niveis.filter((n) =>
+      (!f.especialidade || n.specialty === f.especialidade) &&
+      (!f.fase || n.fase === f.fase) &&
+      (n.piso || n.cota != null),
+    ),
+    [niveis, f.especialidade, f.fase],
+  );
 
   const openNew = () => {
     setEditing(null);
@@ -172,8 +193,7 @@ export default function EstruturaObra() {
     setF({
       especialidade: c.especialidade || '',
       fase: c.fase || '',
-      piso: c.piso || '',
-      cota: c.cota != null ? String(c.cota) : '',
+      nivelId: c.nivel_id || '',
       ambiente: c.ambiente || '',
       atividade: c.atividade || '',
       label: c.label,
@@ -189,18 +209,12 @@ export default function EstruturaObra() {
       toast.error('Preencha pelo menos um campo (para gerar o rótulo).');
       return;
     }
-    let cotaNum: number | null = null;
-    if (f.cota.trim()) {
-      cotaNum = Number(f.cota.trim().replace(',', '.'));
-      if (Number.isNaN(cotaNum)) { toast.error('Cota inválida.'); return; }
-    }
     setSaving(true);
     const payload = {
       site_id: siteId,
       especialidade: f.especialidade.trim() || null,
       fase: f.fase.trim() || null,
-      piso: f.piso.trim() || null,
-      cota: cotaNum,
+      nivel_id: f.nivelId || null,
       ambiente: f.ambiente.trim() || null,
       atividade: f.atividade.trim() || null,
       label,
@@ -294,14 +308,29 @@ export default function EstruturaObra() {
   // Criar fase: uma linha por especialidade escolhida (placeholder cota/piso/tipo a NULL).
   const saveFase = async () => {
     if (!user || !obraId) return;
-    const fase = novaFase.trim();
+    // Formato canónico do catálogo é o número puro (ex: "1.1"), sem o prefixo
+    // "Fase" — o resto do código (Eng. Silva, carimbo, legenda) já espera este
+    // formato e prefixa "Fase" só na apresentação.
+    const fase = novaFase.trim().replace(/^fase\s+/i, '');
     if (!fase) { toast.error('Indique a fase (ex: 1.1).'); return; }
     const especialidades = faseTodas
       ? CATALOGO_ESPECIALIDADES
       : (faseEspecialidade ? [faseEspecialidade] : []);
     if (especialidades.length === 0) { toast.error('Escolha uma especialidade ou "todas".'); return; }
     setSavingFase(true);
-    const rows = especialidades.map((specialty) => ({
+    // Evita recriar a linha-placeholder (sem piso/cota/tipo) desta fase+especialidade
+    // se já existir — era esta falta de verificação que duplicava fases no catálogo.
+    const already = new Set(
+      niveis.filter((n) => n.fase === fase && !n.piso && n.cota == null && !n.tipo).map((n) => n.specialty),
+    );
+    const toCreate = especialidades.filter((e) => !already.has(e));
+    if (toCreate.length === 0) {
+      setSavingFase(false);
+      toast.info('Esta fase já existe para todas as especialidades escolhidas.');
+      setFaseOpen(false);
+      return;
+    }
+    const rows = toCreate.map((specialty) => ({
       obra_id: obraId, user_id: user.id, specialty, fase, cota: null, piso: null, tipo: null,
     }));
     const { error } = await supabase.from('eng_silva_niveis').insert(rows);
@@ -311,7 +340,7 @@ export default function EstruturaObra() {
       toast.error('Erro ao criar fase: ' + error.message);
       return;
     }
-    toast.success(`Fase ${fase} criada para ${especialidades.length} especialidade(s).`);
+    toast.success(`Fase ${fase} criada para ${toCreate.length} especialidade(s).`);
     setFaseOpen(false);
     setNovaFase('');
     setFaseEspecialidade('');
@@ -643,19 +672,55 @@ export default function EstruturaObra() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label>Especialidade</Label>
-                <Input value={f.especialidade} onChange={(e) => setF((s) => ({ ...s, especialidade: e.target.value }))} placeholder="ex: Estrutural" />
+                <Select
+                  value={f.especialidade}
+                  onValueChange={(v) => setF((s) => ({ ...s, especialidade: v, fase: '', nivelId: '' }))}
+                >
+                  <SelectTrigger><SelectValue placeholder="Seleccionar especialidade" /></SelectTrigger>
+                  <SelectContent>
+                    {especialidadesCatalogo.map((e) => <SelectItem key={e} value={e}>{e}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1">
                 <Label>Fase</Label>
-                <Input value={f.fase} onChange={(e) => setF((s) => ({ ...s, fase: e.target.value }))} placeholder="ex: 1.1" />
+                <Select
+                  value={f.fase}
+                  onValueChange={(v) => setF((s) => ({ ...s, fase: v, nivelId: '' }))}
+                  disabled={!f.especialidade}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={f.especialidade ? 'Seleccionar fase' : 'Escolha a especialidade primeiro'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {fasesCatalogo.map((fs) => <SelectItem key={fs} value={fs}>Fase {fs}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="space-y-1">
-                <Label>Piso</Label>
-                <Input value={f.piso} onChange={(e) => setF((s) => ({ ...s, piso: e.target.value }))} placeholder="ex: Piso -6" />
-              </div>
-              <div className="space-y-1">
-                <Label>Cota</Label>
-                <Input value={f.cota} onChange={(e) => setF((s) => ({ ...s, cota: e.target.value }))} placeholder="ex: -21.45" />
+              <div className="space-y-1 col-span-2">
+                <Label>Nível (piso / cota) — vem do catálogo da obra, fonte única</Label>
+                <Select
+                  value={f.nivelId}
+                  onValueChange={(v) => setF((s) => ({ ...s, nivelId: v }))}
+                  disabled={!f.especialidade || !f.fase}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={
+                      !f.especialidade || !f.fase
+                        ? 'Escolha especialidade e fase primeiro'
+                        : niveisCatalogo.length === 0
+                          ? 'Sem níveis com piso/cota nesta fase — adicione no catálogo abaixo'
+                          : 'Seleccionar nível'
+                    } />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {niveisCatalogo.map((n) => (
+                      <SelectItem key={n.id} value={n.id}>
+                        {[n.piso, n.cota != null ? `(${String(n.cota).replace('.', ',')})` : '', n.tipo].filter(Boolean).join(' · ')}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1">
                 <Label>Ambiente</Label>

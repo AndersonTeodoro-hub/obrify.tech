@@ -501,6 +501,14 @@ serve(async (req) => {
         "tom técnico de fiscal sénior; NO MÁXIMO DUAS frases; descreve o elemento e o " +
         "estado/observação relevante para fiscalização (não faças descrição genérica de " +
         "imagem nem listas). Usa os metadados apenas como contexto — não os repitas em bruto. " +
+        "REGRA CRÍTICA — NUNCA INVENTES: não uses nenhum termo técnico, patologia, material, " +
+        "elemento construtivo ou quantidade que não consigas confirmar a olhar para a imagem. " +
+        "É preferível uma legenda genérica e correcta a uma legenda específica mas inventada. " +
+        "Se a imagem não permitir identificar com confiança o que se vê (enquadramento distante, " +
+        "desfocado, mal iluminado, ou simplesmente ambíguo), declara essa incerteza explicitamente " +
+        "na legenda (por exemplo: \"Elemento não identificável com confiança nesta imagem.\" ou " +
+        "\"Imagem não permite confirmar o estado deste elemento.\") em vez de preencheres o vazio " +
+        "com um termo plausível. " +
         "Responde só com a legenda, sem aspas nem prefixos.";
 
       const capResp = await fetch("https://api.anthropic.com/v1/messages", {
